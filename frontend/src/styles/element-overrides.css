@@ -1,0 +1,298 @@
+/* ===== Element Plus 主题定制 · 日式极简覆盖 ===== */
+/* 消除 Element Plus 默认的"科技蓝"感，融入暖纸调主题 */
+
+/* —— 全局根变量映射：让 Element Plus 组件跟随设计 tokens —— */
+/* 由于 CSS var() 动态解析，[data-theme="dark"] 切换 --color-* 后自动级联 */
+:root {
+  /* 主色系 */
+  --el-color-primary: var(--color-primary);
+  --el-color-primary-light-3: var(--color-primary);
+  --el-color-primary-light-5: var(--color-primary);
+  --el-color-primary-light-7: var(--color-primary-light);
+  --el-color-primary-light-8: var(--color-primary-light);
+  --el-color-primary-light-9: var(--color-primary-light);
+  --el-color-primary-dark-2: var(--color-primary-hover);
+
+  --el-color-success: var(--color-success);
+  --el-color-warning: var(--color-warning);
+  --el-color-danger: var(--color-danger);
+  --el-color-info: var(--color-info);
+
+  /* 背景 */
+  --el-bg-color: var(--color-bg-elevated);
+  --el-bg-color-page: var(--color-bg);
+  --el-bg-color-overlay: var(--color-bg-elevated);
+
+  /* 文字 */
+  --el-text-color-primary: var(--color-text);
+  --el-text-color-regular: var(--color-text-secondary);
+  --el-text-color-secondary: var(--color-text-tertiary);
+  --el-text-color-placeholder: var(--color-text-tertiary);
+  --el-text-color-disabled: var(--color-text-tertiary);
+
+  /* 边框 */
+  --el-border-color: var(--color-border);
+  --el-border-color-light: var(--color-border);
+  --el-border-color-lighter: var(--color-divider);
+  --el-border-color-extra-light: var(--color-divider);
+  --el-border-color-dark: var(--color-border-strong);
+  --el-border-color-disabled: var(--color-border);
+
+  /* 填充 */
+  --el-fill-color: var(--color-bg-subtle);
+  --el-fill-color-light: var(--color-bg-subtle);
+  --el-fill-color-lighter: var(--color-bg-subtle);
+  --el-fill-color-extra-light: var(--color-bg-subtle);
+  --el-fill-color-blank: var(--color-bg-elevated);
+  --el-fill-color-dark: var(--color-bg-muted);
+
+  /* 禁用 */
+  --el-disabled-bg-color: var(--color-bg-subtle);
+  --el-disabled-text-color: var(--color-text-tertiary);
+  --el-disabled-border-color: var(--color-border);
+
+  /* 阴影 */
+  --el-box-shadow: var(--shadow-md);
+  --el-box-shadow-light: var(--shadow-sm);
+  --el-box-shadow-lighter: var(--shadow-sm);
+  --el-box-shadow-dark: var(--shadow-lg);
+
+  /* 遮罩（v-loading / dialog） */
+  --el-mask-color: rgba(0, 0, 0, 0.5);
+  --el-mask-color-extra-light: rgba(0, 0, 0, 0.3);
+}
+
+/* 暗色模式：遮罩加深，其余通过上面映射自动级联 */
+[data-theme="dark"] {
+  --el-mask-color: rgba(0, 0, 0, 0.65);
+  --el-mask-color-extra-light: rgba(0, 0, 0, 0.5);
+}
+
+/* —— 通用 —— */
+.el-button {
+  font-family: var(--font-sans);
+  font-weight: 500;
+  border-radius: var(--radius-md);
+  transition: all var(--duration) var(--ease-soft);
+}
+
+.el-button--primary {
+  --el-button-bg-color: var(--color-primary);
+  --el-button-border-color: var(--color-primary);
+  --el-button-hover-bg-color: var(--color-primary-hover);
+  --el-button-hover-border-color: var(--color-primary-hover);
+  --el-button-active-bg-color: var(--color-primary-hover);
+  --el-button-active-border-color: var(--color-primary-hover);
+}
+
+.el-button--default {
+  --el-button-bg-color: transparent;
+  --el-button-border-color: var(--color-border-strong);
+  --el-button-text-color: var(--color-text-secondary);
+  --el-button-hover-bg-color: var(--color-bg-subtle);
+  --el-button-hover-border-color: var(--color-text-tertiary);
+  --el-button-hover-text-color: var(--color-text);
+}
+
+.el-button.is-text {
+  --el-button-text-color: var(--color-text-secondary);
+  --el-button-hover-text-color: var(--color-primary);
+  --el-button-hover-bg-color: var(--color-primary-light);
+}
+
+/* —— 输入框 —— */
+.el-input__wrapper {
+  background-color: var(--color-bg-elevated);
+  border-radius: var(--radius-md);
+  transition: box-shadow var(--duration) var(--ease-soft);
+}
+
+.el-input__wrapper.is-focus {
+  box-shadow: 0 0 0 1px var(--color-primary) inset !important;
+}
+
+.el-input__inner {
+  font-family: var(--font-sans);
+  color: var(--color-text);
+}
+
+/* —— 表格 —— */
+.el-table {
+  --el-table-bg-color: var(--color-bg-elevated);
+  --el-table-tr-bg-color: var(--color-bg-elevated);
+  --el-table-header-bg-color: var(--color-bg-subtle);
+  --el-table-row-hover-bg-color: var(--color-bg-subtle);
+  --el-table-border-color: var(--color-border);
+  --el-table-text-color: var(--color-text);
+  --el-table-header-text-color: var(--color-text-secondary);
+  font-size: var(--fs-body);
+}
+
+.el-table th.el-table__cell {
+  font-weight: 500;
+  letter-spacing: var(--ls-wide);
+  text-transform: uppercase;
+  font-size: var(--fs-caption);
+  color: var(--color-text-tertiary);
+}
+
+/* —— 卡片 —— */
+.el-card {
+  --el-card-bg-color: var(--color-bg-elevated);
+  --el-card-border-color: var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--color-border);
+}
+
+/* —— 分页 —— */
+.el-pagination {
+  --el-pagination-bg-color: transparent;
+  --el-pagination-hover-color: var(--color-primary);
+  --el-pagination-button-color: var(--color-text-secondary);
+  --el-pagination-button-bg-color: transparent;
+  --el-pagination-button-disabled-color: var(--color-text-tertiary);
+}
+
+/* —— 菜单 · 侧边栏 —— */
+.el-menu {
+  --el-menu-bg-color: transparent;
+  --el-menu-text-color: var(--color-text-secondary);
+  --el-menu-active-color: var(--color-primary);
+  --el-menu-hover-bg-color: var(--color-bg-subtle);
+  border-right: 1px solid var(--color-border);
+}
+
+.el-menu-item.is-active {
+  color: var(--color-primary);
+  background: var(--color-primary-light);
+  font-weight: 500;
+}
+
+/* —— 标签 —— */
+.el-tag {
+  border-radius: var(--radius-sm);
+  font-weight: 500;
+  --el-tag-bg-color: var(--color-bg-subtle);
+  --el-tag-border-color: var(--color-border);
+  --el-tag-text-color: var(--color-text-secondary);
+}
+
+/* —— 对话框 —— */
+.el-dialog {
+  --el-dialog-bg-color: var(--color-bg-elevated);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+}
+
+/* —— 消息提示 —— */
+.el-message-box {
+  border-radius: var(--radius-lg);
+}
+
+/* —— 下拉 —— */
+.el-dropdown-menu {
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+}
+
+/* —— 树 —— */
+.el-tree {
+  --el-tree-node-hover-bg-color: var(--color-bg-subtle);
+  --el-tree-text-color: var(--color-text);
+  background: transparent;
+}
+
+/* —— Tabs —— */
+.el-tabs__item {
+  font-family: var(--font-sans);
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+.el-tabs__item.is-active {
+  color: var(--color-primary);
+}
+.el-tabs__active-bar {
+  background-color: var(--color-primary);
+}
+.el-tabs__nav-wrap::after {
+  background-color: var(--color-border);
+}
+
+/* —— Empty —— */
+.el-empty__description p {
+  color: var(--color-text-tertiary);
+}
+
+/* —— Select 下拉 / Popper 浮层 —— */
+.el-select-dropdown__item.hover,
+.el-select-dropdown__item:hover {
+  background-color: var(--color-bg-subtle);
+}
+.el-popper {
+  background: var(--el-bg-color-overlay) !important;
+  border: 1px solid var(--color-border) !important;
+}
+
+/* —— Checkbox / Radio —— */
+.el-checkbox__label,
+.el-radio__label {
+  color: var(--color-text-secondary);
+}
+.el-checkbox.is-checked .el-checkbox__label,
+.el-radio.is-checked .el-radio__label {
+  color: var(--color-primary);
+}
+
+/* —— Breadcrumb —— */
+.el-breadcrumb__item .el-breadcrumb__inner {
+  color: var(--color-text-tertiary);
+}
+.el-breadcrumb__item:last-child .el-breadcrumb__inner {
+  color: var(--color-text);
+}
+
+/* —— Loading 遮罩 —— */
+.el-loading-mask {
+  background-color: var(--el-mask-color);
+}
+.el-loading-spinner .el-loading-text {
+  color: var(--color-text-inverse);
+}
+.el-loading-spinner .path {
+  stroke: var(--color-text-inverse);
+}
+
+/* —— Message 消息条 —— */
+.el-message {
+  background: var(--color-bg-elevated) !important;
+  border: 1px solid var(--color-border) !important;
+  color: var(--color-text) !important;
+}
+
+/* —— Drawer 抽屉 —— */
+.el-drawer {
+  background: var(--color-bg-elevated);
+}
+
+/* —— Form —— */
+.el-form-item__label {
+  color: var(--color-text-secondary);
+}
+
+/* —— Avatar / Badge —— */
+.el-badge__content {
+  font-family: var(--font-sans);
+}
+
+/* —— Tooltip 文字提示 —— */
+.el-popper.is-dark {
+  background: var(--color-text) !important;
+  color: var(--color-bg) !important;
+  border: none !important;
+}
+.el-popper.is-dark .el-popper__arrow::before {
+  background: var(--color-text) !important;
+}

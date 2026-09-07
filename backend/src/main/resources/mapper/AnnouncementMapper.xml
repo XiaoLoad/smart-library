@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.library.mapper.AnnouncementMapper">
+
+    <resultMap id="announceMap" type="com.library.entity.Announcement">
+        <id property="id" column="id"/>
+        <result property="title" column="title"/>
+        <result property="content" column="content"/>
+        <result property="publisherId" column="publisher_id"/>
+        <result property="publisherName" column="publisher_name"/>
+        <result property="top" column="top"/>
+        <result property="status" column="status"/>
+        <result property="publishTime" column="publish_time"/>
+    </resultMap>
+
+    <select id="selectList" resultMap="announceMap">
+        SELECT * FROM announcements
+        WHERE status = 1
+        ORDER BY top DESC, publish_time DESC
+    </select>
+
+    <select id="selectById" resultMap="announceMap">
+        SELECT * FROM announcements WHERE id = #{id}
+    </select>
+
+    <insert id="insert" parameterType="com.library.entity.Announcement" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO announcements (title, content, publisher_id, publisher_name, top, status, publish_time)
+        VALUES (#{title}, #{content}, #{publisherId}, #{publisherName}, #{top}, #{status}, NOW())
+    </insert>
+
+    <delete id="deleteById">
+        DELETE FROM announcements WHERE id = #{id}
+    </delete>
+
+    <update id="updateTop">
+        UPDATE announcements SET top = #{top} WHERE id = #{id}
+    </update>
+
+</mapper>

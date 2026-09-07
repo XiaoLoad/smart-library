@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.library.mapper.BorrowMapper">
+
+    <resultMap id="borrowMap" type="com.library.entity.Borrow">
+        <id property="id" column="id"/>
+        <result property="borrowNo" column="borrow_no"/>
+        <result property="userId" column="user_id"/>
+        <result property="userName" column="user_name"/>
+        <result property="bookId" column="book_id"/>
+        <result property="bookTitle" column="book_title"/>
+        <result property="applyTime" column="apply_time"/>
+        <result property="borrowTime" column="borrow_time"/>
+        <result property="dueTime" column="due_time"/>
+        <result property="returnTime" column="return_time"/>
+        <result property="renewCount" column="renew_count"/>
+        <result property="renewMaxCount" column="renew_max_count"/>
+        <result property="pickupDeadline" column="pickup_deadline"/>
+        <result property="status" column="status"/>
+        <result property="remark" column="remark"/>
+        <result property="qrPayload" column="qr_payload"/>
+    </resultMap>
+
+    <select id="selectList" resultMap="borrowMap">
+        SELECT * FROM borrows
+        <where>
+            <if test="!isAdmin">
+                user_id = #{userId}
+            </if>
+            <if test="status != null">
+                AND status = #{status}
+            </if>
+            <if test="search != null and search != ''">
+                AND (user_name LIKE CONCAT('%', #{search}, '%')
+                  OR borrow_no LIKE CONCAT('%', #{search}, '%'))
+            </if>
+        </where>
+        ORDER BY apply_time DESC
+    </select>
+
+    <select id="selectById" resultMap="borrowMap">
+        SELECT * FROM borrows WHERE id = #{id}
+    </select>
+
+    <select id="selectByBorrowNo" resultMap="borrowMap">
+        SELECT * FROM borrows WHERE borrow_no = #{borrowNo}
+    </select>
+
+    <select id="countByUserAndStatuses" resultType="int">
+        SELECT COUNT(*) FROM borrows
+        WHERE user_id = #{userId}
+        AND status IN
+        <foreach collection="statuses" item="s" open="(" separator="," close=")">#{s}</foreach>
+    </select>
+
+    <select id="selectMaxSeqOfDay" resultType="java.lang.Integer">
+        SELECT MAX(CAST(SUBSTRING(borrow_no, 11, 4) AS UNSIGNED))
+        FROM borrows
+        WHERE borrow_no LIKE CONCAT(#{prefix}, '%')
+    </select>
+
+    <insert id="insert" parameterType="com.library.entity.Borrow" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO borrows (borrow_no, user_id, user_name, book_id, book_title, apply_time,
+                            borrow_time, due_time, return_time, renew_count, renew_max_count,
+                            pickup_deadline, status, remark, qr_payload)
+        VALUES (#{borrowNo}, #{userId}, #{userName}, #{bookId}, #{bookTitle}, #{applyTime},
+                #{borrowTime}, #{dueTime}, #{returnTime}, #{renewCount}, #{renewMaxCount},
+                #{pickupDeadline}, #{status}, #{remark}, #{qrPayload})
+    </insert>
+
+    <update id="updateStatus">
+        UPDATE borrows SET status = #{status}, remark = #{remark} WHERE id = #{id}
+    </update>
+
+    <update id="updatePickup">
+        UPDATE borrows
+        SET status = #{status}, borrow_time = #{borrowTime}, due_time = #{dueTime}, remark = #{remark}
+        WHERE id = #{id}
+    </update>
+
+    <update id="updateReturn">
+        UPDATE borrows
+        SET status = #{status}, return_time = #{returnTime}, remark = #{remark}
+        WHERE id = #{id}
+    </update>
+
+    <update id="updateRenew">
+        UPDATE borrows
+        SET due_time = #{dueTime}, renew_count = #{renewCount}
+        WHERE id = #{id}
+    </update>
+
+</mapper>
