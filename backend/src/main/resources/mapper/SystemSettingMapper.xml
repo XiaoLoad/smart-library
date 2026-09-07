@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.library.mapper.SystemSettingMapper">
+
+    <resultMap id="settingMap" type="com.library.entity.SystemSetting">
+        <id property="id" column="id"/>
+        <result property="settingKey" column="setting_key"/>
+        <result property="settingValue" column="setting_value"/>
+        <result property="updateTime" column="update_time"/>
+    </resultMap>
+
+    <select id="selectByKey" resultMap="settingMap">
+        SELECT * FROM system_settings WHERE setting_key = #{key}
+    </select>
+
+    <insert id="upsert">
+        INSERT INTO system_settings (setting_key, setting_value)
+        VALUES (#{key}, #{value})
+        ON DUPLICATE KEY UPDATE setting_value = #{value}
+    </insert>
+
+</mapper>

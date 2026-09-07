@@ -108,6 +108,20 @@ const routes = [
       },
     ],
   },
+  {
+    path: '/system',
+    component: Layout,
+    redirect: '/system/settings',
+    meta: { title: '系统设置', icon: 'Setting', roles: [3] },
+    children: [
+      {
+        path: 'settings',
+        name: 'SystemSettings',
+        component: () => import('@/views/system/settings.vue'),
+        meta: { title: '系统设置', icon: 'Tools', roles: [3] },
+      },
+    ],
+  },
 ]
 
 const router = createRouter({

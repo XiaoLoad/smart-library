@@ -245,19 +245,19 @@ onMounted(() => {
 
 .sidebar-nav {
   flex: 1;
-  padding: var(--space-4) 0;
+  padding: var(--space-3) 0;
   overflow-y: auto;
 }
 
 .menu-group {
-  margin-bottom: var(--space-4);
+  margin-bottom: var(--space-2);
 }
 
 .menu-group__title {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-2) var(--space-5);
+  padding: var(--space-3) var(--space-5) var(--space-1);
   font-size: var(--fs-caption);
   text-transform: uppercase;
   letter-spacing: var(--ls-wide);
@@ -265,13 +265,22 @@ onMounted(() => {
   font-weight: 500;
 }
 
+/* 无标题的平铺菜单组（meta.hidden 的容器路由）增加顶部分隔 */
+.menu-group + .menu-item,
+.sidebar-nav > .menu-item:first-child {
+  margin-top: var(--space-1);
+}
+
 .menu-item {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  padding: var(--space-3) var(--space-5);
+  padding: var(--space-2) var(--space-5);
+  margin: 2px var(--space-2);
+  border-radius: var(--radius-md);
   color: var(--color-text-secondary);
   font-size: var(--fs-body);
+  line-height: 1.4;
   transition: all var(--duration-fast) var(--ease-soft);
   position: relative;
   text-decoration: none;
@@ -291,15 +300,17 @@ onMounted(() => {
   content: '';
   position: absolute;
   left: 0;
-  top: 0;
-  bottom: 0;
-  width: 2px;
+  top: 6px;
+  bottom: 6px;
+  width: 3px;
+  border-radius: 0 2px 2px 0;
   background: var(--color-primary);
 }
 
 .app-sidebar.collapsed .menu-item {
   justify-content: center;
   padding: var(--space-3);
+  margin: 2px var(--space-1);
 }
 
 .sidebar-footer {
