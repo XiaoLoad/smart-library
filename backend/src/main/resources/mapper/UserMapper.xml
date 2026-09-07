@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.library.mapper.UserMapper">
+
+    <select id="selectById" resultType="com.library.entity.User">
+        SELECT * FROM users WHERE id = #{id}
+    </select>
+
+    <select id="selectByUsername" resultType="com.library.entity.User">
+        SELECT * FROM users WHERE username = #{username}
+    </select>
+
+    <select id="selectList" resultType="com.library.entity.User">
+        SELECT * FROM users
+        <where>
+            <if test="keyword != null and keyword != ''">
+                username LIKE CONCAT('%', #{keyword}, '%')
+                OR real_name LIKE CONCAT('%', #{keyword}, '%')
+            </if>
+        </where>
+        ORDER BY create_time DESC
+    </select>
+
+    <select id="selectAll" resultType="com.library.entity.User">
+        SELECT * FROM users
+    </select>
+
+    <update id="updatePassword">
+        UPDATE users SET password = #{password} WHERE id = #{id}
+    </update>
+
+    <insert id="insert" parameterType="com.library.entity.User" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO users (username, password, real_name, user_type, role_name, email, phone, status, create_time,
+                          avatar, teacher_no, department, title, student_no, class_name, grade, major)
+        VALUES (#{username}, #{password}, #{realName}, #{userType}, #{roleName}, #{email}, #{phone}, #{status}, NOW(),
+                #{avatar}, #{teacherNo}, #{department}, #{title}, #{studentNo}, #{className}, #{grade}, #{major})
+    </insert>
+
+    <update id="update" parameterType="com.library.entity.User">
+        UPDATE users
+        <set>
+            <if test="realName != null">real_name = #{realName},</if>
+            <if test="userType != null">user_type = #{userType},</if>
+            <if test="roleName != null">role_name = #{roleName},</if>
+            <if test="email != null">email = #{email},</if>
+            <if test="phone != null">phone = #{phone},</if>
+            <if test="status != null">status = #{status},</if>
+            <if test="teacherNo != null">teacher_no = #{teacherNo},</if>
+            <if test="department != null">department = #{department},</if>
+            <if test="title != null">title = #{title},</if>
+            <if test="studentNo != null">student_no = #{studentNo},</if>
+            <if test="className != null">class_name = #{className},</if>
+            <if test="grade != null">grade = #{grade},</if>
+            <if test="major != null">major = #{major},</if>
+        </set>
+        WHERE id = #{id}
+    </update>
+
+</mapper>

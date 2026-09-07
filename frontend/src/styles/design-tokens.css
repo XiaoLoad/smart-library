@@ -1,0 +1,211 @@
+/* ===== 智图 · 设计系统 · 日式极简 (Ma) + Editorial 字体对比 ===== */
+/* 设计理念：图书馆的沉静 + 杂志排版的张力。大量留白、细线分割、克制圆角、无重阴影。 */
+
+:root {
+  /* —— 基础色 · 暖纸调 —— */
+  --color-bg: #faf8f5;          /* washi 暖白纸色 */
+  --color-bg-elevated: #ffffff; /* 卡片/浮层 */
+  --color-bg-subtle: #f3efe9;   /* 次级背景 */
+  --color-bg-muted: #ece6dd;    /* 更深的次级 */
+
+  /* —— 文字色 —— */
+  --color-text: #2c2825;        /* 墨色主文字 */
+  --color-text-secondary: #6b6560; /* 石色次文字 */
+  --color-text-tertiary: #9c958d;  /* 淡石色辅助文字 */
+  --color-text-inverse: #faf8f5;   /* 深色背景上的文字 */
+
+  /* —— 强调色 —— */
+  --color-primary: #3a5a6b;       /* 靛蓝 · 沉静知性 */
+  --color-primary-hover: #2f4a59;
+  --color-primary-light: #e8eef0;
+  --color-secondary: #7a9270;     /* 抹茶绿 · 生命感 */
+  --color-secondary-light: #eef2ea;
+
+  /* —— 功能色 —— */
+  --color-success: #5d8a6b;
+  --color-warning: #c4904a;       /* 陶土黄 */
+  --color-danger: #a85a4a;        /* 旧朱红 */
+  --color-info: #5a7a8c;
+
+  /* —— 分割线 · 极细 —— */
+  --color-border: #e8e3dc;       /* 细分割线 */
+  --color-border-strong: #d4cdc2;
+  --color-divider: #ece6dd;
+
+  /* —— 字体 —— */
+  --font-serif: 'Noto Serif SC', 'Source Han Serif SC', 'Songti SC', serif;
+  --font-sans: 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+
+  /* —— 字号 · Editorial 对比 —— */
+  --fs-hero: 2.75rem;    /* 44px 页面主标题 */
+  --fs-h1: 2rem;         /* 32px */
+  --fs-h2: 1.5rem;       /* 24px */
+  --fs-h3: 1.25rem;      /* 20px */
+  --fs-body: 0.9375rem;  /* 15px 正文 */
+  --fs-small: 0.8125rem; /* 13px 次要 */
+  --fs-caption: 0.75rem; /* 12px 标注 */
+  --fs-display: 3.5rem;  /* 56px 登录页大字 */
+
+  /* —— 行高 —— */
+  --lh-tight: 1.2;
+  --lh-snug: 1.4;
+  --lh-normal: 1.6;
+  --lh-relaxed: 1.8;   /* 日式极简的舒展行高 */
+
+  /* —— 字间距 —— */
+  --ls-tight: -0.02em;
+  --ls-normal: 0;
+  --ls-wide: 0.08em;   /* Editorial 全大写副标题 */
+
+  /* —— 间距 · 8px 基准 —— */
+  --space-1: 0.25rem;  /* 4px */
+  --space-2: 0.5rem;   /* 8px */
+  --space-3: 0.75rem;  /* 12px */
+  --space-4: 1rem;     /* 16px */
+  --space-5: 1.5rem;   /* 24px */
+  --space-6: 2rem;     /* 32px */
+  --space-7: 3rem;     /* 48px */
+  --space-8: 4rem;     /* 64px */
+
+  /* —— 圆角 · 克制 —— */
+  --radius-sm: 2px;
+  --radius: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-pill: 999px;
+
+  /* —— 阴影 · 极轻 —— */
+  --shadow-sm: 0 1px 2px rgba(44, 40, 37, 0.04);
+  --shadow: 0 1px 3px rgba(44, 40, 37, 0.06), 0 1px 2px rgba(44, 40, 37, 0.04);
+  --shadow-md: 0 4px 12px rgba(44, 40, 37, 0.06), 0 1px 3px rgba(44, 40, 37, 0.04);
+  --shadow-lg: 0 12px 32px rgba(44, 40, 37, 0.08), 0 4px 8px rgba(44, 40, 37, 0.04);
+
+  /* —— 动效 · 缓慢克制 —— */
+  --ease-soft: cubic-bezier(0.25, 0.1, 0.25, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --duration-fast: 150ms;
+  --duration: 250ms;
+  --duration-slow: 450ms;
+
+  /* —— 布局 —— */
+  --sidebar-width: 240px;
+  --sidebar-collapsed-width: 64px;
+  --header-height: 60px;
+  --content-max-width: 1440px;
+}
+
+/* ===== 暗色模式 ===== */
+[data-theme="dark"] {
+  --color-bg: #1a1815;
+  --color-bg-elevated: #242019;
+  --color-bg-subtle: #2a261f;
+  --color-bg-muted: #322d25;
+
+  --color-text: #e8e3dc;
+  --color-text-secondary: #b5ada3;
+  --color-text-tertiary: #8a837a;
+  --color-text-inverse: #1a1815;
+
+  --color-primary: #6b8ea0;
+  --color-primary-hover: #7da0b2;
+  --color-primary-light: #2a3540;
+  --color-secondary: #9ab58e;
+  --color-secondary-light: #2e3a2a;
+
+  --color-border: #3a342c;
+  --color-border-strong: #4a4438;
+  --color-divider: #2e2920;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.4), 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4), 0 1px 3px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.5), 0 4px 8px rgba(0, 0, 0, 0.3);
+}
+
+/* ===== 基础重置 ===== */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+  line-height: var(--lh-normal);
+  color: var(--color-text);
+  background-color: var(--color-bg);
+  transition: background-color var(--duration) var(--ease-soft),
+    color var(--duration) var(--ease-soft);
+}
+
+/* —— 排版 —— */
+h1, h2, h3, h4 {
+  font-family: var(--font-serif);
+  font-weight: 600;
+  line-height: var(--lh-tight);
+  letter-spacing: var(--ls-tight);
+  color: var(--color-text);
+}
+
+h1 { font-size: var(--fs-h1); }
+h2 { font-size: var(--fs-h2); }
+h3 { font-size: var(--fs-h3); }
+
+p {
+  line-height: var(--lh-relaxed);
+  color: var(--color-text-secondary);
+}
+
+a {
+  color: var(--color-primary);
+  text-decoration: none;
+  transition: color var(--duration-fast) var(--ease-soft);
+}
+a:hover { color: var(--color-primary-hover); }
+
+/* —— 工具类 —— */
+.serif { font-family: var(--font-serif); }
+.mono { font-family: var(--font-mono); }
+
+.eyebrow {
+  font-family: var(--font-sans);
+  font-size: var(--fs-caption);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: var(--ls-wide);
+  color: var(--color-text-tertiary);
+}
+
+/* —— 滚动条 · 极简 —— */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--color-border-strong);
+  border-radius: var(--radius-pill);
+}
+::-webkit-scrollbar-thumb:hover { background: var(--color-text-tertiary); }
+
+/* —— 选区 —— */
+::selection {
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+}
+
+/* —— 减弱动效偏好 —— */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
