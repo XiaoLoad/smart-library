@@ -109,7 +109,7 @@
             </el-table-column>
             <el-table-column label="操作" width="160" fixed="right">
               <template #default="{ row }">
-                <el-button text type="primary" size="small">详情</el-button>
+                <el-button text type="primary" size="small" @click="openDetail(row)">详情</el-button>
                 <el-button
                   v-if="!userStore.isAdmin"
                   text
@@ -189,13 +189,55 @@
         <el-button type="primary" :loading="addBookLoading" @click="submitAddBook">确认新增</el-button>
       </template>
     </el-dialog>
+
+    <!-- 图书详情弹窗 -->
+    <el-dialog v-model="detailVisible" title="图书详情" width="600px" align-center>
+      <div v-if="detailData" class="book-detail">
+        <div class="detail-header">
+          <div class="detail-cover">
+            <span class="cover-char">{{ detailData.title?.charAt(0) }}</span>
+          </div>
+          <div class="detail-title-area">
+            <h2 class="detail-title">{{ detailData.title }}</h2>
+            <p class="detail-author">{{ detailData.author }}</p>
+            <span class="status-tag" :class="stockClass(detailData)">
+              {{ detailData.availableCount > 0 ? '可借' : '已借完' }}
+            </span>
+          </div>
+        </div>
+        <el-descriptions :column="2" border size="small" class="detail-desc">
+          <el-descriptions-item label="ISBN">{{ detailData.isbn || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="出版社">{{ detailData.publisher || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="分类">{{ findCategoryName(detailData.categoryId) || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="馆藏位置">{{ detailData.location || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="价格">{{ detailData.price != null ? '¥' + detailData.price : '-' }}</el-descriptions-item>
+          <el-descriptions-item label="出版日期">{{ detailData.publishDate || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="馆藏总量">{{ detailData.totalCount ?? '-' }} 册</el-descriptions-item>
+          <el-descriptions-item label="可借数量">
+            <span :class="stockClass(detailData)">{{ detailData.availableCount ?? '-' }} 册</span>
+          </el-descriptions-item>
+          <el-descriptions-item label="入库时间" :span="2">{{ formatTime(detailData.createTime) }}</el-descriptions-item>
+          <el-descriptions-item label="图书简介" :span="2">
+            <span class="detail-description">{{ detailData.description || '暂无简介' }}</span>
+          </el-descriptions-item>
+        </el-descriptions>
+      </div>
+      <template #footer>
+        <el-button @click="detailVisible = false">关闭</el-button>
+        <el-button
+          v-if="!userStore.isAdmin && detailData?.availableCount > 0"
+          type="primary"
+          @click="detailBorrow"
+        >借阅此书</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, reactive } from 'vue'
 import { Search, Plus, Collection, Notebook } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { bookApi, borrowApi } from '@/api'
 import { useUserStore } from '@/stores/user'
 import BorrowCodeDialog from '@/components/BorrowCodeDialog.vue'
@@ -220,6 +262,10 @@ const codeData = ref({ borrowNo: '', pickupDeadline: '', bookTitle: '', qrPayloa
 const addBookVisible = ref(false)
 const addBookLoading = ref(false)
 const addBookFormRef = ref(null)
+
+// 图书详情
+const detailVisible = ref(false)
+const detailData = ref(null)
 const addBookForm = reactive({
   title: '', author: '', isbn: '', categoryId: null,
   publisher: '', location: '', price: 0, totalCount: 1,
@@ -282,6 +328,15 @@ const loadQuota = async () => {
 
 const onBorrow = async (row) => {
   if (userStore.isAdmin) return
+  try {
+    await ElMessageBox.confirm(
+      `确认借阅《${row.title}》？\n借阅成功后请及时到馆取书。`,
+      '借阅确认',
+      { type: 'warning', confirmButtonText: '确认借阅', cancelButtonText: '取消' }
+    )
+  } catch {
+    return // 用户取消
+  }
   borrowingId.value = row.id
   try {
     const res = await borrowApi.apply({ bookId: row.id })
@@ -299,6 +354,39 @@ const onBorrow = async (row) => {
   } finally {
     borrowingId.value = null
   }
+}
+
+// 图书详情
+const openDetail = (row) => {
+  detailData.value = row
+  detailVisible.value = true
+}
+
+const detailBorrow = () => {
+  if (!detailData.value) return
+  detailVisible.value = false
+  onBorrow(detailData.value)
+}
+
+// 在分类树中查找分类名称
+const findCategoryName = (categoryId) => {
+  if (!categoryId) return ''
+  const find = (nodes) => {
+    for (const n of nodes) {
+      if (n.id === categoryId) return n.categoryName
+      if (n.children) {
+        const r = find(n.children)
+        if (r) return r
+      }
+    }
+    return ''
+  }
+  return find(categories.value)
+}
+
+const formatTime = (t) => {
+  if (!t) return '-'
+  return String(t).replace('T', ' ').slice(0, 19)
 }
 
 const onCategoryClick = (node) => {
@@ -510,5 +598,58 @@ onMounted(async () => {
   font-size: var(--fs-small);
   color: var(--color-text-secondary);
   margin-right: var(--space-2);
+}
+
+/* 图书详情弹窗 */
+.book-detail { padding: 0 var(--space-2); }
+
+.detail-header {
+  display: flex;
+  gap: var(--space-4);
+  align-items: center;
+  margin-bottom: var(--space-5);
+}
+
+.detail-cover {
+  width: 56px;
+  height: 72px;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(135deg, var(--color-primary-light), var(--color-secondary-light));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.detail-cover .cover-char {
+  font-family: var(--font-serif);
+  font-size: 28px;
+  font-weight: 600;
+  color: var(--color-primary);
+}
+
+.detail-title-area { min-width: 0; }
+
+.detail-title {
+  font-family: var(--font-serif);
+  font-size: var(--fs-h3);
+  font-weight: 600;
+  color: var(--color-text);
+  margin: 0 0 4px;
+}
+
+.detail-author {
+  font-size: var(--fs-small);
+  color: var(--color-text-secondary);
+  margin: 0 0 6px;
+}
+
+.detail-desc { margin-bottom: var(--space-2); }
+
+.detail-description {
+  display: block;
+  line-height: 1.6;
+  color: var(--color-text-secondary);
+  font-size: var(--fs-small);
 }
 </style>
