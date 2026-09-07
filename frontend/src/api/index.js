@@ -62,3 +62,10 @@ export const aiApi = {
   conversationList: () => get('/ai/conversation/list'),
   messageList: (conversationId) => get('/ai/message/list', { conversationId }),
 }
+
+// 系统设置
+export const systemApi = {
+  changePassword: (data) => post('/system/change-password', data),
+  getAiConfig: () => get('/system/ai-config'),
+  saveAiConfig: (data) => post('/system/ai-config', data),
+}
