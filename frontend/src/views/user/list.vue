@@ -62,7 +62,7 @@
             <span class="time-text">{{ formatTime(row.createTime) }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="160" fixed="right">
+        <el-table-column label="操作" width="160" fixed="right" class-name="ops-col">
           <template #default="{ row }">
             <el-button text type="primary" size="small" @click="openDetail(row)">详情</el-button>
             <el-button v-if="userStore.isAdmin" text type="primary" size="small" @click="openEdit(row)">编辑</el-button>
