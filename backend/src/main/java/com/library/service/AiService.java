@@ -7,11 +7,15 @@ import com.library.entity.AiConversation;
 import com.library.entity.SystemSetting;
 import com.library.mapper.*;
 import com.library.security.CurrentUser;
+import dev.langchain4j.data.message.AiMessage;
+import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.memory.ChatMemory;
 import dev.langchain4j.memory.chat.MessageWindowChatMemory;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import dev.langchain4j.service.AiServices;
 import dev.langchain4j.service.TokenStream;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
@@ -32,9 +36,15 @@ import java.util.Map;
  * AI 对话服务：基于 LangChain4j 1.0.0 + OpenAI 兼容接口（DeepSeek/OpenAI 等）。
  * <p>
  * 提供：会话增删、SSE 流式对话（含历史记忆 + 工具调用 + 首条消息自动生成标题）。
+ * <p>
+ * 记忆管理：历史「用户提问 + AI 最终回答」以纯文本持久化到 MySQL，每请求加载进窗口记忆；
+ * 工具调用的中间消息（tool_calls / tool 结果）仅存在于请求内内存记忆，不落库，
+ * 以保证多轮工具调用上下文完整且不会污染历史（详见 {@link #chat} 注释）。
  */
 @Service
 public class AiService {
+
+    private static final Logger log = LoggerFactory.getLogger(AiService.class);
 
     /** 单会话保留的最大历史消息条数（窗口记忆） */
     private static final int MAX_MEMORY_MESSAGES = 40;
@@ -42,6 +52,8 @@ public class AiService {
     private static final long SSE_TIMEOUT_MS = 180_000L;
     /** 首条消息生成标题的最大字符数 */
     private static final int TITLE_MAX_LEN = 20;
+    /** 模型调用超时（秒），避免长时间无响应卡死 SSE */
+    private static final long MODEL_TIMEOUT_SECONDS = 60L;
 
     @Autowired private SystemSettingMapper systemSettingMapper;
     @Autowired private AiConversationMapper conversationMapper;
@@ -58,7 +70,10 @@ public class AiService {
     private volatile OpenAiStreamingChatModel cachedModel;
     private volatile String cachedConfigHash;
 
-    /** AI 服务接口（流式返回 TokenStream） */
+    /**
+     * AI 服务接口（流式返回 TokenStream）。
+     * 单 String 参数由 LangChain4j 自动识别为用户消息。
+     */
     public interface LibraryAssistant {
         TokenStream chat(String userMessage);
     }
@@ -105,9 +120,20 @@ public class AiService {
      * 事件流：
      * <ul>
      *   <li>{@code delta} —— 增量文本片段</li>
-     *   <li>{@code done} —— "[DONE]"，表示本轮结束</li>
+     *   <li>{@code tool}  —— 工具调用过程（JSON：{name, phase, detail}）</li>
+     *   <li>{@code done}  —— "[DONE]"，表示本轮结束</li>
      *   <li>{@code error} —— 错误消息</li>
      * </ul>
+     * <p>
+     * 记忆策略：每请求从 DB 加载历史「纯文本」消息（用户提问 + AI 最终回答）构建窗口记忆；
+     * 工具调用的中间消息（带 tool_calls 的 AiMessage、ToolExecutionResultMessage）只存在于
+     * 本次请求的内存记忆中，<b>不落库</b>。
+     * <p>
+     * 原因：OpenAI/DeepSeek 协议要求多轮工具调用必须原样回传 assistant 的 tool_calls 与
+     * 对应 tool 结果；而 ai_messages 表只存文本。若把工具轮的过渡语（如「我来查询」）落库、
+     * 却丢失 tool_calls/tool 结果，下一轮模型会看到一堆孤立的过渡语、看不到工具调用记录，
+     * 从而反复重复调用工具。因此 DB 只保存完整的用户提问与最终回答，请求内由 LangChain4j
+     * 自动维护完整的工具调用上下文。
      */
     public SseEmitter chat(Long conversationId, String content) {
         CurrentUser cu = CurrentUser.get();
@@ -125,14 +151,17 @@ public class AiService {
         }
         OpenAiStreamingChatModel model = getOrBuildModel(cfg);
 
-        // 1. 构建带历史记忆（从 DB 回放）
+        // 1. 从 DB 加载历史纯文本消息，构建本次请求的窗口记忆（工具中间态不入 DB）
         ChatMemory memory = MessageWindowChatMemory.withMaxMessages(MAX_MEMORY_MESSAGES);
         List<com.library.entity.AiMessage> history = messageMapper.selectByConversationId(conversationId);
         for (com.library.entity.AiMessage m : history) {
+            if (m.getContent() == null || m.getContent().isBlank()) {
+                continue;
+            }
             if ("user".equalsIgnoreCase(m.getRole())) {
-                memory.add(dev.langchain4j.data.message.UserMessage.from(m.getContent()));
+                memory.add(UserMessage.from(m.getContent()));
             } else if ("assistant".equalsIgnoreCase(m.getRole())) {
-                memory.add(dev.langchain4j.data.message.AiMessage.from(m.getContent()));
+                memory.add(AiMessage.from(m.getContent()));
             }
         }
 
@@ -154,11 +183,25 @@ public class AiService {
                 || "新对话".equals(conv.getTitle());
 
         SseEmitter emitter = new SseEmitter(SSE_TIMEOUT_MS);
-        StringBuilder fullResponse = new StringBuilder();
+
+        // 工具事件发射器：将工具调用过程通过 SSE 推送给前端
+        tools.setEventEmitter((toolName, phase, detail) -> {
+            try {
+                String payload = objectMapper.writeValueAsString(
+                        Map.of("name", toolName, "phase", phase,
+                                "detail", detail == null ? "" : detail));
+                emitter.send(SseEmitter.event().name("tool").data(payload));
+            } catch (IOException e) {
+                // 客户端已断开，忽略
+            } catch (Exception e) {
+                log.warn("[AI] 工具事件序列化失败: {}", e.getMessage());
+            }
+        });
 
         try {
             LibraryAssistant assistant = AiServices.builder(LibraryAssistant.class)
                     .streamingChatModel(model)
+                    // 请求级记忆：持有完整工具调用上下文（含 tool_calls/tool 结果），不落库
                     .chatMemory(memory)
                     .tools(tools)
                     .systemMessageProvider(memoryId -> buildSystemPrompt(displayName))
@@ -166,7 +209,6 @@ public class AiService {
 
             assistant.chat(content)
                     .onPartialResponse(partial -> {
-                        fullResponse.append(partial);
                         try {
                             emitter.send(SseEmitter.event().name("delta").data(partial));
                         } catch (IOException e) {
@@ -174,13 +216,17 @@ public class AiService {
                         }
                     })
                     .onCompleteResponse(response -> {
-                        // 落库助手消息
-                        com.library.entity.AiMessage aiMsg = new com.library.entity.AiMessage();
-                        aiMsg.setConversationId(conversationId);
-                        aiMsg.setRole("assistant");
-                        aiMsg.setContent(fullResponse.toString());
-                        aiMsg.setCreateTime(LocalDateTime.now());
-                        messageMapper.insert(aiMsg);
+                        // 落库最终 AI 回答：取最终一轮模型响应的文本（不含工具轮过渡语）
+                        AiMessage finalAi = response.aiMessage();
+                        String answer = finalAi == null ? null : finalAi.text();
+                        if (answer != null && !answer.isBlank()) {
+                            com.library.entity.AiMessage aiMsg = new com.library.entity.AiMessage();
+                            aiMsg.setConversationId(conversationId);
+                            aiMsg.setRole("assistant");
+                            aiMsg.setContent(answer);
+                            aiMsg.setCreateTime(LocalDateTime.now());
+                            messageMapper.insert(aiMsg);
+                        }
                         // 首条消息自动生成标题
                         if (needsTitle) {
                             String title = content.length() > TITLE_MAX_LEN
@@ -217,6 +263,7 @@ public class AiService {
                     })
                     .start();
         } catch (RuntimeException e) {
+            log.error("[AI] 构建对话失败 conversationId={}", conversationId, e);
             try {
                 emitter.send(SseEmitter.event().name("error")
                         .data(e.getMessage() == null ? "AI 服务异常" : e.getMessage()));
@@ -291,6 +338,14 @@ public class AiService {
                 .baseUrl(baseUrl)
                 .apiKey(cfg.apiKey())
                 .modelName(cfg.model())
+                // 自定义 HTTP 客户端：对 DeepSeek 模型自动关闭 thinking 模式，
+                // 规避 reasoning_content 在多轮/工具调用时必须回传而 LangChain4j 不支持的问题
+                .httpClientBuilder(new DeepSeekCompatHttpClient.Builder())
+                // 模型调用超时：避免长时间无响应卡死 SSE（参考 langchain4j-examples）
+                .timeout(Duration.ofSeconds(MODEL_TIMEOUT_SECONDS))
+                // 请求/响应日志：便于排查调用失败、token 用量等问题
+                .logRequests(true)
+                .logResponses(true)
                 .build();
         cachedModel = model;
         cachedConfigHash = hash;
