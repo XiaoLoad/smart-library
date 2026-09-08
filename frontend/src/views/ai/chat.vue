@@ -25,78 +25,115 @@
       </div>
     </aside>
 
-    <!-- 对话主区 -->
+    <!-- 对话主区：三段式 flex（头部固定 / 消息滚动 / 输入固定） -->
     <main class="chat-main">
       <header class="chat-head">
-        <div>
+        <div class="head-id">
           <span class="eyebrow">智 · AI</span>
           <h2 class="chat-title">智能助手</h2>
         </div>
         <div class="head-tip">
           <el-icon><MagicStick /></el-icon>
-          <span>可以查询图书、借阅、个人数据</span>
+          <span>可查询图书、借阅、个人数据</span>
         </div>
       </header>
 
-      <div class="msg-list" ref="msgListRef">
-        <div v-if="!messages.length" class="welcome">
-          <div class="welcome-mark">智</div>
-          <h3 class="welcome-title">您好，请问需要什么帮助？</h3>
-          <p class="welcome-desc">我可以为您查询馆藏图书、个人借阅、罚款记录等。</p>
-          <div class="quick-prompts">
-            <button v-for="p in quickPrompts" :key="p" class="quick-prompt" @click="sendPrompt(p)">
-              {{ p }}
-            </button>
-          </div>
-        </div>
-
-        <div
-          v-for="m in messages"
-          :key="m.id"
-          class="msg-row"
-          :class="m.role"
-        >
-          <div class="msg-avatar">
-            <span v-if="m.role === 'user'">我</span>
-            <span v-else>智</span>
-          </div>
-          <div class="msg-body">
-            <div class="msg-name">{{ m.role === 'user' ? '我' : '智能助手' }}</div>
-            <div class="msg-content">
-              <template v-if="m.role === 'assistant'">
-                <span v-for="(line, i) in m.content.split('\n')" :key="i">{{ line }}<br v-if="i < m.content.split('\n').length - 1" /></span>
-              </template>
-              <template v-else>{{ m.content }}</template>
+      <!-- 唯一滚动容器：flex:1 + min-height:0，高度被钉死，输入框永不被顶走 -->
+      <div class="msg-scroll" ref="msgListRef" @scroll="onScroll">
+        <div class="msg-inner">
+          <!-- 欢迎屏 -->
+          <div v-if="!messages.length" class="welcome">
+            <div class="welcome-mark">智</div>
+            <h3 class="welcome-title">您好，请问需要什么帮助？</h3>
+            <p class="welcome-desc">我可以为您查询馆藏图书、个人借阅、罚款记录等。</p>
+            <div class="quick-prompts">
+              <button v-for="p in quickPrompts" :key="p" class="quick-prompt" @click="sendPrompt(p)">
+                <span class="quick-dot"></span>{{ p }}
+              </button>
             </div>
           </div>
-        </div>
 
-        <div v-if="thinking" class="msg-row assistant">
-          <div class="msg-avatar"><span>智</span></div>
-          <div class="msg-body">
-            <div class="msg-name">智能助手</div>
-            <div class="msg-content thinking">
-              <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+          <template v-for="(m, i) in messages" :key="m.id">
+            <!-- 日期分隔线：历史对话的导航锚点 -->
+            <div v-if="needDivider(i)" class="day-divider">
+              <span class="day-line"></span>
+              <span class="day-label">{{ dayLabel(m.createTime) }}</span>
+              <span class="day-line"></span>
+            </div>
+
+            <!-- 用户消息：右侧气泡 -->
+            <div v-if="m.role === 'user'" class="msg-row user">
+              <div class="user-bubble">{{ m.content }}</div>
+            </div>
+
+            <!-- 助手消息：左侧头像 + 空气化排版 -->
+            <div v-else class="msg-row assistant">
+              <div class="msg-avatar"><span>智</span></div>
+              <div class="msg-body">
+                <!-- 工具调用过程卡片 -->
+                <div v-if="m.toolEvents && m.toolEvents.length" class="tool-events">
+                  <div v-for="(t, ti) in m.toolEvents" :key="ti" class="tool-card" :class="t.phase">
+                    <el-icon class="tool-icon">
+                      <Loading v-if="t.phase === 'start'" />
+                      <Check v-else-if="t.phase === 'end'" />
+                      <Close v-else-if="t.phase === 'error'" />
+                    </el-icon>
+                    <span class="tool-name">{{ toolLabel(t.name) }}</span>
+                    <span v-if="t.detail" class="tool-detail">{{ t.detail }}</span>
+                  </div>
+                </div>
+
+                <div class="msg-content markdown" v-html="renderMarkdown(m.content)"></div>
+              </div>
+            </div>
+          </template>
+
+          <!-- 思考中占位 -->
+          <div v-if="thinking" class="msg-row assistant">
+            <div class="msg-avatar"><span>智</span></div>
+            <div class="msg-body">
+              <div class="msg-content thinking">
+                <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+                <span class="thinking-text">正在思考…</span>
+              </div>
             </div>
           </div>
+
+          <!-- 底部留白，保证最后一条不被输入框遮挡 -->
+          <div class="msg-bottom-gap"></div>
         </div>
       </div>
 
-      <div class="input-area">
-        <div class="input-wrap">
+      <!-- 「回到最新」浮动按钮：锚定在输入框上方，不随内容滚动 -->
+      <transition name="jump">
+        <button v-if="showJumpBtn" class="jump-latest" @click="scrollToBottomForce">
+          <el-icon><ArrowDownBold /></el-icon>
+          回到最新
+        </button>
+      </transition>
+
+      <!-- 输入区：固定在视口底部 -->
+      <div class="composer">
+        <div class="composer-box" :class="{ active: input }">
           <el-input
             v-model="input"
             type="textarea"
             :rows="2"
             placeholder="输入您的问题，Enter 发送，Shift+Enter 换行"
             resize="none"
+            class="composer-input"
             @keydown.enter.exact.prevent="send"
           />
-          <el-button type="primary" :icon="Promotion" @click="send" :loading="thinking">发送</el-button>
+          <button
+            class="composer-btn"
+            :class="thinking ? 'stop' : 'send'"
+            :title="thinking ? '停止生成' : '发送'"
+            @click="thinking ? stopGenerate() : send()"
+          >
+            <el-icon><VideoPause v-if="thinking" /><Promotion v-else /></el-icon>
+          </button>
         </div>
-        <div class="input-tip">
-          AI 助手基于馆藏数据回答，请勿输入敏感信息。
-        </div>
+        <p class="composer-tip">AI 助手基于馆藏数据回答，内容仅供参考。</p>
       </div>
     </main>
   </div>
@@ -104,9 +141,70 @@
 
 <script setup>
 import { ref, reactive, nextTick, onMounted, onBeforeUnmount } from 'vue'
-import { Plus, ChatDotRound, MagicStick, Promotion, Delete } from '@element-plus/icons-vue'
+import {
+  Plus, ChatDotRound, MagicStick, Promotion, Delete,
+  VideoPause, Loading, Check, Close, ArrowDownBold,
+} from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import MarkdownIt from 'markdown-it'
+import hljs from 'highlight.js'
+import 'highlight.js/styles/github.css'
 import { aiApi } from '@/api'
+
+// 初始化 Markdown 渲染器：启用代码高亮、链接安全属性
+const md = new MarkdownIt({
+  html: false,        // 不允许内嵌 HTML（防止 XSS）
+  breaks: true,       // 单换行转 <br>
+  linkify: true,      // 自动识别链接
+  highlight(code, lang) {
+    if (lang && hljs.getLanguage(lang)) {
+      try {
+        return `<pre class="hljs"><code>${hljs.highlight(code, { language: lang, ignoreIllegals: true }).value}</code></pre>`
+      } catch {
+        // fallthrough
+      }
+    }
+    return `<pre class="hljs"><code>${md.utils.escapeHtml(code)}</code></pre>`
+  },
+})
+
+// 工具名称中文映射
+const TOOL_LABELS = {
+  queryMyBorrows: '查询借阅记录',
+  queryBooks: '检索馆藏图书',
+  queryMyFines: '查询罚款记录',
+  queryBorrowQuota: '查询借阅额度',
+  queryAnnouncements: '查询公告',
+}
+const toolLabel = (name) => TOOL_LABELS[name] || name
+
+const renderMarkdown = (content) => {
+  if (!content) return ''
+  try {
+    return md.render(content)
+  } catch {
+    return md.utils.escapeHtml(content)
+  }
+}
+
+// ===== 日期分隔（历史导航锚点） =====
+const dayKey = (t) => (t ? String(t).slice(0, 10) : '')
+const dayLabel = (t) => {
+  const key = dayKey(t)
+  if (!key) return ''
+  const today = new Date()
+  const fmt = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  const yest = new Date(today); yest.setDate(today.getDate() - 1)
+  if (key === fmt(today)) return '今天'
+  if (key === fmt(yest)) return '昨天'
+  const [y, mo, d] = key.split('-').map(Number)
+  return y === today.getFullYear() ? `${mo}月${d}日` : `${y}年${mo}月${d}日`
+}
+// 与上一条消息不同日（或为第一条）时显示分隔线
+const needDivider = (i) => {
+  if (i === 0) return true
+  return dayKey(messages.value[i].createTime) !== dayKey(messages.value[i - 1].createTime)
+}
 
 const conversations = ref([])
 const currentConvId = ref(null)
@@ -116,6 +214,44 @@ const thinking = ref(false)
 const msgListRef = ref(null)
 // 当前流式请求的 AbortController（用于取消）
 let abortController = null
+
+// ===== 智能滚动控制 =====
+const isAutoFollow = ref(true)
+const showJumpBtn = ref(false)
+
+const isAtBottom = () => {
+  const el = msgListRef.value
+  if (!el) return true
+  return el.scrollHeight - el.scrollTop - el.clientHeight < 24
+}
+
+const onScroll = () => {
+  const atBottom = isAtBottom()
+  isAutoFollow.value = atBottom
+  showJumpBtn.value = !atBottom && messages.value.length > 0
+}
+
+const scrollToBottom = async () => {
+  if (!isAutoFollow.value) {
+    // 用户上翻中：显示「回到最新」，不打断阅读
+    showJumpBtn.value = true
+    return
+  }
+  await nextTick()
+  if (msgListRef.value) {
+    msgListRef.value.scrollTop = msgListRef.value.scrollHeight
+  }
+  showJumpBtn.value = false
+}
+
+const scrollToBottomForce = async () => {
+  isAutoFollow.value = true
+  await nextTick()
+  if (msgListRef.value) {
+    msgListRef.value.scrollTop = msgListRef.value.scrollHeight
+  }
+  showJumpBtn.value = false
+}
 
 const quickPrompts = [
   '我当前借了哪些书？',
@@ -139,13 +275,17 @@ const loadConversations = async () => {
 const switchConv = async (id) => {
   if (thinking.value) return // 流式输出中不切换
   currentConvId.value = id
+  isAutoFollow.value = true
   try {
     const data = await aiApi.messageList(id)
-    messages.value = data.list || []
+    messages.value = (data.list || []).map((m) => ({
+      ...m,
+      toolEvents: [], // 历史消息无工具调用记录
+    }))
   } catch (e) {
     messages.value = []
   }
-  await scrollToBottom()
+  await scrollToBottomForce()
 }
 
 const newConv = async () => {
@@ -155,6 +295,8 @@ const newConv = async () => {
     conversations.value.unshift(conv)
     currentConvId.value = conv.id
     messages.value = []
+    isAutoFollow.value = true
+    showJumpBtn.value = false
   } catch (e) {
     ElMessage.error('创建会话失败')
   }
@@ -192,8 +334,18 @@ const sendPrompt = (prompt) => {
   send()
 }
 
+/** 停止生成：中断当前 SSE 请求 */
+const stopGenerate = () => {
+  if (abortController) {
+    abortController.abort()
+    abortController = null
+  }
+  thinking.value = false
+}
+
 const send = async () => {
-  if (!input.value.trim() || thinking.value) return
+  if (thinking.value) return
+  if (!input.value.trim()) return
   const content = input.value.trim()
   input.value = ''
 
@@ -210,7 +362,6 @@ const send = async () => {
   }
 
   const convId = currentConvId.value
-  // 首条消息本地更新标题
   const conv = conversations.value.find((c) => c.id === convId)
   const isFirstMsg = !conv || conv.title === '新对话' || !conv.title
 
@@ -222,6 +373,8 @@ const send = async () => {
     content,
     createTime: new Date().toISOString(),
   })
+  isAutoFollow.value = true
+  showJumpBtn.value = false
   await scrollToBottom()
   thinking.value = true
 
@@ -257,6 +410,23 @@ const send = async () => {
     const decoder = new TextDecoder('utf-8')
     let buffer = ''
 
+    const ensureAssistantMsg = () => {
+      if (!assistantMsg) {
+        thinking.value = false
+        // 用 reactive 包装：局部变量引用 Proxy，修改其属性能触发响应式更新
+        assistantMsg = reactive({
+          id: Date.now() + 1,
+          conversationId: convId,
+          role: 'assistant',
+          content: '',
+          toolEvents: [],
+          createTime: new Date().toISOString(),
+        })
+        messages.value.push(assistantMsg)
+      }
+      return assistantMsg
+    }
+
     const handleEvent = (block) => {
       const lines = block.split('\n')
       let event = 'message'
@@ -272,20 +442,21 @@ const send = async () => {
       }
       const data = dataParts.join('\n')
       if (event === 'delta') {
-        if (!assistantMsg) {
-          thinking.value = false
-          // 用 reactive 包装：局部变量引用 Proxy，修改其属性能触发响应式更新
-          // （若用普通对象，push 到 ref 数组后局部变量引用的是原始对象，修改不触发更新）
-          assistantMsg = reactive({
-            id: Date.now() + 1,
-            conversationId: convId,
-            role: 'assistant',
-            content: '',
-            createTime: new Date().toISOString(),
+        const msg = ensureAssistantMsg()
+        msg.content += data
+        scrollToBottom()
+      } else if (event === 'tool') {
+        const msg = ensureAssistantMsg()
+        try {
+          const info = JSON.parse(data)
+          msg.toolEvents.push({
+            name: info.name || '',
+            phase: info.phase || 'start',
+            detail: info.detail || '',
           })
-          messages.value.push(assistantMsg)
+        } catch {
+          // 忽略解析失败的 tool 事件
         }
-        assistantMsg.content += data
         scrollToBottom()
       } else if (event === 'done') {
         thinking.value = false
@@ -294,17 +465,8 @@ const send = async () => {
         }
       } else if (event === 'error') {
         thinking.value = false
-        if (!assistantMsg) {
-          assistantMsg = reactive({
-            id: Date.now() + 1,
-            conversationId: convId,
-            role: 'assistant',
-            content: '',
-            createTime: new Date().toISOString(),
-          })
-          messages.value.push(assistantMsg)
-        }
-        assistantMsg.content = `⚠️ ${data || 'AI 请求出错'}`
+        const msg = ensureAssistantMsg()
+        msg.content = `⚠️ ${data || 'AI 请求出错'}`
         scrollToBottom()
       }
     }
@@ -314,7 +476,6 @@ const send = async () => {
       if (done) break
       buffer += decoder.decode(value, { stream: true })
       buffer = buffer.replace(/\r\n/g, '\n')
-      // 按空行切分事件块
       let idx
       while ((idx = buffer.indexOf('\n\n')) >= 0) {
         const block = buffer.slice(0, idx)
@@ -322,24 +483,19 @@ const send = async () => {
         if (block.trim()) handleEvent(block)
       }
     }
-    // 处理残留事件
     if (buffer.trim()) handleEvent(buffer)
   } catch (e) {
     thinking.value = false
-    if (e.name === 'AbortError') return
+    if (e.name === 'AbortError') {
+      // 用户主动停止：保留已生成内容
+      return
+    }
     ElMessage.error(e.message || 'AI 请求失败')
     if (assistantMsg) {
       assistantMsg.content = `⚠️ ${e.message || 'AI 请求失败'}`
     }
   } finally {
     abortController = null
-  }
-}
-
-const scrollToBottom = async () => {
-  await nextTick()
-  if (msgListRef.value) {
-    msgListRef.value.scrollTop = msgListRef.value.scrollHeight
   }
 }
 
@@ -356,31 +512,35 @@ onMounted(loadConversations)
 </script>
 
 <style scoped>
+/* ===== 布局：高度钉死，仅消息区滚动 ===== */
 .ai-page {
   display: grid;
   grid-template-columns: 280px 1fr;
+  grid-template-rows: 1fr;          /* 显式 1fr 行，约束子项不随内容增高 */
   height: calc(100vh - var(--header-height));
+  overflow: hidden;
 }
 
-/* 会话侧栏 */
+/* —— 会话侧栏 —— */
 .conv-side {
   background: var(--color-bg-elevated);
   border-right: 1px solid var(--color-border);
   display: flex;
   flex-direction: column;
+  min-height: 0;
 }
 
 .conv-head {
   padding: var(--space-4);
   border-bottom: 1px solid var(--color-divider);
+  flex-shrink: 0;
 }
 
-.new-btn {
-  width: 100%;
-}
+.new-btn { width: 100%; }
 
 .conv-list {
   flex: 1;
+  min-height: 0;                    /* flex 滚动关键 */
   overflow-y: auto;
   padding: var(--space-3);
 }
@@ -393,26 +553,14 @@ onMounted(loadConversations)
   padding: var(--space-3);
   border-radius: var(--radius-md);
   cursor: pointer;
-  transition: all var(--duration-fast) var(--ease-soft);
+  transition: background var(--duration-fast) var(--ease-soft);
   margin-bottom: var(--space-1);
 }
+.conv-item:hover { background: var(--color-bg-subtle); }
+.conv-item.active { background: var(--color-primary-light); }
 
-.conv-item:hover {
-  background: var(--color-bg-subtle);
-}
-
-.conv-item.active {
-  background: var(--color-primary-light);
-}
-
-.conv-icon {
-  margin-top: 2px;
-  color: var(--color-text-tertiary);
-}
-
-.conv-item.active .conv-icon {
-  color: var(--color-primary);
-}
+.conv-icon { margin-top: 2px; color: var(--color-text-tertiary); }
+.conv-item.active .conv-icon { color: var(--color-primary); }
 
 .conv-del {
   position: absolute;
@@ -424,14 +572,10 @@ onMounted(loadConversations)
   padding: 2px;
   border-radius: var(--radius-sm);
 }
-
-.conv-item:hover .conv-del {
-  opacity: 1;
-}
-
+.conv-item:hover .conv-del { opacity: 1; }
 .conv-del:hover {
   color: var(--color-danger);
-  background: var(--color-danger-light, rgba(255, 77, 79, 0.1));
+  background: rgba(168, 90, 74, 0.1);
 }
 
 .conv-meta { flex: 1; min-width: 0; padding-right: 20px; }
@@ -450,24 +594,32 @@ onMounted(loadConversations)
   color: var(--color-text-tertiary);
 }
 
-/* 对话主区 */
+/* —— 对话主区 —— */
 .chat-main {
   display: flex;
   flex-direction: column;
-  background: var(--color-bg);
   min-width: 0;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+  /* 微妙纸感：顶部一抹暖光，营造空间纵深 */
+  background:
+    radial-gradient(120% 60% at 50% -10%, rgba(58, 90, 107, 0.05), transparent 60%),
+    var(--color-bg);
 }
 
 .chat-head {
+  flex-shrink: 0;
   display: flex;
   justify-content: space-between;
   align-items: center;
   padding: var(--space-4) var(--space-6);
   border-bottom: 1px solid var(--color-border);
   background: var(--color-bg-elevated);
+  z-index: 2;
 }
 
-.chat-title {
+.head-id .chat-title {
   font-family: var(--font-serif);
   font-size: var(--fs-h3);
   font-weight: 600;
@@ -482,23 +634,33 @@ onMounted(loadConversations)
   color: var(--color-text-tertiary);
 }
 
-.msg-list {
+/* —— 消息滚动区（唯一滚动容器） —— */
+.msg-scroll {
   flex: 1;
+  min-height: 0;                    /* flex 滚动关键：允许收缩触发 overflow */
   overflow-y: auto;
-  padding: var(--space-6);
+  overflow-x: hidden;
 }
 
-/* 欢迎屏 */
+.msg-inner {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: var(--space-6) var(--space-6) 0;
+}
+
+.msg-bottom-gap { height: var(--space-4); }
+
+/* —— 欢迎屏 —— */
 .welcome {
   text-align: center;
-  padding: var(--space-8) var(--space-5);
+  padding: var(--space-8) var(--space-5) var(--space-6);
   max-width: 560px;
   margin: 0 auto;
 }
 
 .welcome-mark {
-  width: 64px;
-  height: 64px;
+  width: 60px;
+  height: 60px;
   margin: 0 auto var(--space-5);
   border-radius: var(--radius-lg);
   background: var(--color-primary);
@@ -507,8 +669,9 @@ onMounted(loadConversations)
   align-items: center;
   justify-content: center;
   font-family: var(--font-serif);
-  font-size: 2rem;
+  font-size: 1.9rem;
   font-weight: 600;
+  box-shadow: var(--shadow-md);
 }
 
 .welcome-title {
@@ -517,7 +680,6 @@ onMounted(loadConversations)
   font-weight: 600;
   margin-bottom: var(--space-3);
 }
-
 .welcome-desc {
   color: var(--color-text-secondary);
   margin-bottom: var(--space-6);
@@ -527,9 +689,12 @@ onMounted(loadConversations)
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+  text-align: left;
 }
-
 .quick-prompt {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
   background: var(--color-bg-elevated);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
@@ -538,26 +703,78 @@ onMounted(loadConversations)
   font-size: var(--fs-small);
   color: var(--color-text-secondary);
   transition: all var(--duration-fast) var(--ease-soft);
-  text-align: left;
 }
-
 .quick-prompt:hover {
   background: var(--color-primary-light);
   border-color: var(--color-primary);
   color: var(--color-primary);
+  transform: translateX(2px);
+}
+.quick-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  flex-shrink: 0;
+  opacity: 0.5;
 }
 
-/* 消息行 */
+/* —— 日期分隔线 —— */
+.day-divider {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: var(--space-6) 0 var(--space-5);
+}
+.day-line {
+  flex: 1;
+  height: 1px;
+  background: var(--color-divider);
+}
+.day-label {
+  font-size: var(--fs-caption);
+  color: var(--color-text-tertiary);
+  letter-spacing: var(--ls-wide);
+  white-space: nowrap;
+  font-family: var(--font-serif);
+}
+
+/* —— 消息行 —— */
 .msg-row {
   display: flex;
-  gap: var(--space-3);
-  max-width: 880px;
-  margin: 0 auto var(--space-5);
+  margin-bottom: var(--space-5);
+  animation: msg-in var(--duration) var(--ease-out);
+}
+@keyframes msg-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
+/* 用户：右对齐气泡 */
+.msg-row.user {
+  justify-content: flex-end;
+}
+.user-bubble {
+  max-width: 78%;
+  background: var(--color-primary);
+  color: var(--color-text-inverse);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-lg) var(--radius-lg) var(--radius-sm) var(--radius-lg);
+  font-size: var(--fs-body);
+  line-height: var(--lh-relaxed);
+  white-space: pre-wrap;
+  word-break: break-word;
+  box-shadow: var(--shadow-sm);
+}
+
+/* 助手：左对齐头像 + 内容 */
+.msg-row.assistant {
+  gap: var(--space-3);
+  justify-content: flex-start;
+}
 .msg-avatar {
-  width: 36px;
-  height: 36px;
+  width: 34px;
+  height: 34px;
   border-radius: var(--radius-md);
   display: flex;
   align-items: center;
@@ -566,48 +783,32 @@ onMounted(loadConversations)
   font-family: var(--font-serif);
   font-weight: 600;
   font-size: var(--fs-small);
-}
-
-.msg-row.user .msg-avatar {
-  background: var(--color-secondary-light);
-  color: var(--color-secondary);
-}
-
-.msg-row.assistant .msg-avatar {
   background: var(--color-primary);
   color: var(--color-text-inverse);
 }
-
-.msg-body { flex: 1; min-width: 0; }
-
-.msg-name {
-  font-size: var(--fs-caption);
-  color: var(--color-text-tertiary);
-  margin-bottom: var(--space-2);
-  font-weight: 500;
+.msg-body {
+  flex: 1;
+  min-width: 0;
+  max-width: calc(100% - 46px);
 }
 
+/* 助手消息：空气化排版，不套重卡片 */
 .msg-content {
   font-size: var(--fs-body);
   line-height: var(--lh-relaxed);
   color: var(--color-text);
-  background: var(--color-bg-elevated);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  padding: var(--space-3) var(--space-4);
-  white-space: pre-wrap;
+  padding: var(--space-1) 0;
+  word-break: break-word;
 }
-
-.msg-row.user .msg-content {
-  background: var(--color-primary-light);
-  border-color: transparent;
-  color: var(--color-text);
-}
-
 .msg-content.thinking {
   display: flex;
-  gap: 4px;
   align-items: center;
+  gap: 6px;
+  color: var(--color-text-tertiary);
+}
+.thinking-text {
+  font-size: var(--fs-caption);
+  margin-left: 2px;
 }
 
 .dot {
@@ -617,39 +818,207 @@ onMounted(loadConversations)
   background: var(--color-text-tertiary);
   animation: pulse 1.4s infinite ease-in-out both;
 }
-
 .dot:nth-child(1) { animation-delay: -0.32s; }
 .dot:nth-child(2) { animation-delay: -0.16s; }
-
 @keyframes pulse {
   0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
   40% { transform: scale(1); opacity: 1; }
 }
 
-/* 输入区 */
-.input-area {
-  padding: var(--space-4) var(--space-6);
-  border-top: 1px solid var(--color-border);
-  background: var(--color-bg-elevated);
-}
-
-.input-wrap {
+/* —— 工具调用卡片 —— */
+.tool-events {
   display: flex;
-  gap: var(--space-3);
-  max-width: 880px;
-  margin: 0 auto;
-  align-items: flex-end;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: var(--space-2);
+}
+.tool-card {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  align-self: flex-start;
+  padding: 6px 12px;
+  border-radius: var(--radius-pill);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  font-size: var(--fs-caption);
+  color: var(--color-text-secondary);
+  transition: all var(--duration-fast) var(--ease-soft);
+}
+.tool-card.start { border-color: var(--color-primary); color: var(--color-primary); background: var(--color-primary-light); }
+.tool-card.end { border-color: var(--color-success); color: var(--color-success); }
+.tool-card.error { border-color: var(--color-danger); color: var(--color-danger); }
+.tool-card .tool-icon { animation: spin 1s linear infinite; }
+.tool-card.end .tool-icon,
+.tool-card.error .tool-icon { animation: none; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.tool-name { font-weight: 500; }
+.tool-detail { color: var(--color-text-tertiary); }
+
+/* —— Markdown 排版 —— */
+.msg-content.markdown :deep(p) { margin: 0 0 var(--space-2); }
+.msg-content.markdown :deep(p:last-child) { margin-bottom: 0; }
+.msg-content.markdown :deep(h1),
+.msg-content.markdown :deep(h2),
+.msg-content.markdown :deep(h3),
+.msg-content.markdown :deep(h4) {
+  margin: var(--space-3) 0 var(--space-2);
+  font-weight: 600;
+  line-height: 1.4;
+  font-family: var(--font-serif);
+}
+.msg-content.markdown :deep(h1) { font-size: 1.35em; }
+.msg-content.markdown :deep(h2) { font-size: 1.2em; }
+.msg-content.markdown :deep(h3) { font-size: 1.08em; }
+.msg-content.markdown :deep(ul),
+.msg-content.markdown :deep(ol) { margin: var(--space-2) 0; padding-left: 1.5em; }
+.msg-content.markdown :deep(li) { margin: 4px 0; }
+.msg-content.markdown :deep(code) {
+  background: var(--color-bg-muted);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+}
+.msg-content.markdown :deep(pre) {
+  background: var(--color-bg-subtle);
+  border: 1px solid var(--color-border);
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  overflow-x: auto;
+  margin: var(--space-2) 0;
+}
+.msg-content.markdown :deep(pre code) { background: transparent; padding: 0; font-size: 0.85em; line-height: 1.5; }
+.msg-content.markdown :deep(table) {
+  border-collapse: collapse;
+  margin: var(--space-2) 0;
+  width: 100%;
+  font-size: var(--fs-small);
+}
+.msg-content.markdown :deep(th),
+.msg-content.markdown :deep(td) {
+  border: 1px solid var(--color-border);
+  padding: 6px 12px;
+  text-align: left;
+}
+.msg-content.markdown :deep(th) { background: var(--color-bg-subtle); font-weight: 600; }
+.msg-content.markdown :deep(blockquote) {
+  border-left: 3px solid var(--color-primary);
+  padding-left: var(--space-3);
+  margin: var(--space-2) 0;
+  color: var(--color-text-secondary);
+}
+.msg-content.markdown :deep(a) { color: var(--color-primary); text-decoration: none; }
+.msg-content.markdown :deep(a:hover) { text-decoration: underline; }
+.msg-content.markdown :deep(strong) { font-weight: 600; color: var(--color-text); }
+
+/* —— 「回到最新」浮动按钮 —— */
+.jump-latest {
+  position: absolute;
+  left: 50%;
+  bottom: 148px;                         /* 锚定在输入盒上方，不随内容滚动 */
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--color-bg-elevated);
+  color: var(--color-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  padding: 8px 16px;
+  cursor: pointer;
+  font-size: var(--fs-caption);
+  font-weight: 500;
+  box-shadow: var(--shadow-md);
+  z-index: 6;
+  transition: all var(--duration-fast) var(--ease-soft);
+}
+.jump-latest:hover {
+  background: var(--color-primary);
+  color: var(--color-text-inverse);
+  border-color: var(--color-primary);
+  transform: translateX(-50%) translateY(-2px);
+}
+.jump-enter-active, .jump-leave-active {
+  transition: all var(--duration) var(--ease-out);
+}
+.jump-enter-from, .jump-leave-to {
+  opacity: 0;
+  transform: translateX(-50%) translateY(8px);
 }
 
-.input-tip {
+/* —— 输入区（固定底部） —— */
+.composer {
+  flex-shrink: 0;
+  padding: var(--space-3) var(--space-6) var(--space-4);
+  background: linear-gradient(to top, var(--color-bg) 70%, transparent);
+  z-index: 2;
+}
+.composer-box {
+  position: relative;
+  max-width: 860px;
+  margin: 0 auto;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  transition: border-color var(--duration-fast) var(--ease-soft),
+              box-shadow var(--duration-fast) var(--ease-soft);
+}
+.composer-box:focus-within,
+.composer-box.active {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-primary-light);
+}
+.composer-input :deep(.el-textarea__inner) {
+  border: none !important;
+  box-shadow: none !important;
+  background: transparent;
+  padding: var(--space-3) var(--space-4);
+  padding-right: 56px;             /* 给发送按钮留位 */
+  font-size: var(--fs-body);
+  line-height: var(--lh-normal);
+  resize: none;
+  box-shadow: none;
+}
+.composer-btn {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-md);
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  transition: all var(--duration-fast) var(--ease-soft);
+}
+.composer-btn.send {
+  background: var(--color-primary);
+  color: var(--color-text-inverse);
+}
+.composer-btn.send:hover { background: var(--color-primary-hover); transform: scale(1.05); }
+.composer-btn.stop {
+  background: var(--color-danger);
+  color: #fff;
+}
+.composer-btn.stop:hover { transform: scale(1.05); }
+.composer-tip {
   text-align: center;
   font-size: var(--fs-caption);
   color: var(--color-text-tertiary);
   margin-top: var(--space-2);
 }
 
+/* —— 响应式 —— */
 @media (max-width: 768px) {
-  .ai-page { grid-template-columns: 1fr; }
+  .ai-page { grid-template-columns: 1fr; grid-template-rows: 1fr; }
   .conv-side { display: none; }
+  .msg-inner { padding: var(--space-4) var(--space-3) 0; }
+  .composer { padding: var(--space-2) var(--space-3) var(--space-3); }
+  .user-bubble { max-width: 88%; }
 }
 </style>
