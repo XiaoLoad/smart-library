@@ -23,6 +23,9 @@ import java.util.*;
 @Service
 public class BorrowService {
 
+    /** 逾期罚款费率（元/天，按自然日计算） */
+    private static final java.math.BigDecimal FINE_RATE_PER_DAY = new java.math.BigDecimal("0.50");
+
     @Autowired
     private BorrowMapper borrowMapper;
     @Autowired
@@ -31,6 +34,8 @@ public class BorrowService {
     private UserMapper userMapper;
     @Autowired
     private BookMapper bookMapper;
+    @Autowired
+    private FineMapper fineMapper;
 
     /**
      * 同步借阅状态
@@ -84,13 +89,13 @@ public class BorrowService {
         if (limit == null) {
             throw new BusinessException(403, "管理员账号不可借阅");
         }
-        // 额度校验（待取书 + 借阅中）
-        int used = borrowMapper.countByUserAndStatuses(user.getId(), List.of(0, 1));
+        // 额度校验（待取书 + 借阅中 + 待确认归还，书仍在借阅人手上）
+        int used = borrowMapper.countByUserAndStatuses(user.getId(), List.of(0, 1, 5));
         if (used >= limit.getMaxBooks()) {
             throw new BusinessException(400, "借阅额度已满（" + limit.getMaxBooks() + "本），请先归还");
         }
-        // 逾期校验
-        int overdueCount = borrowMapper.countByUserAndStatuses(user.getId(), List.of(3));
+        // 逾期校验（含申请归还但已超期的记录）
+        int overdueCount = borrowMapper.countOverduePending(user.getId());
         if (overdueCount > 0) {
             throw new BusinessException(400, "您有逾期未还图书，请先归还");
         }
@@ -165,7 +170,8 @@ public class BorrowService {
                 LocalDateTime now = LocalDateTime.now();
                 borrowMapper.updatePickup(
                         record.getId(), 1, now,
-                        now.plusDays(limit.getLoanDays()), ""
+                        now.plusDays(limit.getLoanDays()), "",
+                        cu.getUserId()
                 );
                 r.put("success", true);
                 r.put("record", record);
@@ -180,22 +186,14 @@ public class BorrowService {
     }
 
     /**
-     * 归还
+     * 归还入口（按角色分流）
+     * 用户：发起归还申请 1/3 → 5（待确认归还），库存不变，需管理员确认
+     * 管理员：直接归还 1/3 → 2（柜台现场收书场景），库存 +1
      */
     @Transactional
     public Borrow returnBook(Long id, String borrowNo) {
-        Borrow record;
-        if (id != null) {
-            record = borrowMapper.selectById(id);
-        } else if (borrowNo != null) {
-            record = borrowMapper.selectByBorrowNo(borrowNo);
-        } else {
-            throw new BusinessException("请提供借阅记录ID或借阅码");
-        }
-        if (record == null) {
-            throw new BusinessException("借阅记录不存在");
-        }
-        // 非管理员只能归还本人
+        Borrow record = findRecord(id, borrowNo);
+        // 非管理员只能操作本人记录
         CurrentUser cu = CurrentUser.get();
         if (cu.getUserType() != 3 && !record.getUserId().equals(cu.getUserId())) {
             throw new BusinessException(403, "只能归还本人借阅的图书");
@@ -203,19 +201,106 @@ public class BorrowService {
         if (record.getStatus() != 1 && record.getStatus() != 3) {
             throw new BusinessException("该记录状态不可归还");
         }
-        borrowMapper.updateReturn(record.getId(), LocalDateTime.now(), 2, "已归还");
-        bookMapper.increaseAvailable(record.getBookId(), 1);
-        record.setStatus(2);
-        record.setReturnTime(LocalDateTime.now());
+        LocalDateTime now = LocalDateTime.now();
+        if (cu.getUserType() == 3) {
+            // 管理员直接归还，罚款按当前时间结算
+            return completeReturn(record, now, cu.getUserId(), "已归还（管理员确认）");
+        }
+        // 用户发起归还申请，进入待确认归还
+        borrowMapper.updateReturnRequest(record.getId(), now, "待确认归还");
+        record.setStatus(5);
+        record.setReturnRequestTime(now);
+        record.setRemark("待确认归还");
         return record;
     }
 
     /**
-     * 批量归还
+     * 归还确认（管理员）：实物核对后完成归还 5 → 2
+     * 逾期罚款以「用户申请归还时间」为基准计算
+     */
+    @Transactional
+    public Borrow confirmReturn(Long id, String borrowNo) {
+        CurrentUser cu = CurrentUser.get();
+        if (cu.getUserType() != 3) {
+            throw new BusinessException(403, "仅管理员可确认归还");
+        }
+        Borrow record = findRecord(id, borrowNo);
+        if (record.getStatus() != 5) {
+            throw new BusinessException("该记录非待确认归还状态");
+        }
+        LocalDateTime effective = record.getReturnRequestTime() != null
+                ? record.getReturnRequestTime() : LocalDateTime.now();
+        return completeReturn(record, effective, cu.getUserId(), "已归还");
+    }
+
+    /**
+     * 驳回归还申请（管理员）：未收到书 / 图书污损等
+     * 状态按是否超期回落到 1 借阅中 / 3 已逾期，逾期继续计算
+     */
+    @Transactional
+    public Borrow rejectReturn(Long id, String borrowNo, String reason) {
+        CurrentUser cu = CurrentUser.get();
+        if (cu.getUserType() != 3) {
+            throw new BusinessException(403, "仅管理员可驳回归还申请");
+        }
+        Borrow record = findRecord(id, borrowNo);
+        if (record.getStatus() != 5) {
+            throw new BusinessException("该记录非待确认归还状态");
+        }
+        LocalDateTime now = LocalDateTime.now();
+        boolean overdue = record.getDueTime() != null && record.getDueTime().isBefore(now);
+        int backStatus = overdue ? 3 : 1;
+        String remark = "归还申请被驳回" + (reason == null || reason.isBlank() ? "" : "：" + reason);
+        borrowMapper.updateReturnReject(record.getId(), backStatus, remark);
+        record.setStatus(backStatus);
+        record.setReturnRequestTime(null);
+        record.setRemark(remark);
+        return record;
+    }
+
+    /**
+     * 完成归还（库存 +1 + 按生效时间结算逾期罚款）
+     *
+     * @param effectiveTime 罚款结算基准时间：用户申请归还时间 / 管理员直接归还时间
+     */
+    private Borrow completeReturn(Borrow record, LocalDateTime effectiveTime, Long adminId, String remark) {
+        // 逾期罚款：应还日之后按自然日计费
+        if (record.getDueTime() != null && effectiveTime.isAfter(record.getDueTime())) {
+            long days = java.time.temporal.ChronoUnit.DAYS.between(
+                    record.getDueTime().toLocalDate(), effectiveTime.toLocalDate());
+            if (days > 0) {
+                Fine fine = new Fine();
+                fine.setUserId(record.getUserId());
+                fine.setUserName(record.getUserName());
+                fine.setBorrowRecordId(record.getId());
+                fine.setBorrowNo(record.getBorrowNo());
+                fine.setBookTitle(record.getBookTitle());
+                fine.setDaysOverdue((int) days);
+                fine.setAmount(FINE_RATE_PER_DAY.multiply(java.math.BigDecimal.valueOf(days)));
+                fine.setReason("逾期归还");
+                fine.setStatus(0);
+                fineMapper.insert(fine);
+                remark = remark + "，逾期罚款已生成";
+            }
+        }
+        LocalDateTime now = LocalDateTime.now();
+        borrowMapper.updateReturn(record.getId(), now, 2, remark, adminId);
+        bookMapper.increaseAvailable(record.getBookId(), 1);
+        record.setStatus(2);
+        record.setReturnTime(now);
+        record.setRemark(remark);
+        return record;
+    }
+
+    /**
+     * 批量归还（管理员专用：柜台批量核对直接归还）
      */
     @Transactional
     public PickupResultVo batchReturn(List<Long> ids) {
         CurrentUser cu = CurrentUser.get();
+        if (cu.getUserType() != 3) {
+            throw new BusinessException(403, "仅管理员可批量归还，请通过归还申请流程操作");
+        }
         List<Map<String, Object>> results = new ArrayList<>();
         int success = 0;
         for (Long id : ids) {
@@ -226,15 +311,10 @@ public class BorrowService {
                 if (record == null) {
                     throw new BusinessException("借阅记录不存在");
                 }
-                // 非管理员只能归还本人
-                if (cu.getUserType() != 3 && !record.getUserId().equals(cu.getUserId())) {
-                    throw new BusinessException(403, "只能归还本人借阅的图书");
-                }
                 if (record.getStatus() != 1 && record.getStatus() != 3) {
                     throw new BusinessException("该记录状态不可归还");
                 }
-                borrowMapper.updateReturn(record.getId(), LocalDateTime.now(), 2, "已归还");
-                bookMapper.increaseAvailable(record.getBookId(), 1);
+                completeReturn(record, LocalDateTime.now(), cu.getUserId(), "已归还");
                 r.put("success", true);
                 r.put("record", record);
                 success++;
@@ -269,8 +349,8 @@ public class BorrowService {
         if (record.getRenewCount() >= record.getRenewMaxCount()) {
             throw new BusinessException("续借次数已用完");
         }
-        // 有其他逾期不可续借
-        int overdueCount = borrowMapper.countByUserAndStatuses(record.getUserId(), List.of(3));
+        // 有其他逾期不可续借（含申请归还但已超期的记录）
+        int overdueCount = borrowMapper.countOverduePending(record.getUserId());
         if (overdueCount > 0) {
             throw new BusinessException("您有逾期未还图书，请先归还");
         }
@@ -301,13 +381,31 @@ public class BorrowService {
             vo.setCanBorrow(false);
             return vo;
         }
-        int used = borrowMapper.countByUserAndStatuses(user.getId(), List.of(0, 1));
-        int overdueCount = borrowMapper.countByUserAndStatuses(user.getId(), List.of(3));
+        int used = borrowMapper.countByUserAndStatuses(user.getId(), List.of(0, 1, 5));
+        int overdueCount = borrowMapper.countOverduePending(user.getId());
         vo.setMaxBooks(limit.getMaxBooks());
         vo.setUsed(used);
         vo.setRemaining(Math.max(0, limit.getMaxBooks() - used));
         vo.setOverdueCount(overdueCount);
         vo.setCanBorrow(used < limit.getMaxBooks() && overdueCount == 0);
         return vo;
+    }
+
+    /**
+     * 按记录 ID 或借阅码查找借阅记录
+     */
+    private Borrow findRecord(Long id, String borrowNo) {
+        Borrow record;
+        if (id != null) {
+            record = borrowMapper.selectById(id);
+        } else if (borrowNo != null && !borrowNo.isBlank()) {
+            record = borrowMapper.selectByBorrowNo(borrowNo);
+        } else {
+            throw new BusinessException("请提供借阅记录ID或借阅码");
+        }
+        if (record == null) {
+            throw new BusinessException("借阅记录不存在");
+        }
+        return record;
     }
 }

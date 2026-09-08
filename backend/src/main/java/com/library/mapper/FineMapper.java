@@ -11,5 +11,6 @@ import java.util.List;
 public interface FineMapper {
     List<Fine> selectList(@Param("userId") Long userId, @Param("isAdmin") boolean isAdmin);
     Fine selectById(@Param("id") Long id);
+    void insert(Fine fine);
     void updatePaid(@Param("id") Long id, @Param("paidTime") LocalDateTime paidTime, @Param("status") Integer status);
 }

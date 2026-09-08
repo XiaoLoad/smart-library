@@ -15,6 +15,7 @@
             <el-option label="已归还" :value="2" />
             <el-option label="已逾期" :value="3" />
             <el-option label="已取消" :value="4" />
+            <el-option label="待确认归还" :value="5" />
           </el-select>
           <el-input v-model="search" placeholder="借阅人 / 单号" :prefix-icon="Search" clearable class="search-input" @keyup.enter="load" />
           <el-button @click="load">搜索</el-button>
@@ -22,7 +23,7 @@
         <div class="right">
           <el-button v-if="userStore.isAdmin" type="primary" :icon="Check" :disabled="selectedRows.length === 0" @click="onBatchPickup">批量取书({{ selectedRows.length }})</el-button>
           <el-button v-if="userStore.isAdmin" :icon="Check" @click="onPickupByCode">手动取书</el-button>
-          <el-button type="success" :icon="Check" :disabled="returnRows.length === 0" @click="onBatchReturn">批量归还({{ returnRows.length }})</el-button>
+          <el-button v-if="userStore.isAdmin" type="success" :icon="Check" :disabled="returnRows.length === 0" @click="onBatchReturn">批量归还({{ returnRows.length }})</el-button>
         </div>
       </div>
 
@@ -62,7 +63,17 @@
             <el-button text type="primary" size="small" v-if="row.status === 0" @click="openCode(row)">借阅码</el-button>
             <el-button text type="primary" size="small" v-if="row.status === 0 && userStore.isAdmin" @click="onPickup(row)">取书确认</el-button>
             <el-button text type="primary" size="small" :disabled="row.status !== 1" @click="onRenew(row)">续借</el-button>
-            <el-button text type="primary" size="small" :disabled="row.status !== 1 && row.status !== 3" @click="onReturn(row)">归还</el-button>
+            <template v-if="row.status === 5 && userStore.isAdmin">
+              <el-button text type="success" size="small" @click="onConfirmReturn(row)">归还确认</el-button>
+              <el-button text type="danger" size="small" @click="onRejectReturn(row)">驳回</el-button>
+            </template>
+            <el-button
+              v-else-if="row.status === 1 || row.status === 3"
+              text
+              type="primary"
+              size="small"
+              @click="onReturn(row)"
+            >{{ userStore.isAdmin ? '归还' : '申请归还' }}</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -131,8 +142,8 @@ const onSizeChange = () => {
   load()
 }
 
-const statusText = (s) => ({ 0: '待取书', 1: '借阅中', 2: '已归还', 3: '已逾期', 4: '已取消' }[s] || '')
-const statusClass = (s) => ({ 0: 'pending', 1: 'active', 2: 'returned', 3: 'overdue', 4: 'cancelled' }[s] || '')
+const statusText = (s) => ({ 0: '待取书', 1: '借阅中', 2: '已归还', 3: '已逾期', 4: '已取消', 5: '待确认归还' }[s] || '')
+const statusClass = (s) => ({ 0: 'pending', 1: 'active', 2: 'returned', 3: 'overdue', 4: 'cancelled', 5: 'pending' }[s] || '')
 
 const openCode = (row) => {
   codeData.value = {
@@ -215,9 +226,60 @@ const onPickupByCode = async () => {
 
 const onReturn = async (row) => {
   try {
-    await ElMessageBox.confirm(`确认归还《${row.bookTitle}》？`, '归还确认', { type: 'info' })
+    if (userStore.isAdmin) {
+      // 管理员：柜台现场收书，直接完成归还
+      await ElMessageBox.confirm(`确认已收到「${row.userName}」归还的《${row.bookTitle}》？`, '归还确认', { type: 'info' })
+    } else {
+      // 用户：发起归还申请，待管理员核对实物
+      await ElMessageBox.confirm(
+        '将发起归还申请，请随后将图书送至服务台，由管理员核对并确认后完成归还。逾期罚款按申请时间结算。',
+        '申请归还',
+        { type: 'info', confirmButtonText: '提交申请', cancelButtonText: '取消' }
+      )
+    }
     await borrowApi.return({ id: row.id })
-    ElMessage.success('归还成功')
+    ElMessage.success(userStore.isAdmin ? '归还成功' : '归还申请已提交，请送书至服务台')
+    load()
+  } catch (e) {
+    if (e !== 'cancel') {
+      // 错误已由拦截器提示
+    }
+  }
+}
+
+// 管理员：确认收到待归还图书（5 → 2，库存 +1）
+const onConfirmReturn = async (row) => {
+  try {
+    await ElMessageBox.confirm(
+      `确认已收到「${row.userName}」归还的《${row.bookTitle}》？确认后库存将增加，逾期罚款按申请时间结算。`,
+      '归还确认',
+      { type: 'info', confirmButtonText: '确认收书', cancelButtonText: '取消' }
+    )
+    await borrowApi.confirmReturn({ id: row.id })
+    ElMessage.success('归还确认成功')
+    load()
+  } catch (e) {
+    if (e !== 'cancel') {
+      // 错误已由拦截器提示
+    }
+  }
+}
+
+// 管理员：驳回归还申请（5 → 1/3，逾期继续计算）
+const onRejectReturn = async (row) => {
+  try {
+    const { value } = await ElMessageBox.prompt(
+      `驳回归还申请后，「${row.userName}」的《${row.bookTitle}》将恢复为借阅中/已逾期状态，额度继续占用。`,
+      '驳回归还申请',
+      {
+        type: 'warning',
+        confirmButtonText: '驳回',
+        cancelButtonText: '取消',
+        inputPlaceholder: '驳回原因（选填，如 图书缺失/污损）',
+      }
+    )
+    await borrowApi.rejectReturn({ id: row.id, reason: value?.trim() || '' })
+    ElMessage.success('已驳回归还申请')
     load()
   } catch (e) {
     if (e !== 'cancel') {

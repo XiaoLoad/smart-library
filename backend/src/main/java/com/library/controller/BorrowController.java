@@ -50,7 +50,24 @@ public class BorrowController {
 
     @PostMapping("/return")
     public Result<Borrow> returnBook(@RequestBody BorrowReturnRequest req) {
-        return Result.success("归还成功", borrowService.returnBook(req.getId(), req.getBorrowNo()));
+        Borrow record = borrowService.returnBook(req.getId(), req.getBorrowNo());
+        // 用户 → 归还申请已提交（status=5）；管理员 → 直接归还完成（status=2）
+        String message = record.getStatus() == 5
+                ? "归还申请已提交，请将图书送至服务台由管理员确认"
+                : "归还成功";
+        return Result.success(message, record);
+    }
+
+    @PostMapping("/return/confirm")
+    public Result<Borrow> confirmReturn(@RequestBody BorrowReturnRequest req) {
+        Borrow record = borrowService.confirmReturn(req.getId(), req.getBorrowNo());
+        return Result.success("归还确认成功，库存已更新", record);
+    }
+
+    @PostMapping("/return/reject")
+    public Result<Borrow> rejectReturn(@Valid @RequestBody BorrowReturnRejectRequest req) {
+        Borrow record = borrowService.rejectReturn(req.getId(), req.getBorrowNo(), req.getReason());
+        return Result.success("已驳回归还申请", record);
     }
 
     @PostMapping("/batch-return")

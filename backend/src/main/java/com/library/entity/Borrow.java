@@ -21,6 +21,9 @@ public class Borrow {
     private Integer renewCount;
     private Integer renewMaxCount;
     private LocalDateTime pickupDeadline;
+    private LocalDateTime returnRequestTime;
+    private Long pickupAdminId;
+    private Long confirmAdminId;
     private Integer status;
     private String remark;
     private String qrPayload;

@@ -31,6 +31,13 @@
         SELECT * FROM fines WHERE id = #{id}
     </select>
 
+    <insert id="insert" parameterType="com.library.entity.Fine" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO fines (user_id, user_name, borrow_record_id, borrow_no, book_title,
+                           amount, days_overdue, reason, status)
+        VALUES (#{userId}, #{userName}, #{borrowRecordId}, #{borrowNo}, #{bookTitle},
+                #{amount}, #{daysOverdue}, #{reason}, #{status})
+    </insert>
+
     <update id="updatePaid">
         UPDATE fines SET paid_time = #{paidTime}, status = #{status} WHERE id = #{id}
     </update>
