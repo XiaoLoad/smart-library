@@ -39,9 +39,10 @@ public class WebMvcConfig implements WebMvcConfigurer {
 
     @Override
     public void addCorsMappings(CorsRegistry registry) {
+        // 局域网访问：其他设备通过 http://本机IP:5173 访问前端，代理失效/直连后端等场景
+        // 会带局域网 Origin，需放开来源（allowedOriginPatterns 支持通配且可配合 allowCredentials）
         registry.addMapping("/**")
-                .allowedOriginPatterns("http://localhost:5173", "http://127.0.0.1:5173",
-                        "http://localhost:5174", "http://127.0.0.1:5174")
+                .allowedOriginPatterns("*")
                 .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
                 .allowedHeaders("*")
                 .exposedHeaders("Authorization")

@@ -1,5 +1,7 @@
 server:
   port: 8080
+  # 监听所有网卡，局域网设备可通过本机 IP 访问后端（默认虽为 0.0.0.0，显式声明更稳妥）
+  address: 0.0.0.0
   servlet:
     context-path: /api
   tomcat:
