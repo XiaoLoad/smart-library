@@ -1,6 +1,7 @@
 /* ===== 路由配置 ===== */
-import { createRouter, createWebHistory } from 'vue-router'
-import { useUserStore } from '@/stores/user'
+import { createRouter, createWebHistory } from "vue-router";
+import { reactive } from "vue";
+import { useUserStore } from "@/stores/user";
 
 const Layout = () => import('@/layout/index.vue')
 
@@ -39,6 +40,22 @@ const routes = [
         name: 'BookList',
         component: () => import('@/views/book/list.vue'),
         meta: { title: '馆藏图书', icon: 'Notebook', roles: ALL_ROLES },
+      },
+      {
+        path: "detail/:id",
+        name: "BookDetail",
+        component: () => import("@/views/book/detail.vue"),
+        meta: {
+          title: "图书详情",
+          hidden: true,
+          activeMenu: "/book/list",
+          roles: ALL_ROLES,
+          // 全局面包屑的三级结构：详情页加载后动态写入书名
+          crumbs: reactive([
+            { title: "馆藏图书", path: "/book/list" },
+            { title: "图书详情" },
+          ]),
+        },
       },
       {
         path: 'category',

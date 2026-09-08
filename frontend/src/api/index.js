@@ -19,6 +19,7 @@ export const userApi = {
 // 图书
 export const bookApi = {
   list: (params) => get('/book/list', params),
+  detail: (id) => get(`/book/${id}`),
   categoryTree: () => get('/book/category/tree'),
   add: (data) => post('/book/add', data),
   update: (data) => post('/book/update', data),

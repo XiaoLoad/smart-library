@@ -22,27 +22,28 @@
             size="small"
             class="category-filter"
           />
-          <el-tree
-            :data="filteredCategories"
-            node-key="id"
-            :props="{ label: 'categoryName', children: 'children' }"
-            :expand-on-click-node="false"
-            default-expand-all
-            @node-click="onCategoryClick"
-            class="category-tree"
-          >
-            <template #default="{ node, data }">
-              <span class="tree-node">
-                <span class="tree-label">{{ data.categoryName }}</span>
-                <span class="tree-code">{{ data.categoryCode }}</span>
-              </span>
-            </template>
-          </el-tree>
-          <div
-            class="all-books"
-            :class="{ active: !selectedCategory }"
-            @click="clearCategory"
-          >
+          <div class="tree-wrap">
+            <div class="tree-scroll" ref="treeScrollRef" @scroll="updateTreeScroll">
+              <el-tree
+                :data="filteredCategories"
+                node-key="id"
+                :props="{ label: 'categoryName', children: 'children' }"
+                :expand-on-click-node="false"
+                default-expand-all
+                @node-click="onCategoryClick"
+                class="category-tree"
+              >
+                <template #default="{ node, data }">
+                  <span class="tree-node">
+                    <span class="tree-label">{{ data.categoryName }}</span>
+                    <span class="tree-code">{{ data.categoryCode }}</span>
+                  </span>
+                </template>
+              </el-tree>
+            </div>
+            <div v-if="treeScrollable" class="tree-fade"></div>
+          </div>
+          <div class="all-books" :class="{ active: !selectedCategory }" @click="clearCategory">
             <el-icon><Notebook /></el-icon>
             <span>全部图书</span>
             <span class="count">{{ total }}</span>
@@ -80,8 +81,12 @@
             </div>
           </div>
 
-          <el-table :data="books" style="width: 100%">
-            <el-table-column label="书名" min-width="220">
+          <el-table
+            :data="books"
+            style="width: 100%"
+            max-height="calc(100vh - 290px)"
+          >
+            <el-table-column label="书名" min-width="250">
               <template #default="{ row }">
                 <div class="book-cell">
                   <div class="book-cover">
@@ -95,20 +100,53 @@
                     }}</span>
                   </div>
                   <div class="book-info">
-                    <div class="book-title">{{ row.title }}</div>
-                    <div class="book-isbn">{{ row.isbn }}</div>
+                    <el-tooltip
+                      :content="row.title"
+                      placement="top"
+                      effect="dark"
+                      :show-after="300"
+                      :disabled="!row._titleTip"
+                    >
+                      <div
+                        class="book-title"
+                        @mouseenter="checkEllipsis($event, row, '_titleTip')"
+                      >{{ row.title }}</div>
+                    </el-tooltip>
+                    <el-tooltip
+                      :content="row.isbn"
+                      placement="top"
+                      effect="dark"
+                      :show-after="300"
+                      :disabled="!row._isbnTip"
+                    >
+                      <div
+                        class="book-isbn"
+                        @mouseenter="checkEllipsis($event, row, '_isbnTip')"
+                      >{{ row.isbn }}</div>
+                    </el-tooltip>
                   </div>
                 </div>
               </template>
             </el-table-column>
-            <el-table-column prop="author" label="作者" width="160" />
-            <el-table-column prop="publisher" label="出版社" width="180" />
-            <el-table-column label="馆藏位置" width="120">
+            <el-table-column prop="author" label="作者" width="130" show-overflow-tooltip />
+            <el-table-column prop="publisher" label="出版社" width="150" show-overflow-tooltip />
+            <el-table-column label="馆藏位置" width="115">
               <template #default="{ row }">
-                <span class="mono-text">{{ row.location }}</span>
+                <el-tooltip
+                  :content="row.location"
+                  placement="top"
+                  effect="dark"
+                  :show-after="300"
+                  :disabled="!row._locTip"
+                >
+                  <span
+                    class="mono-text"
+                    @mouseenter="checkEllipsis($event, row, '_locTip')"
+                  >{{ row.location }}</span>
+                </el-tooltip>
               </template>
             </el-table-column>
-            <el-table-column label="库存" width="160">
+            <el-table-column label="库存" width="150">
               <template #default="{ row }">
                 <div class="stock-cell">
                   <div class="stock-bar">
@@ -124,7 +162,7 @@
                 </div>
               </template>
             </el-table-column>
-            <el-table-column label="操作" width="160" fixed="right">
+            <el-table-column label="操作" width="160" fixed="right" class-name="ops-col">
               <template #default="{ row }">
                 <el-button
                   text
@@ -190,85 +228,13 @@
       @success="loadBooks"
     />
 
-    <!-- 图书详情弹窗 -->
-    <el-dialog
-      v-model="detailVisible"
-      title="图书详情"
-      width="600px"
-      align-center
-    >
-      <div v-if="detailData" class="book-detail">
-        <div class="detail-header">
-          <div class="detail-cover">
-            <img
-              v-if="detailData.coverUrl"
-              :src="detailData.coverUrl"
-              :alt="detailData.title"
-            />
-            <span v-else class="cover-char">{{
-              detailData.title?.charAt(0)
-            }}</span>
-          </div>
-          <div class="detail-title-area">
-            <h2 class="detail-title">{{ detailData.title }}</h2>
-            <p class="detail-author">{{ detailData.author }}</p>
-            <span class="status-tag" :class="stockClass(detailData)">
-              {{ detailData.availableCount > 0 ? "可借" : "已借完" }}
-            </span>
-          </div>
-        </div>
-        <el-descriptions :column="2" border size="small" class="detail-desc">
-          <el-descriptions-item label="ISBN">{{
-            detailData.isbn || "-"
-          }}</el-descriptions-item>
-          <el-descriptions-item label="出版社">{{
-            detailData.publisher || "-"
-          }}</el-descriptions-item>
-          <el-descriptions-item label="分类">{{
-            findCategoryName(detailData.categoryId) || "-"
-          }}</el-descriptions-item>
-          <el-descriptions-item label="馆藏位置">{{
-            detailData.location || "-"
-          }}</el-descriptions-item>
-          <el-descriptions-item label="价格">{{
-            detailData.price != null ? "¥" + detailData.price : "-"
-          }}</el-descriptions-item>
-          <el-descriptions-item label="出版日期">{{
-            detailData.publishDate || "-"
-          }}</el-descriptions-item>
-          <el-descriptions-item label="馆藏总量"
-            >{{ detailData.totalCount ?? "-" }} 册</el-descriptions-item
-          >
-          <el-descriptions-item label="可借数量">
-            <span :class="stockClass(detailData)"
-              >{{ detailData.availableCount ?? "-" }} 册</span
-            >
-          </el-descriptions-item>
-          <el-descriptions-item label="入库时间" :span="2">{{
-            formatTime(detailData.createTime)
-          }}</el-descriptions-item>
-          <el-descriptions-item label="图书简介" :span="2">
-            <span class="detail-description">{{
-              detailData.description || "暂无简介"
-            }}</span>
-          </el-descriptions-item>
-        </el-descriptions>
-      </div>
-      <template #footer>
-        <el-button @click="detailVisible = false">关闭</el-button>
-        <el-button
-          v-if="!userStore.isAdmin && detailData?.availableCount > 0"
-          type="primary"
-          @click="detailBorrow"
-          >借阅此书</el-button
-        >
-      </template>
-    </el-dialog>
+    <!-- 图书详情改为独立页面：/book/detail/:id -->
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from "vue";
+import { ref, computed, onMounted, watch, nextTick } from "vue";
+import { useRouter } from "vue-router";
 import { Search, Plus, Collection, Notebook } from "@element-plus/icons-vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { bookApi, borrowApi } from "@/api";
@@ -308,9 +274,18 @@ const openBookDialog = (mode, row = null) => {
   bookDialogVisible.value = true;
 };
 
-// 图书详情
-const detailVisible = ref(false);
-const detailData = ref(null);
+// 路由跳转（详情页）
+const router = useRouter();
+
+// 分类树滚动状态：超出可视高度时显示底部渐隐提示
+const treeScrollRef = ref(null);
+const treeScrollable = ref(false);
+const updateTreeScroll = () => {
+  const el = treeScrollRef.value;
+  if (!el) return;
+  treeScrollable.value = el.scrollHeight - el.scrollTop - el.clientHeight > 4;
+};
+watch(categories, () => nextTick(updateTreeScroll));
 
 // el-tree-select 需要带 children 字段的数据
 const categoryTreeData = computed(() => categories.value);
@@ -396,37 +371,9 @@ const onBorrow = async (row) => {
   }
 };
 
-// 图书详情
+// 图书详情：跳转独立详情页
 const openDetail = (row) => {
-  detailData.value = row;
-  detailVisible.value = true;
-};
-
-const detailBorrow = () => {
-  if (!detailData.value) return;
-  detailVisible.value = false;
-  onBorrow(detailData.value);
-};
-
-// 在分类树中查找分类名称
-const findCategoryName = (categoryId) => {
-  if (!categoryId) return "";
-  const find = (nodes) => {
-    for (const n of nodes) {
-      if (n.id === categoryId) return n.categoryName;
-      if (n.children) {
-        const r = find(n.children);
-        if (r) return r;
-      }
-    }
-    return "";
-  };
-  return find(categories.value);
-};
-
-const formatTime = (t) => {
-  if (!t) return "-";
-  return String(t).replace("T", " ").slice(0, 19);
+  router.push(`/book/detail/${row.id}`);
 };
 
 const onCategoryClick = (node) => {
@@ -453,8 +400,15 @@ const stockClass = (row) => {
   return "";
 };
 
+// 悬停时检测文本是否被截断（溢出），仅截断时启用 tooltip
+const checkEllipsis = (e, row, flagKey) => {
+  const el = e.currentTarget;
+  row[flagKey] = el.scrollWidth > el.clientWidth + 1;
+};
+
 onMounted(async () => {
   await loadCategories();
+  nextTick(updateTreeScroll);
   await Promise.all([loadBooks(), loadQuota()]);
 });
 </script>
@@ -494,10 +448,49 @@ onMounted(async () => {
   margin-bottom: var(--space-3);
 }
 
-.category-tree {
+/* 树滚动容器：限高 + 细滚动条 + 底部渐隐，防止长分类树撑开页面 */
+.tree-wrap {
+  position: relative;
   margin-bottom: var(--space-3);
-  border-bottom: 1px solid var(--color-divider);
   padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--color-divider);
+}
+
+.tree-scroll {
+  max-height: 46vh;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border-strong) transparent;
+  padding-right: 4px;
+  margin-right: -4px;
+}
+
+.tree-scroll::-webkit-scrollbar {
+  width: 4px;
+}
+
+.tree-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.tree-scroll::-webkit-scrollbar-thumb {
+  background: var(--color-border-strong);
+  border-radius: 999px;
+}
+
+.tree-fade {
+  position: absolute;
+  left: -4px;
+  right: 0;
+  bottom: calc(var(--space-3) + 1px);
+  height: 40px;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    var(--color-bg-elevated, #fff)
+  );
+  pointer-events: none;
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
 }
 
 .tree-node {
@@ -548,7 +541,32 @@ onMounted(async () => {
   font-size: var(--fs-caption);
 }
 
-/* 图书表格 */
+/* 图书表格（放大图书显示） */
+:deep(.el-table th.el-table__cell),
+:deep(.el-table td.el-table__cell) {
+  padding: 14px 0;
+}
+
+/* 表格内部滚动：细化滚动条 */
+:deep(.el-table .el-scrollbar__bar.is-vertical) {
+  width: 6px;
+  right: 2px;
+}
+
+:deep(.el-table .el-scrollbar__bar.is-horizontal) {
+  height: 6px;
+  bottom: 2px;
+}
+
+:deep(.el-table .el-scrollbar__bar .el-scrollbar__thumb) {
+  border-radius: 999px;
+}
+
+/* 操作列按钮禁止换行挤压 */
+:deep(.el-table .ops-col .cell) {
+  white-space: nowrap;
+}
+
 .book-cell {
   display: flex;
   align-items: center;
@@ -556,9 +574,9 @@ onMounted(async () => {
 }
 
 .book-cover {
-  width: 36px;
-  height: 48px;
-  border-radius: var(--radius-sm);
+  width: 52px;
+  height: 68px;
+  border-radius: var(--radius-md);
   background: linear-gradient(
     135deg,
     var(--color-primary-light),
@@ -569,18 +587,18 @@ onMounted(async () => {
   justify-content: center;
   flex-shrink: 0;
   overflow: hidden;
+  box-shadow: 0 6px 16px -10px rgba(31, 27, 22, 0.4);
 }
 
 .cover-char {
   font-family: var(--font-serif);
-  font-size: var(--fs-h3);
+  font-size: 24px;
   font-weight: 600;
   color: var(--color-primary);
 }
 
 /* 有真实封面时铺满容器 */
-.book-cover img,
-.detail-cover img {
+.book-cover img {
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -593,10 +611,11 @@ onMounted(async () => {
   flex: 1;
 }
 .book-info .book-title {
-  font-size: var(--fs-body);
+  font-size: 15px;
   font-weight: 500;
+  line-height: 1.4;
   color: var(--color-text);
-  margin-bottom: 2px;
+  margin-bottom: 3px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -639,69 +658,5 @@ onMounted(async () => {
   font-size: var(--fs-small);
   color: var(--color-text-secondary);
   margin-right: var(--space-2);
-}
-
-/* 图书详情弹窗 */
-.book-detail {
-  padding: 0 var(--space-2);
-}
-
-.detail-header {
-  display: flex;
-  gap: var(--space-4);
-  align-items: center;
-  margin-bottom: var(--space-5);
-}
-
-.detail-cover {
-  width: 56px;
-  height: 72px;
-  border-radius: var(--radius-sm);
-  background: linear-gradient(
-    135deg,
-    var(--color-primary-light),
-    var(--color-secondary-light)
-  );
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  overflow: hidden;
-}
-
-.detail-cover .cover-char {
-  font-family: var(--font-serif);
-  font-size: 28px;
-  font-weight: 600;
-  color: var(--color-primary);
-}
-
-.detail-title-area {
-  min-width: 0;
-}
-
-.detail-title {
-  font-family: var(--font-serif);
-  font-size: var(--fs-h3);
-  font-weight: 600;
-  color: var(--color-text);
-  margin: 0 0 4px;
-}
-
-.detail-author {
-  font-size: var(--fs-small);
-  color: var(--color-text-secondary);
-  margin: 0 0 6px;
-}
-
-.detail-desc {
-  margin-bottom: var(--space-2);
-}
-
-.detail-description {
-  display: block;
-  line-height: 1.6;
-  color: var(--color-text-secondary);
-  font-size: var(--fs-small);
 }
 </style>
