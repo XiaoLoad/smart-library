@@ -13,6 +13,18 @@
           <div class="card-title">
             <el-icon><Collection /></el-icon>
             <span>分类导航</span>
+            <span class="tree-tools">
+              <el-tooltip content="展开全部分类" placement="top" effect="dark" :show-after="300">
+                <button type="button" class="tree-tool" @click="setAllTreeExpanded(true)">
+                  <el-icon><Expand /></el-icon>
+                </button>
+              </el-tooltip>
+              <el-tooltip content="收起全部分类" placement="top" effect="dark" :show-after="300">
+                <button type="button" class="tree-tool" @click="setAllTreeExpanded(false)">
+                  <el-icon><Fold /></el-icon>
+                </button>
+              </el-tooltip>
+            </span>
           </div>
           <el-input
             v-model="categoryFilter"
@@ -25,6 +37,7 @@
           <div class="tree-wrap">
             <div class="tree-scroll" ref="treeScrollRef" @scroll="updateTreeScroll">
               <el-tree
+                ref="cateTreeRef"
                 :data="filteredCategories"
                 node-key="id"
                 :props="{ label: 'categoryName', children: 'children' }"
@@ -224,7 +237,7 @@
       v-model="bookDialogVisible"
       :mode="bookDialogMode"
       :book="editingBook"
-      :categories="categories"
+      :categories="enabledCategories"
       @success="loadBooks"
     />
 
@@ -235,7 +248,7 @@
 <script setup>
 import { ref, computed, onMounted, watch, nextTick } from "vue";
 import { useRouter } from "vue-router";
-import { Search, Plus, Collection, Notebook } from "@element-plus/icons-vue";
+import { Search, Plus, Collection, Notebook, Expand, Fold } from "@element-plus/icons-vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { bookApi, borrowApi } from "@/api";
 import { useUserStore } from "@/stores/user";
@@ -289,6 +302,28 @@ watch(categories, () => nextTick(updateTreeScroll));
 
 // el-tree-select 需要带 children 字段的数据
 const categoryTreeData = computed(() => categories.value);
+
+// 分类树一键展开 / 收起
+const cateTreeRef = ref(null);
+const setAllTreeExpanded = (expanded) => {
+  const tree = cateTreeRef.value;
+  if (!tree?.store?.nodesMap) return;
+  Object.values(tree.store.nodesMap).forEach((node) => {
+    node.expanded = expanded;
+  });
+};
+
+// 图书表单可选分类：自身及祖先链全部启用（禁用分类不可挂载新图书）
+const enabledCategories = computed(() => {
+  const walk = (nodes) =>
+    nodes
+      .filter((n) => n.status === 1)
+      .map((n) => {
+        const children = n.children ? walk(n.children) : [];
+        return children.length ? { ...n, children } : { ...n, children: undefined };
+      });
+  return walk(categories.value);
+});
 
 const filteredCategories = computed(() => {
   if (!categoryFilter.value) return categories.value;
@@ -442,6 +477,32 @@ onMounted(async () => {
   font-size: var(--fs-h3);
   font-weight: 600;
   margin-bottom: var(--space-4);
+}
+
+/* 分类树展开/收起工具 */
+.tree-tools {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 4px;
+}
+.tree-tool {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+.tree-tool:hover {
+  color: var(--color-primary);
+  border-color: var(--color-divider);
+  background: var(--color-bg-soft, rgba(0, 0, 0, 0.02));
 }
 
 .category-filter {

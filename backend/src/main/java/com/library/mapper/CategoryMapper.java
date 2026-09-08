@@ -18,4 +18,6 @@ public interface CategoryMapper {
     void insert(Category category);
 
     void update(Category category);
+
+    void updateStatusBatch(@Param("ids") List<Long> ids, @Param("status") Integer status);
 }
