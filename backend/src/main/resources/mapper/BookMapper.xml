@@ -52,6 +52,22 @@
                 #{coverUrl}, #{description}, #{totalCount}, #{availableCount}, #{status}, NOW())
     </insert>
 
+    <update id="update" parameterType="com.library.entity.Book">
+        UPDATE books
+        SET title = #{title},
+            author = #{author},
+            publisher = #{publisher},
+            isbn = #{isbn},
+            category_id = #{categoryId},
+            location = #{location},
+            price = #{price},
+            cover_url = #{coverUrl},
+            description = #{description},
+            total_count = #{totalCount},
+            available_count = #{availableCount}
+        WHERE id = #{id}
+    </update>
+
     <update id="decreaseAvailable">
         UPDATE books SET available_count = available_count - #{count} WHERE id = #{id}
     </update>

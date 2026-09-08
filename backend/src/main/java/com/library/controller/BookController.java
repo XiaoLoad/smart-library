@@ -3,6 +3,7 @@ package com.library.controller;
 import com.library.common.PageResult;
 import com.library.common.Result;
 import com.library.dto.BookAddRequest;
+import com.library.dto.BookUpdateRequest;
 import com.library.entity.Book;
 import com.library.mapper.BookMapper;
 import com.library.security.CurrentUser;
@@ -58,8 +59,30 @@ public class BookController {
         book.setCategoryId(req.getCategoryId());
         book.setLocation(req.getLocation());
         book.setPrice(req.getPrice());
+        book.setCoverUrl(req.getCoverUrl());
         book.setDescription(req.getDescription());
         book.setTotalCount(req.getTotalCount());
         return Result.success("新增成功", bookService.add(book));
+    }
+
+    @PostMapping("/book/update")
+    public Result<Book> update(@Valid @RequestBody BookUpdateRequest req) {
+        CurrentUser cu = CurrentUser.get();
+        if (cu.getUserType() != 3) {
+            return Result.error(403, "仅管理员可编辑图书");
+        }
+        Book book = new Book();
+        book.setId(req.getId());
+        book.setTitle(req.getTitle());
+        book.setAuthor(req.getAuthor());
+        book.setIsbn(req.getIsbn());
+        book.setPublisher(req.getPublisher());
+        book.setCategoryId(req.getCategoryId());
+        book.setLocation(req.getLocation());
+        book.setPrice(req.getPrice());
+        book.setCoverUrl(req.getCoverUrl());
+        book.setDescription(req.getDescription());
+        book.setTotalCount(req.getTotalCount());
+        return Result.success("修改成功", bookService.update(book));
     }
 }
