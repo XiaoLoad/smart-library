@@ -449,11 +449,36 @@ const send = async () => {
         const msg = ensureAssistantMsg()
         try {
           const info = JSON.parse(data)
-          msg.toolEvents.push({
-            name: info.name || '',
-            phase: info.phase || 'start',
-            detail: info.detail || '',
-          })
+          const events = msg.toolEvents
+          if (info.phase === 'start') {
+            // start：新增一张「调用中」卡片
+            events.push({
+              name: info.name || '',
+              phase: 'start',
+              detail: info.detail || '',
+            })
+          } else {
+            // end / error：更新对应的 start 卡片（同名且仍在 start 状态的最后一条），
+            // 而非新增卡片——否则 start 卡片会永远停在加载态
+            let target = null
+            for (let i = events.length - 1; i >= 0; i--) {
+              if (events[i].name === (info.name || '') && events[i].phase === 'start') {
+                target = events[i]
+                break
+              }
+            }
+            const endDetail = info.detail || ''
+            if (target) {
+              target.phase = info.phase // end → 绿色对勾，error → 红色叉，停止旋转
+              if (endDetail) {
+                target.detail = target.detail
+                  ? `${target.detail} · ${endDetail}`
+                  : endDetail
+              }
+            } else {
+              events.push({ name: info.name || '', phase: info.phase, detail: endDetail })
+            }
+          }
         } catch {
           // 忽略解析失败的 tool 事件
         }
@@ -496,6 +521,12 @@ const send = async () => {
     }
   } finally {
     abortController = null
+    // 流结束（完成/停止/出错）后，仍在加载态的工具卡片停止旋转
+    if (assistantMsg && assistantMsg.toolEvents) {
+      assistantMsg.toolEvents.forEach((t) => {
+        if (t.phase === 'start') t.phase = 'end'
+      })
+    }
   }
 }
 
