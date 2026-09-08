@@ -47,4 +47,11 @@
         </foreach>
     </update>
 
+    <delete id="deleteByIds">
+        DELETE FROM categories WHERE id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </delete>
+
 </mapper>

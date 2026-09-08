@@ -2,6 +2,7 @@ package com.library.controller;
 
 import com.library.common.Result;
 import com.library.dto.CategoryAddRequest;
+import com.library.dto.CategoryDeleteRequest;
 import com.library.dto.CategoryStatusRequest;
 import com.library.dto.CategoryUpdateRequest;
 import com.library.entity.Category;
@@ -57,6 +58,19 @@ public class CategoryController {
         String message = req.getStatus() == 1
                 ? "已启用"
                 : (affected > 1 ? "已禁用（含 " + (affected - 1) + " 个子分类）" : "已禁用");
+        return Result.success(message, null);
+    }
+
+    @PostMapping("/category/delete")
+    public Result<Void> delete(@Valid @RequestBody CategoryDeleteRequest req) {
+        CurrentUser cu = CurrentUser.get();
+        if (cu.getUserType() != 3) {
+            return Result.error(403, "仅管理员可删除分类");
+        }
+        int affected = categoryService.delete(req.getId());
+        String message = affected > 1
+                ? "已删除（含 " + (affected - 1) + " 个子分类）"
+                : "已删除";
         return Result.success(message, null);
     }
 }

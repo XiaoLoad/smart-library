@@ -95,13 +95,10 @@
             <el-input v-model="form.isbn" placeholder="请输入 ISBN" />
           </el-form-item>
           <el-form-item label="分类" prop="categoryId" class="span-2">
-            <el-tree-select
+            <CategoryTreeSelect
               v-model="form.categoryId"
               :data="categories"
-              :props="{ label: 'categoryName', value: 'id', children: 'children' }"
-              check-strictly
-              placeholder="请选择分类"
-              style="width: 100%"
+              placeholder="输入分类名称可模糊搜索"
             />
           </el-form-item>
         </div>
@@ -161,6 +158,7 @@ import { ref, reactive, computed, watch, nextTick } from 'vue'
 import { Plus, Check, UploadFilled, Loading } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { bookApi, uploadApi } from '@/api'
+import CategoryTreeSelect from '@/components/CategoryTreeSelect.vue'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },

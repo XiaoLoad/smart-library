@@ -65,7 +65,7 @@
       </aside>
 
       <!-- 图书列表 -->
-      <section class="book-main fade-in" v-if="books.length">
+      <section class="book-main fade-in">
         <div class="data-table">
           <div class="table-toolbar">
             <div class="left">
@@ -204,6 +204,25 @@
                 >
               </template>
             </el-table-column>
+            <template #empty>
+              <div class="book-empty">
+                <span class="empty-mark">∅</span>
+                <p class="empty-title">
+                  {{ selectedCategory ? '该分类下暂无图书' : '未找到匹配的图书' }}
+                </p>
+                <span class="empty-tip">
+                  {{ selectedCategory ? '换个分类看看，或清除筛选浏览全部馆藏' : '试试更换关键词，或清除搜索条件' }}
+                </span>
+                <el-button
+                  v-if="selectedCategory || search"
+                  type="primary"
+                  plain
+                  size="small"
+                  class="empty-clear"
+                  @click="clearAllFilter"
+                >清除筛选条件</el-button>
+              </div>
+            </template>
           </el-table>
 
           <div class="table-pagination">
@@ -419,6 +438,14 @@ const onCategoryClick = (node) => {
 
 const clearCategory = () => {
   selectedCategory.value = null;
+  page.value = 1;
+  loadBooks();
+};
+
+// 空态：一键清除分类 + 关键词筛选
+const clearAllFilter = () => {
+  selectedCategory.value = null;
+  search.value = "";
   page.value = 1;
   loadBooks();
 };
@@ -719,5 +746,32 @@ onMounted(async () => {
   font-size: var(--fs-small);
   color: var(--color-text-secondary);
   margin-right: var(--space-2);
+}
+
+/* 图书空态 */
+.book-empty {
+  padding: 56px 0 60px;
+  text-align: center;
+}
+.book-empty .empty-mark {
+  display: block;
+  font-size: 38px;
+  color: var(--color-text-tertiary);
+  margin-bottom: 10px;
+}
+.book-empty .empty-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text);
+  margin: 0 0 6px;
+}
+.book-empty .empty-tip {
+  display: block;
+  font-size: var(--fs-small);
+  color: var(--color-text-tertiary);
+  margin-bottom: 14px;
+}
+.book-empty .empty-clear {
+  margin: 0 auto;
 }
 </style>

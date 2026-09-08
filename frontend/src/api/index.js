@@ -26,6 +26,7 @@ export const bookApi = {
   addCategory: (data) => post('/category/add', data),
   updateCategory: (data) => post('/category/update', data),
   updateCategoryStatus: (data) => post('/category/status', data),
+  deleteCategory: (data) => post('/category/delete', data),
 }
 
 // 文件上传（multipart）
