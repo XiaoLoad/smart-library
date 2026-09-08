@@ -16,6 +16,9 @@
         <result property="renewCount" column="renew_count"/>
         <result property="renewMaxCount" column="renew_max_count"/>
         <result property="pickupDeadline" column="pickup_deadline"/>
+        <result property="returnRequestTime" column="return_request_time"/>
+        <result property="pickupAdminId" column="pickup_admin_id"/>
+        <result property="confirmAdminId" column="confirm_admin_id"/>
         <result property="status" column="status"/>
         <result property="remark" column="remark"/>
         <result property="qrPayload" column="qr_payload"/>
@@ -53,6 +56,13 @@
         <foreach collection="statuses" item="s" open="(" separator="," close=")">#{s}</foreach>
     </select>
 
+    <!-- 有效的逾期未还：已逾期 或 申请归还但实际已超期（罚款尚未结算） -->
+    <select id="countOverduePending" resultType="int">
+        SELECT COUNT(*) FROM borrows
+        WHERE user_id = #{userId}
+        AND (status = 3 OR (status = 5 AND due_time IS NOT NULL AND due_time &lt; NOW()))
+    </select>
+
     <select id="selectMaxSeqOfDay" resultType="java.lang.Integer">
         SELECT MAX(CAST(SUBSTRING(borrow_no, 11, 4) AS UNSIGNED))
         FROM borrows
@@ -62,10 +72,12 @@
     <insert id="insert" parameterType="com.library.entity.Borrow" useGeneratedKeys="true" keyProperty="id">
         INSERT INTO borrows (borrow_no, user_id, user_name, book_id, book_title, apply_time,
                             borrow_time, due_time, return_time, renew_count, renew_max_count,
-                            pickup_deadline, status, remark, qr_payload)
+                            pickup_deadline, return_request_time, pickup_admin_id, confirm_admin_id,
+                            status, remark, qr_payload)
         VALUES (#{borrowNo}, #{userId}, #{userName}, #{bookId}, #{bookTitle}, #{applyTime},
                 #{borrowTime}, #{dueTime}, #{returnTime}, #{renewCount}, #{renewMaxCount},
-                #{pickupDeadline}, #{status}, #{remark}, #{qrPayload})
+                #{pickupDeadline}, #{returnRequestTime}, #{pickupAdminId}, #{confirmAdminId},
+                #{status}, #{remark}, #{qrPayload})
     </insert>
 
     <update id="updateStatus">
@@ -74,13 +86,28 @@
 
     <update id="updatePickup">
         UPDATE borrows
-        SET status = #{status}, borrow_time = #{borrowTime}, due_time = #{dueTime}, remark = #{remark}
+        SET status = #{status}, borrow_time = #{borrowTime}, due_time = #{dueTime},
+            pickup_admin_id = #{pickupAdminId}, remark = #{remark}
         WHERE id = #{id}
     </update>
 
     <update id="updateReturn">
         UPDATE borrows
-        SET status = #{status}, return_time = #{returnTime}, remark = #{remark}
+        SET status = #{status}, return_time = #{returnTime}, confirm_admin_id = #{confirmAdminId}, remark = #{remark}
+        WHERE id = #{id}
+    </update>
+
+    <!-- 用户发起归还申请：进入待确认归还状态 -->
+    <update id="updateReturnRequest">
+        UPDATE borrows
+        SET status = 5, return_request_time = #{returnRequestTime}, remark = #{remark}
+        WHERE id = #{id}
+    </update>
+
+    <!-- 驳回归还申请：回到借阅中/已逾期，清除申请时间 -->
+    <update id="updateReturnReject">
+        UPDATE borrows
+        SET status = #{status}, return_request_time = NULL, remark = #{remark}
         WHERE id = #{id}
     </update>
 

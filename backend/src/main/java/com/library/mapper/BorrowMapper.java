@@ -30,12 +30,21 @@ public interface BorrowMapper {
     void updateStatus(@Param("id") Long id, @Param("status") Integer status, @Param("remark") String remark);
 
     void updateReturn(@Param("id") Long id, @Param("returnTime") LocalDateTime returnTime,
-                      @Param("status") Integer status, @Param("remark") String remark);
+                      @Param("status") Integer status, @Param("remark") String remark,
+                      @Param("confirmAdminId") Long confirmAdminId);
+
+    void updateReturnRequest(@Param("id") Long id, @Param("returnRequestTime") LocalDateTime returnRequestTime,
+                             @Param("remark") String remark);
+
+    void updateReturnReject(@Param("id") Long id, @Param("status") Integer status, @Param("remark") String remark);
+
+    int countOverduePending(@Param("userId") Long userId);
 
     void updateRenew(@Param("id") Long id, @Param("dueTime") LocalDateTime dueTime,
                      @Param("renewCount") Integer renewCount);
 
     void updatePickup(@Param("id") Long id, @Param("status") Integer status,
                       @Param("borrowTime") LocalDateTime borrowTime,
-                      @Param("dueTime") LocalDateTime dueTime, @Param("remark") String remark);
+                      @Param("dueTime") LocalDateTime dueTime, @Param("remark") String remark,
+                      @Param("pickupAdminId") Long pickupAdminId);
 }
