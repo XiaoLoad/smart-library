@@ -16,4 +16,13 @@
         ORDER BY create_time ASC
     </select>
 
+    <insert id="insert" parameterType="com.library.entity.AiMessage" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO ai_messages (conversation_id, role, content, create_time)
+        VALUES (#{conversationId}, #{role}, #{content}, #{createTime})
+    </insert>
+
+    <delete id="deleteByConversationId">
+        DELETE FROM ai_messages WHERE conversation_id = #{conversationId}
+    </delete>
+
 </mapper>

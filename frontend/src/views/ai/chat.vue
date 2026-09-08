@@ -18,6 +18,9 @@
             <div class="conv-title">{{ c.title }}</div>
             <div class="conv-time">{{ formatTime(c.createTime) }}</div>
           </div>
+          <el-icon class="conv-del" title="删除会话" @click.stop="deleteConv(c.id)">
+            <Delete />
+          </el-icon>
         </div>
       </div>
     </aside>
@@ -100,8 +103,9 @@
 </template>
 
 <script setup>
-import { ref, nextTick, onMounted } from 'vue'
-import { Plus, ChatDotRound, MagicStick, Promotion } from '@element-plus/icons-vue'
+import { ref, reactive, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import { Plus, ChatDotRound, MagicStick, Promotion, Delete } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { aiApi } from '@/api'
 
 const conversations = ref([])
@@ -110,6 +114,8 @@ const messages = ref([])
 const input = ref('')
 const thinking = ref(false)
 const msgListRef = ref(null)
+// 当前流式请求的 AbortController（用于取消）
+let abortController = null
 
 const quickPrompts = [
   '我当前借了哪些书？',
@@ -118,41 +124,67 @@ const quickPrompts = [
   '我有未缴罚款吗？',
 ]
 
-// 模拟 AI 回复
-const aiReplies = [
-  '您好，我已为您查询。当前馆藏图书 12,834 册，可借 8,247 册，借阅中 389 本，逾期 23 本。',
-  '根据您的借阅记录，您当前借阅中图书 2 本：\n1. 《红楼梦》— 应还日期 2026-10-01\n2. 《三体》— 应还日期 2026-09-19（已逾期 18 天）\n\n建议您尽快归还《三体》以避免产生更多罚款。',
-  '本月借阅最多的图书是《百年孤独》，共借出 86 次。其次是《红楼梦》（72 次）和《三体》（65 次）。',
-  '您当前有 1 笔未缴罚款，金额 ¥15.00，关联借阅《百年孤独》（超期 30 天）。请尽快到馆缴费或在线支付。',
-  '哲学类图书位于 C 区 3 排，馆藏 5 种推荐：《存在与时间》《理想国》《中国哲学简史》《查拉图斯特拉如是说》《纯粹理性批判》。',
-]
-
 const loadConversations = async () => {
-  const data = await aiApi.conversationList()
-  conversations.value = data.list
-  if (data.list.length) {
-    await switchConv(data.list[0].id)
+  try {
+    const data = await aiApi.conversationList()
+    conversations.value = data.list || []
+    if (conversations.value.length) {
+      await switchConv(conversations.value[0].id)
+    }
+  } catch (e) {
+    // 加载失败静默
   }
 }
 
 const switchConv = async (id) => {
+  if (thinking.value) return // 流式输出中不切换
   currentConvId.value = id
-  const data = await aiApi.messageList(id)
-  messages.value = data.list
+  try {
+    const data = await aiApi.messageList(id)
+    messages.value = data.list || []
+  } catch (e) {
+    messages.value = []
+  }
   await scrollToBottom()
 }
 
-const newConv = () => {
-  const newId = Date.now()
-  conversations.value.unshift({
-    id: newId,
-    title: '新的对话',
-    model: 'qwen-plus',
-    status: 1,
-    createTime: new Date().toISOString().replace('T', ' ').substring(0, 19),
-  })
-  currentConvId.value = newId
-  messages.value = []
+const newConv = async () => {
+  if (thinking.value) return
+  try {
+    const conv = await aiApi.createConversation()
+    conversations.value.unshift(conv)
+    currentConvId.value = conv.id
+    messages.value = []
+  } catch (e) {
+    ElMessage.error('创建会话失败')
+  }
+}
+
+const deleteConv = async (id) => {
+  try {
+    await ElMessageBox.confirm('确认删除该会话？删除后不可恢复。', '提示', {
+      type: 'warning',
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+    })
+  } catch {
+    return
+  }
+  try {
+    await aiApi.deleteConversation(id)
+    const idx = conversations.value.findIndex((c) => c.id === id)
+    if (idx >= 0) conversations.value.splice(idx, 1)
+    if (currentConvId.value === id) {
+      currentConvId.value = null
+      messages.value = []
+      if (conversations.value.length) {
+        await switchConv(conversations.value[0].id)
+      }
+    }
+    ElMessage.success('已删除')
+  } catch (e) {
+    ElMessage.error('删除失败')
+  }
 }
 
 const sendPrompt = (prompt) => {
@@ -164,28 +196,144 @@ const send = async () => {
   if (!input.value.trim() || thinking.value) return
   const content = input.value.trim()
   input.value = ''
+
+  // 无会话时先创建
+  if (!currentConvId.value) {
+    try {
+      const conv = await aiApi.createConversation()
+      conversations.value.unshift(conv)
+      currentConvId.value = conv.id
+    } catch (e) {
+      ElMessage.error('创建会话失败')
+      return
+    }
+  }
+
+  const convId = currentConvId.value
+  // 首条消息本地更新标题
+  const conv = conversations.value.find((c) => c.id === convId)
+  const isFirstMsg = !conv || conv.title === '新对话' || !conv.title
+
+  // 推送用户消息
   messages.value.push({
     id: Date.now(),
-    conversationId: currentConvId.value,
+    conversationId: convId,
     role: 'user',
     content,
     createTime: new Date().toISOString(),
   })
   await scrollToBottom()
-
   thinking.value = true
-  // 模拟流式延迟
-  await new Promise((r) => setTimeout(r, 800 + Math.random() * 600))
-  const reply = aiReplies[Math.floor(Math.random() * aiReplies.length)] || aiReplies[0]
-  messages.value.push({
-    id: Date.now() + 1,
-    conversationId: currentConvId.value,
-    role: 'assistant',
-    content: reply,
-    createTime: new Date().toISOString(),
-  })
-  thinking.value = false
-  await scrollToBottom()
+
+  // SSE 流式请求
+  abortController = new AbortController()
+  let assistantMsg = null
+  try {
+    const token = localStorage.getItem('library_token') || ''
+    const resp = await fetch('/api/ai/chat', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ conversationId: convId, content }),
+      signal: abortController.signal,
+    })
+
+    // 非流式响应 → 后端抛 BusinessException，返回 JSON 错误
+    const ct = resp.headers.get('content-type') || ''
+    if (!ct.includes('text/event-stream')) {
+      let msg = 'AI 请求失败'
+      try {
+        const errBody = await resp.json()
+        msg = errBody.message || msg
+      } catch {
+        // 忽略
+      }
+      throw new Error(msg)
+    }
+
+    const reader = resp.body.getReader()
+    const decoder = new TextDecoder('utf-8')
+    let buffer = ''
+
+    const handleEvent = (block) => {
+      const lines = block.split('\n')
+      let event = 'message'
+      const dataParts = []
+      for (const line of lines) {
+        if (line.startsWith('event:')) {
+          event = line.slice(6).trim()
+        } else if (line.startsWith('data:')) {
+          let d = line.slice(5)
+          if (d.startsWith(' ')) d = d.slice(1)
+          dataParts.push(d)
+        }
+      }
+      const data = dataParts.join('\n')
+      if (event === 'delta') {
+        if (!assistantMsg) {
+          thinking.value = false
+          // 用 reactive 包装：局部变量引用 Proxy，修改其属性能触发响应式更新
+          // （若用普通对象，push 到 ref 数组后局部变量引用的是原始对象，修改不触发更新）
+          assistantMsg = reactive({
+            id: Date.now() + 1,
+            conversationId: convId,
+            role: 'assistant',
+            content: '',
+            createTime: new Date().toISOString(),
+          })
+          messages.value.push(assistantMsg)
+        }
+        assistantMsg.content += data
+        scrollToBottom()
+      } else if (event === 'done') {
+        thinking.value = false
+        if (isFirstMsg && conv) {
+          conv.title = content.length > 20 ? content.substring(0, 20) + '…' : content
+        }
+      } else if (event === 'error') {
+        thinking.value = false
+        if (!assistantMsg) {
+          assistantMsg = reactive({
+            id: Date.now() + 1,
+            conversationId: convId,
+            role: 'assistant',
+            content: '',
+            createTime: new Date().toISOString(),
+          })
+          messages.value.push(assistantMsg)
+        }
+        assistantMsg.content = `⚠️ ${data || 'AI 请求出错'}`
+        scrollToBottom()
+      }
+    }
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      buffer = buffer.replace(/\r\n/g, '\n')
+      // 按空行切分事件块
+      let idx
+      while ((idx = buffer.indexOf('\n\n')) >= 0) {
+        const block = buffer.slice(0, idx)
+        buffer = buffer.slice(idx + 2)
+        if (block.trim()) handleEvent(block)
+      }
+    }
+    // 处理残留事件
+    if (buffer.trim()) handleEvent(buffer)
+  } catch (e) {
+    thinking.value = false
+    if (e.name === 'AbortError') return
+    ElMessage.error(e.message || 'AI 请求失败')
+    if (assistantMsg) {
+      assistantMsg.content = `⚠️ ${e.message || 'AI 请求失败'}`
+    }
+  } finally {
+    abortController = null
+  }
 }
 
 const scrollToBottom = async () => {
@@ -199,6 +347,10 @@ const formatTime = (t) => {
   if (!t) return ''
   return t.substring(5, 10)
 }
+
+onBeforeUnmount(() => {
+  if (abortController) abortController.abort()
+})
 
 onMounted(loadConversations)
 </script>
@@ -234,6 +386,7 @@ onMounted(loadConversations)
 }
 
 .conv-item {
+  position: relative;
   display: flex;
   align-items: flex-start;
   gap: var(--space-3);
@@ -261,7 +414,27 @@ onMounted(loadConversations)
   color: var(--color-primary);
 }
 
-.conv-meta { flex: 1; min-width: 0; }
+.conv-del {
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-3);
+  color: var(--color-text-tertiary);
+  opacity: 0;
+  transition: all var(--duration-fast) var(--ease-soft);
+  padding: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.conv-item:hover .conv-del {
+  opacity: 1;
+}
+
+.conv-del:hover {
+  color: var(--color-danger);
+  background: var(--color-danger-light, rgba(255, 77, 79, 0.1));
+}
+
+.conv-meta { flex: 1; min-width: 0; padding-right: 20px; }
 .conv-title {
   font-size: var(--fs-small);
   color: var(--color-text);

@@ -17,4 +17,21 @@
         ORDER BY create_time DESC
     </select>
 
+    <select id="selectById" resultMap="convMap">
+        SELECT * FROM ai_conversations WHERE id = #{id}
+    </select>
+
+    <insert id="insert" parameterType="com.library.entity.AiConversation" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO ai_conversations (user_id, title, model, status, create_time)
+        VALUES (#{userId}, #{title}, #{model}, #{status}, #{createTime})
+    </insert>
+
+    <update id="updateTitle">
+        UPDATE ai_conversations SET title = #{title} WHERE id = #{id}
+    </update>
+
+    <delete id="deleteById">
+        DELETE FROM ai_conversations WHERE id = #{id}
+    </delete>
+
 </mapper>
