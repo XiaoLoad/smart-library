@@ -321,7 +321,7 @@ const mockRoutes = [
       location: body.location || '',
       price: Number(body.price) || 0,
       publishDate: body.publishDate || '',
-      coverUrl: '',
+      coverUrl: body.coverUrl || '',
       description: body.description || '',
       totalCount: Number(body.totalCount) || 1,
       availableCount: Number(body.totalCount) || 1,
@@ -330,6 +330,30 @@ const mockRoutes = [
     }
     mockBooks.push(newBook)
     return { code: 200, data: newBook, message: '新增图书成功' }
+  }},
+  { url: '/book/update', method: 'post', handler: (config) => {
+    const body = typeof config.data === 'string' ? JSON.parse(config.data) : (config.data || {})
+    const userId = parseUserId(config)
+    const user = mockUsers.find((u) => u.id === userId)
+    if (!user || user.userType !== 3) return { code: 403, message: '仅管理员可编辑图书' }
+    const book = mockBooks.find((b) => b.id === Number(body.id))
+    if (!book) return { code: 400, message: '图书不存在' }
+    if (mockBooks.some((b) => b.isbn === body.isbn && b.id !== book.id)) {
+      return { code: 400, message: '该 ISBN 已存在' }
+    }
+    const delta = (Number(body.totalCount) || 1) - book.totalCount
+    book.title = body.title
+    book.author = body.author
+    book.publisher = body.publisher || ''
+    book.isbn = body.isbn
+    book.categoryId = Number(body.categoryId)
+    book.location = body.location || ''
+    book.price = Number(body.price) || 0
+    book.coverUrl = body.coverUrl || ''
+    book.description = body.description || ''
+    book.totalCount += delta
+    book.availableCount = Math.max(0, Math.min(book.availableCount + delta, book.totalCount))
+    return { code: 200, data: book, message: '修改成功' }
   }},
   { url: '/category/add', method: 'post', handler: (config) => {
     const body = typeof config.data === 'string' ? JSON.parse(config.data) : (config.data || {})

@@ -38,7 +38,11 @@
               </span>
             </template>
           </el-tree>
-          <div class="all-books" :class="{ active: !selectedCategory }" @click="clearCategory">
+          <div
+            class="all-books"
+            :class="{ active: !selectedCategory }"
+            @click="clearCategory"
+          >
             <el-icon><Notebook /></el-icon>
             <span>全部图书</span>
             <span class="count">{{ total }}</span>
@@ -66,7 +70,13 @@
               <span v-if="!userStore.isAdmin && quota" class="quota-tip">
                 剩余可借 {{ quota.remaining }} 本
               </span>
-              <el-button v-if="userStore.isAdmin" type="primary" :icon="Plus" @click="addBookVisible = true">新增图书</el-button>
+              <el-button
+                v-if="userStore.isAdmin"
+                type="primary"
+                :icon="Plus"
+                @click="openBookDialog('add')"
+                >新增图书</el-button
+              >
             </div>
           </div>
 
@@ -75,7 +85,14 @@
               <template #default="{ row }">
                 <div class="book-cell">
                   <div class="book-cover">
-                    <span class="cover-char">{{ row.title.charAt(0) }}</span>
+                    <img
+                      v-if="row.coverUrl"
+                      :src="row.coverUrl"
+                      :alt="row.title"
+                    />
+                    <span v-else class="cover-char">{{
+                      row.title.charAt(0)
+                    }}</span>
                   </div>
                   <div class="book-info">
                     <div class="book-title">{{ row.title }}</div>
@@ -109,7 +126,21 @@
             </el-table-column>
             <el-table-column label="操作" width="160" fixed="right">
               <template #default="{ row }">
-                <el-button text type="primary" size="small" @click="openDetail(row)">详情</el-button>
+                <el-button
+                  text
+                  type="primary"
+                  size="small"
+                  @click="openDetail(row)"
+                  >详情</el-button
+                >
+                <el-button
+                  v-if="userStore.isAdmin"
+                  text
+                  type="primary"
+                  size="small"
+                  @click="openBookDialog('edit', row)"
+                  >编辑</el-button
+                >
                 <el-button
                   v-if="!userStore.isAdmin"
                   text
@@ -118,7 +149,8 @@
                   :disabled="row.availableCount === 0 || !quota?.canBorrow"
                   :loading="borrowingId === row.id"
                   @click="onBorrow(row)"
-                >借阅</el-button>
+                  >借阅</el-button
+                >
               </template>
             </el-table-column>
           </el-table>
@@ -149,76 +181,76 @@
       mode="success"
     />
 
-    <!-- 新增图书弹窗 -->
-    <el-dialog v-model="addBookVisible" title="新增图书" width="560px" align-center>
-      <el-form :model="addBookForm" label-width="90px" ref="addBookFormRef" :rules="addBookRules">
-        <el-form-item label="书名" prop="title">
-          <el-input v-model="addBookForm.title" placeholder="请输入书名" />
-        </el-form-item>
-        <el-form-item label="作者" prop="author">
-          <el-input v-model="addBookForm.author" placeholder="请输入作者" />
-        </el-form-item>
-        <el-form-item label="ISBN" prop="isbn">
-          <el-input v-model="addBookForm.isbn" placeholder="请输入 ISBN" />
-        </el-form-item>
-        <el-form-item label="分类" prop="categoryId">
-          <el-tree-select
-            v-model="addBookForm.categoryId"
-            :data="categoryTreeData"
-            :props="{ label: 'categoryName', value: 'id', children: 'children' }"
-            check-strictly
-            placeholder="请选择分类"
-            style="width: 100%"
-          />
-        </el-form-item>
-        <el-form-item label="出版社">
-          <el-input v-model="addBookForm.publisher" placeholder="请输入出版社" />
-        </el-form-item>
-        <el-form-item label="馆藏位置">
-          <el-input v-model="addBookForm.location" placeholder="如 A区1排3架" />
-        </el-form-item>
-        <el-form-item label="价格">
-          <el-input-number v-model="addBookForm.price" :min="0" :precision="2" :step="1" style="width: 100%" />
-        </el-form-item>
-        <el-form-item label="馆藏数量">
-          <el-input-number v-model="addBookForm.totalCount" :min="1" :step="1" style="width: 100%" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="addBookVisible = false">取消</el-button>
-        <el-button type="primary" :loading="addBookLoading" @click="submitAddBook">确认新增</el-button>
-      </template>
-    </el-dialog>
+    <!-- 图书新增/编辑弹窗（通用组件） -->
+    <BookFormDialog
+      v-model="bookDialogVisible"
+      :mode="bookDialogMode"
+      :book="editingBook"
+      :categories="categories"
+      @success="loadBooks"
+    />
 
     <!-- 图书详情弹窗 -->
-    <el-dialog v-model="detailVisible" title="图书详情" width="600px" align-center>
+    <el-dialog
+      v-model="detailVisible"
+      title="图书详情"
+      width="600px"
+      align-center
+    >
       <div v-if="detailData" class="book-detail">
         <div class="detail-header">
           <div class="detail-cover">
-            <span class="cover-char">{{ detailData.title?.charAt(0) }}</span>
+            <img
+              v-if="detailData.coverUrl"
+              :src="detailData.coverUrl"
+              :alt="detailData.title"
+            />
+            <span v-else class="cover-char">{{
+              detailData.title?.charAt(0)
+            }}</span>
           </div>
           <div class="detail-title-area">
             <h2 class="detail-title">{{ detailData.title }}</h2>
             <p class="detail-author">{{ detailData.author }}</p>
             <span class="status-tag" :class="stockClass(detailData)">
-              {{ detailData.availableCount > 0 ? '可借' : '已借完' }}
+              {{ detailData.availableCount > 0 ? "可借" : "已借完" }}
             </span>
           </div>
         </div>
         <el-descriptions :column="2" border size="small" class="detail-desc">
-          <el-descriptions-item label="ISBN">{{ detailData.isbn || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="出版社">{{ detailData.publisher || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="分类">{{ findCategoryName(detailData.categoryId) || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="馆藏位置">{{ detailData.location || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="价格">{{ detailData.price != null ? '¥' + detailData.price : '-' }}</el-descriptions-item>
-          <el-descriptions-item label="出版日期">{{ detailData.publishDate || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="馆藏总量">{{ detailData.totalCount ?? '-' }} 册</el-descriptions-item>
+          <el-descriptions-item label="ISBN">{{
+            detailData.isbn || "-"
+          }}</el-descriptions-item>
+          <el-descriptions-item label="出版社">{{
+            detailData.publisher || "-"
+          }}</el-descriptions-item>
+          <el-descriptions-item label="分类">{{
+            findCategoryName(detailData.categoryId) || "-"
+          }}</el-descriptions-item>
+          <el-descriptions-item label="馆藏位置">{{
+            detailData.location || "-"
+          }}</el-descriptions-item>
+          <el-descriptions-item label="价格">{{
+            detailData.price != null ? "¥" + detailData.price : "-"
+          }}</el-descriptions-item>
+          <el-descriptions-item label="出版日期">{{
+            detailData.publishDate || "-"
+          }}</el-descriptions-item>
+          <el-descriptions-item label="馆藏总量"
+            >{{ detailData.totalCount ?? "-" }} 册</el-descriptions-item
+          >
           <el-descriptions-item label="可借数量">
-            <span :class="stockClass(detailData)">{{ detailData.availableCount ?? '-' }} 册</span>
+            <span :class="stockClass(detailData)"
+              >{{ detailData.availableCount ?? "-" }} 册</span
+            >
           </el-descriptions-item>
-          <el-descriptions-item label="入库时间" :span="2">{{ formatTime(detailData.createTime) }}</el-descriptions-item>
+          <el-descriptions-item label="入库时间" :span="2">{{
+            formatTime(detailData.createTime)
+          }}</el-descriptions-item>
           <el-descriptions-item label="图书简介" :span="2">
-            <span class="detail-description">{{ detailData.description || '暂无简介' }}</span>
+            <span class="detail-description">{{
+              detailData.description || "暂无简介"
+            }}</span>
           </el-descriptions-item>
         </el-descriptions>
       </div>
@@ -228,73 +260,77 @@
           v-if="!userStore.isAdmin && detailData?.availableCount > 0"
           type="primary"
           @click="detailBorrow"
-        >借阅此书</el-button>
+          >借阅此书</el-button
+        >
       </template>
     </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, reactive } from 'vue'
-import { Search, Plus, Collection, Notebook } from '@element-plus/icons-vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { bookApi, borrowApi } from '@/api'
-import { useUserStore } from '@/stores/user'
-import BorrowCodeDialog from '@/components/BorrowCodeDialog.vue'
+import { ref, computed, onMounted } from "vue";
+import { Search, Plus, Collection, Notebook } from "@element-plus/icons-vue";
+import { ElMessage, ElMessageBox } from "element-plus";
+import { bookApi, borrowApi } from "@/api";
+import { useUserStore } from "@/stores/user";
+import BorrowCodeDialog from "@/components/BorrowCodeDialog.vue";
+import BookFormDialog from "@/components/BookFormDialog.vue";
 
-const userStore = useUserStore()
-const books = ref([])
-const total = ref(0)
-const page = ref(1)
-const size = ref(10)
-const search = ref('')
-const categories = ref([])
-const categoryFilter = ref('')
-const selectedCategory = ref(null)
+const userStore = useUserStore();
+const books = ref([]);
+const total = ref(0);
+const page = ref(1);
+const size = ref(10);
+const search = ref("");
+const categories = ref([]);
+const categoryFilter = ref("");
+const selectedCategory = ref(null);
 
 // 借阅额度
-const quota = ref(null)
-const borrowingId = ref(null)
-const codeVisible = ref(false)
-const codeData = ref({ borrowNo: '', pickupDeadline: '', bookTitle: '', qrPayload: '' })
+const quota = ref(null);
+const borrowingId = ref(null);
+const codeVisible = ref(false);
+const codeData = ref({
+  borrowNo: "",
+  pickupDeadline: "",
+  bookTitle: "",
+  qrPayload: "",
+});
 
-// 新增图书
-const addBookVisible = ref(false)
-const addBookLoading = ref(false)
-const addBookFormRef = ref(null)
+// 图书新增/编辑弹窗（通用组件状态）
+const bookDialogVisible = ref(false);
+const bookDialogMode = ref("add"); // add | edit
+const editingBook = ref(null);
+
+const openBookDialog = (mode, row = null) => {
+  bookDialogMode.value = mode;
+  editingBook.value = row;
+  bookDialogVisible.value = true;
+};
 
 // 图书详情
-const detailVisible = ref(false)
-const detailData = ref(null)
-const addBookForm = reactive({
-  title: '', author: '', isbn: '', categoryId: null,
-  publisher: '', location: '', price: 0, totalCount: 1,
-})
-const addBookRules = {
-  title: [{ required: true, message: '请输入书名', trigger: 'blur' }],
-  author: [{ required: true, message: '请输入作者', trigger: 'blur' }],
-  isbn: [{ required: true, message: '请输入 ISBN', trigger: 'blur' }],
-  categoryId: [{ required: true, message: '请选择分类', trigger: 'change' }],
-}
+const detailVisible = ref(false);
+const detailData = ref(null);
+
 // el-tree-select 需要带 children 字段的数据
-const categoryTreeData = computed(() => categories.value)
+const categoryTreeData = computed(() => categories.value);
 
 const filteredCategories = computed(() => {
-  if (!categoryFilter.value) return categories.value
+  if (!categoryFilter.value) return categories.value;
   const filter = (nodes) => {
     return nodes
       .map((n) => {
-        const children = n.children ? filter(n.children) : []
-        const match = n.categoryName.includes(categoryFilter.value)
+        const children = n.children ? filter(n.children) : [];
+        const match = n.categoryName.includes(categoryFilter.value);
         if (match || children.length) {
-          return { ...n, children }
+          return { ...n, children };
         }
-        return null
+        return null;
       })
-      .filter(Boolean)
-  }
-  return filter(categories.value)
-})
+      .filter(Boolean);
+  };
+  return filter(categories.value);
+});
 
 const loadBooks = async () => {
   const data = await bookApi.list({
@@ -302,144 +338,125 @@ const loadBooks = async () => {
     size: size.value,
     keyword: search.value,
     categoryId: selectedCategory.value,
-  })
-  books.value = data.list
-  total.value = data.total
-}
+  });
+  books.value = data.list;
+  total.value = data.total;
+};
 
 const onSizeChange = () => {
-  page.value = 1
-  loadBooks()
-}
+  page.value = 1;
+  loadBooks();
+};
 
 const loadCategories = async () => {
-  const data = await bookApi.categoryTree()
-  categories.value = data
-}
+  const data = await bookApi.categoryTree();
+  categories.value = data;
+};
 
 const loadQuota = async () => {
-  if (userStore.isAdmin) return
+  if (userStore.isAdmin) return;
   try {
-    quota.value = await borrowApi.quota()
+    quota.value = await borrowApi.quota();
   } catch {
     // 静默失败，不阻塞页面
   }
-}
+};
 
 const onBorrow = async (row) => {
-  if (userStore.isAdmin) return
+  if (userStore.isAdmin) return;
   try {
     await ElMessageBox.confirm(
       `确认借阅《${row.title}》？\n借阅成功后请及时到馆取书。`,
-      '借阅确认',
-      { type: 'warning', confirmButtonText: '确认借阅', cancelButtonText: '取消' }
-    )
+      "借阅确认",
+      {
+        type: "warning",
+        confirmButtonText: "确认借阅",
+        cancelButtonText: "取消",
+      },
+    );
   } catch {
-    return // 用户取消
+    return; // 用户取消
   }
-  borrowingId.value = row.id
+  borrowingId.value = row.id;
   try {
-    const res = await borrowApi.apply({ bookId: row.id })
+    const res = await borrowApi.apply({ bookId: row.id });
     codeData.value = {
       borrowNo: res.borrowNo,
       pickupDeadline: res.pickupDeadline,
       bookTitle: row.title,
       qrPayload: res.qrPayload,
-    }
-    codeVisible.value = true
-    ElMessage.success('借阅申请成功，请到馆取书')
-    await Promise.all([loadBooks(), loadQuota()])
+    };
+    codeVisible.value = true;
+    ElMessage.success("借阅申请成功，请到馆取书");
+    await Promise.all([loadBooks(), loadQuota()]);
   } catch {
     // 错误已由拦截器提示
   } finally {
-    borrowingId.value = null
+    borrowingId.value = null;
   }
-}
+};
 
 // 图书详情
 const openDetail = (row) => {
-  detailData.value = row
-  detailVisible.value = true
-}
+  detailData.value = row;
+  detailVisible.value = true;
+};
 
 const detailBorrow = () => {
-  if (!detailData.value) return
-  detailVisible.value = false
-  onBorrow(detailData.value)
-}
+  if (!detailData.value) return;
+  detailVisible.value = false;
+  onBorrow(detailData.value);
+};
 
 // 在分类树中查找分类名称
 const findCategoryName = (categoryId) => {
-  if (!categoryId) return ''
+  if (!categoryId) return "";
   const find = (nodes) => {
     for (const n of nodes) {
-      if (n.id === categoryId) return n.categoryName
+      if (n.id === categoryId) return n.categoryName;
       if (n.children) {
-        const r = find(n.children)
-        if (r) return r
+        const r = find(n.children);
+        if (r) return r;
       }
     }
-    return ''
-  }
-  return find(categories.value)
-}
+    return "";
+  };
+  return find(categories.value);
+};
 
 const formatTime = (t) => {
-  if (!t) return '-'
-  return String(t).replace('T', ' ').slice(0, 19)
-}
+  if (!t) return "-";
+  return String(t).replace("T", " ").slice(0, 19);
+};
 
 const onCategoryClick = (node) => {
-  selectedCategory.value = node.id
-  page.value = 1
-  loadBooks()
-}
+  selectedCategory.value = node.id;
+  page.value = 1;
+  loadBooks();
+};
 
 const clearCategory = () => {
-  selectedCategory.value = null
-  page.value = 1
-  loadBooks()
-}
+  selectedCategory.value = null;
+  page.value = 1;
+  loadBooks();
+};
 
 const stockPercent = (row) => {
-  if (!row.totalCount) return 0
-  return Math.round((row.availableCount / row.totalCount) * 100)
-}
+  if (!row.totalCount) return 0;
+  return Math.round((row.availableCount / row.totalCount) * 100);
+};
 
 const stockClass = (row) => {
-  const p = stockPercent(row)
-  if (p === 0) return 'danger'
-  if (p < 30) return 'warning'
-  return ''
-}
-
-// 提交新增图书
-const submitAddBook = async () => {
-  if (!addBookFormRef.value) return
-  await addBookFormRef.value.validate(async (valid) => {
-    if (!valid) return
-    addBookLoading.value = true
-    try {
-      const res = await bookApi.add({ ...addBookForm })
-      ElMessage.success(res.message || '新增图书成功')
-      addBookVisible.value = false
-      // 重置表单
-      Object.assign(addBookForm, {
-        title: '', author: '', isbn: '', categoryId: null,
-        publisher: '', location: '', price: 0, totalCount: 1,
-      })
-      // 刷新到最后一页查看新书
-      await loadBooks()
-    } finally {
-      addBookLoading.value = false
-    }
-  })
-}
+  const p = stockPercent(row);
+  if (p === 0) return "danger";
+  if (p < 30) return "warning";
+  return "";
+};
 
 onMounted(async () => {
-  await loadCategories()
-  await Promise.all([loadBooks(), loadQuota()])
-})
+  await loadCategories();
+  await Promise.all([loadBooks(), loadQuota()]);
+});
 </script>
 
 <style scoped>
@@ -473,7 +490,9 @@ onMounted(async () => {
   margin-bottom: var(--space-4);
 }
 
-.category-filter { margin-bottom: var(--space-3); }
+.category-filter {
+  margin-bottom: var(--space-3);
+}
 
 .category-tree {
   margin-bottom: var(--space-3);
@@ -540,11 +559,16 @@ onMounted(async () => {
   width: 36px;
   height: 48px;
   border-radius: var(--radius-sm);
-  background: linear-gradient(135deg, var(--color-primary-light), var(--color-secondary-light));
+  background: linear-gradient(
+    135deg,
+    var(--color-primary-light),
+    var(--color-secondary-light)
+  );
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  overflow: hidden;
 }
 
 .cover-char {
@@ -554,7 +578,20 @@ onMounted(async () => {
   color: var(--color-primary);
 }
 
-.book-info { min-width: 0; flex: 1; }
+/* 有真实封面时铺满容器 */
+.book-cover img,
+.detail-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+  display: block;
+}
+
+.book-info {
+  min-width: 0;
+  flex: 1;
+}
 .book-info .book-title {
   font-size: var(--fs-body);
   font-weight: 500;
@@ -590,8 +627,12 @@ onMounted(async () => {
 }
 
 @media (max-width: 1024px) {
-  .book-layout { grid-template-columns: 1fr; }
-  .category-card { position: static; }
+  .book-layout {
+    grid-template-columns: 1fr;
+  }
+  .category-card {
+    position: static;
+  }
 }
 
 .quota-tip {
@@ -601,7 +642,9 @@ onMounted(async () => {
 }
 
 /* 图书详情弹窗 */
-.book-detail { padding: 0 var(--space-2); }
+.book-detail {
+  padding: 0 var(--space-2);
+}
 
 .detail-header {
   display: flex;
@@ -614,11 +657,16 @@ onMounted(async () => {
   width: 56px;
   height: 72px;
   border-radius: var(--radius-sm);
-  background: linear-gradient(135deg, var(--color-primary-light), var(--color-secondary-light));
+  background: linear-gradient(
+    135deg,
+    var(--color-primary-light),
+    var(--color-secondary-light)
+  );
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  overflow: hidden;
 }
 
 .detail-cover .cover-char {
@@ -628,7 +676,9 @@ onMounted(async () => {
   color: var(--color-primary);
 }
 
-.detail-title-area { min-width: 0; }
+.detail-title-area {
+  min-width: 0;
+}
 
 .detail-title {
   font-family: var(--font-serif);
@@ -644,7 +694,9 @@ onMounted(async () => {
   margin: 0 0 6px;
 }
 
-.detail-desc { margin-bottom: var(--space-2); }
+.detail-desc {
+  margin-bottom: var(--space-2);
+}
 
 .detail-description {
   display: block;

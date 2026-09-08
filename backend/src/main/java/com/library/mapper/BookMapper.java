@@ -17,6 +17,8 @@ public interface BookMapper {
 
     void insert(Book book);
 
+    void update(Book book);
+
     void decreaseAvailable(@Param("id") Long id, @Param("count") int count);
 
     void increaseAvailable(@Param("id") Long id, @Param("count") int count);

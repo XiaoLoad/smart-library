@@ -30,6 +30,10 @@ pagehelper:
   support-methods-arguments: true
   params: count=countSql
 
+# 自定义业务配置
+app:
+  upload-dir: ./uploads
+
 # 自定义 JWT 配置
 jwt:
   secret: Zmxhc2gtZGVtby1saWJyYXJ5LWp3dC1zZWNyZXQta2V5LWZvci0yMDI2LTExLWNvbW11bml0eQ==

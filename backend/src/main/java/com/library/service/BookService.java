@@ -56,4 +56,32 @@ public class BookService {
         bookMapper.insert(book);
         return book;
     }
+
+    /**
+     * 更新图书（ISBN 查重 + 按馆藏数量差值同步可借数量）
+     */
+    public Book update(Book book) {
+        Book exist = bookMapper.selectById(book.getId());
+        if (exist == null) {
+            throw new BusinessException("图书不存在");
+        }
+        Book sameIsbn = bookMapper.selectByIsbn(book.getIsbn());
+        if (sameIsbn != null && !sameIsbn.getId().equals(book.getId())) {
+            throw new BusinessException("ISBN 已存在");
+        }
+        if (book.getTotalCount() == null || book.getTotalCount() < 1) {
+            book.setTotalCount(1);
+        }
+        // 可借数量随馆藏数量差值增减，并夹取到 [0, totalCount]
+        int delta = book.getTotalCount() - exist.getTotalCount();
+        int available = exist.getAvailableCount() + delta;
+        available = Math.max(0, Math.min(available, book.getTotalCount()));
+        book.setAvailableCount(available);
+        if (book.getCoverUrl() == null) book.setCoverUrl("");
+        if (book.getDescription() == null) book.setDescription("");
+        if (book.getPublisher() == null) book.setPublisher("");
+        if (book.getLocation() == null) book.setLocation("");
+        bookMapper.update(book);
+        return bookMapper.selectById(book.getId());
+    }
 }

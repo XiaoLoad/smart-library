@@ -1,5 +1,5 @@
 /* ===== 各模块 API 封装 ===== */
-import { get, post } from './request.js'
+import { get, post, default as service } from './request.js'
 
 // 认证
 export const authApi = {
@@ -21,8 +21,18 @@ export const bookApi = {
   list: (params) => get('/book/list', params),
   categoryTree: () => get('/book/category/tree'),
   add: (data) => post('/book/add', data),
+  update: (data) => post('/book/update', data),
   addCategory: (data) => post('/category/add', data),
   updateCategory: (data) => post('/category/update', data),
+}
+
+// 文件上传（multipart）
+export const uploadApi = {
+  image: (file) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    return service.request({ method: 'post', url: '/upload/image', data: fd })
+  },
 }
 
 // 借阅
