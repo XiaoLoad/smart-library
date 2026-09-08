@@ -302,3 +302,24 @@
   }
   .table-toolbar .left { flex-direction: column; }
 }
+
+/* —— 列表操作列统一规范 ——
+   用法：<el-table-column label="操作" fixed="right" class-name="ops-col" /> */
+.el-table .ops-col .cell {
+  white-space: nowrap;
+}
+.el-table .ops-col .el-button.is-text {
+  padding: 5px 6px;
+}
+.el-table .ops-col .el-button + .el-button {
+  margin-left: 6px;
+}
+/* 禁用态：淡灰药丸底色，与可点按钮明显区分 */
+.el-table .ops-col .el-button.is-disabled {
+  color: var(--color-text-tertiary, #9ca3af);
+  background: rgba(17, 24, 39, 0.045);
+  border-radius: 999px;
+  opacity: 0.72;
+  cursor: not-allowed;
+  transition: none;
+}

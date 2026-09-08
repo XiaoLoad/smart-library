@@ -109,7 +109,7 @@
             />
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="200" fixed="right">
+        <el-table-column label="操作" width="200" fixed="right" class-name="ops-col">
           <template #default="{ row }">
             <el-tooltip
               v-if="row.status === 0"

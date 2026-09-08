@@ -35,7 +35,19 @@
           </template>
         </el-table-column>
         <el-table-column prop="userName" label="借阅人" width="120" />
-        <el-table-column prop="bookTitle" label="图书" min-width="160" />
+        <el-table-column prop="bookTitle" label="图书" min-width="180">
+          <template #default="{ row }">
+            <el-tooltip
+              :content="row.bookTitle"
+              placement="top"
+              effect="dark"
+              :show-after="300"
+              :disabled="!row._titleTip"
+            >
+              <span class="book-title" @mouseenter="checkEllipsis($event, row, '_titleTip')">{{ row.bookTitle }}</span>
+            </el-tooltip>
+          </template>
+        </el-table-column>
         <el-table-column label="借阅时间" width="160">
           <template #default="{ row }">
             <span class="time-text">{{ row.borrowTime || '—' }}</span>
@@ -58,7 +70,7 @@
             </span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="240" fixed="right">
+        <el-table-column label="操作" width="200" fixed="right" class-name="ops-col">
           <template #default="{ row }">
             <el-button text type="primary" size="small" v-if="row.status === 0" @click="openCode(row)">借阅码</el-button>
             <el-button text type="primary" size="small" v-if="row.status === 0 && userStore.isAdmin" @click="onPickup(row)">取书确认</el-button>
@@ -144,6 +156,12 @@ const onSizeChange = () => {
 
 const statusText = (s) => ({ 0: '待取书', 1: '借阅中', 2: '已归还', 3: '已逾期', 4: '已取消', 5: '待确认归还' }[s] || '')
 const statusClass = (s) => ({ 0: 'pending', 1: 'active', 2: 'returned', 3: 'overdue', 4: 'cancelled', 5: 'pending' }[s] || '')
+
+// 悬停时检测文本是否被截断（溢出），仅截断时启用 tooltip
+const checkEllipsis = (e, row, flagKey) => {
+  const el = e.currentTarget
+  row[flagKey] = el.scrollWidth > el.clientWidth + 1
+}
 
 const openCode = (row) => {
   codeData.value = {
@@ -320,7 +338,17 @@ onMounted(load)
 .mono-text {
   font-family: var(--font-mono);
   font-size: var(--fs-small);
-  color: var(--color-text-secondary);
+}
+
+/* 图书名截断：溢出省略，截断时悬停显示全文 */
+.book-title {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+  line-height: 1.5;
 }
 .time-text {
   font-size: var(--fs-caption);

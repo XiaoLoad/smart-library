@@ -63,7 +63,7 @@
             </span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="120" fixed="right">
+        <el-table-column label="操作" width="120" fixed="right" class-name="ops-col">
           <template #default="{ row }">
             <el-button v-if="row.status === 0" text type="primary" size="small" @click="onPay(row)">缴费</el-button>
             <span v-else class="status-tag active">已缴</span>
