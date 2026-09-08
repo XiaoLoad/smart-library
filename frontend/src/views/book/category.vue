@@ -97,7 +97,17 @@
             <span class="status-tag">{{ 'L' + row.level }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="sortOrder" label="排序" width="100" />
+        <el-table-column prop="sortOrder" label="排序" width="90" />
+        <el-table-column width="110" align="center">
+          <template #header>
+            <el-tooltip content="该分类及其所有子分类下的图书总数" placement="top" effect="dark" :show-after="200">
+              <span class="count-header">图书数量 <el-icon class="count-info"><InfoFilled /></el-icon></span>
+            </el-tooltip>
+          </template>
+          <template #default="{ row }">
+            <span class="book-count" :class="{ zero: !row.bookCount }">{{ row.bookCount ?? 0 }} 册</span>
+          </template>
+        </el-table-column>
         <el-table-column label="状态" width="100">
           <template #default="{ row }">
             <el-switch
@@ -109,7 +119,7 @@
             />
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="200" fixed="right" class-name="ops-col">
+        <el-table-column label="操作" width="250" fixed="right" class-name="ops-col">
           <template #default="{ row }">
             <el-tooltip
               v-if="row.status === 0"
@@ -124,6 +134,7 @@
             </el-tooltip>
             <el-button v-else text type="primary" size="small" @click="openAddChild(row)">新增子级</el-button>
             <el-button text type="primary" size="small" @click="openEdit(row)">编辑</el-button>
+            <el-button text type="danger" size="small" @click="onDelete(row)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -155,7 +166,7 @@
 
 <script setup>
 import { ref, reactive, computed, watch, nextTick, onMounted } from 'vue'
-import { Search, Plus, Expand, Fold } from '@element-plus/icons-vue'
+import { Search, Plus, Expand, Fold, InfoFilled } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { bookApi } from '@/api'
 
@@ -300,6 +311,35 @@ const onStatusChange = async (row, next) => {
   }
 }
 
+// 删除分类（含子分类；后端校验分类下是否有图书）
+const onDelete = async (row) => {
+  const descendantCount = countDescendants(row.id) - 1
+  const tip = descendantCount > 0
+    ? `其下 ${descendantCount} 个子分类将一并删除`
+    : '删除后不可恢复'
+  try {
+    await ElMessageBox.confirm(
+      `确定删除分类「${row.categoryName}」？${tip}。若分类下仍有图书将无法删除。`,
+      '删除分类',
+      {
+        type: 'warning',
+        confirmButtonText: '删除',
+        cancelButtonText: '取消',
+        confirmButtonClass: 'el-button--danger',
+      },
+    )
+  } catch {
+    return // 取消
+  }
+  try {
+    const res = await bookApi.deleteCategory({ id: row.id })
+    ElMessage.success(res.message || '已删除')
+    await load()
+  } catch {
+    // 后端校验失败（如分类下有图书），错误已由拦截器提示
+  }
+}
+
 // 新增/编辑分类弹窗
 const cateDialogVisible = ref(false)
 const cateLoading = ref(false)
@@ -389,6 +429,34 @@ onMounted(load)
   font-family: var(--font-mono);
   font-size: var(--fs-small);
   color: var(--color-text-secondary);
+}
+
+/* 图书数量列 */
+.count-header {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  cursor: help;
+}
+.count-info {
+  font-size: 13px;
+  color: var(--color-text-tertiary, #9ca3af);
+}
+.book-count {
+  display: inline-block;
+  min-width: 44px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  font-weight: 600;
+  color: var(--color-primary, #1f3a93);
+  background: var(--color-primary-light, rgba(31, 58, 147, 0.08));
+}
+.book-count.zero {
+  color: var(--color-text-tertiary, #b6bcc6);
+  background: var(--color-bg-subtle, rgba(17, 24, 39, 0.04));
+  font-weight: 400;
 }
 
 /* 工具栏命中计数 */

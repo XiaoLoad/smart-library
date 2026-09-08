@@ -76,4 +76,18 @@
         UPDATE books SET available_count = available_count + #{count} WHERE id = #{id}
     </update>
 
+    <select id="countByCategoryIds" resultType="int">
+        SELECT COUNT(*) FROM books
+        WHERE category_id IN
+        <foreach collection="categoryIds" item="cid" open="(" separator="," close=")">
+            #{cid}
+        </foreach>
+    </select>
+
+    <select id="countGroupByCategory" resultType="java.util.Map">
+        SELECT category_id AS categoryId, COUNT(*) AS cnt
+        FROM books
+        GROUP BY category_id
+    </select>
+
 </mapper>

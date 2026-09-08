@@ -10,7 +10,8 @@
       <div class="table-toolbar">
         <div class="left">
           <el-input v-model="search" placeholder="用户名 / 姓名" :prefix-icon="Search" clearable class="search-input" @keyup.enter="load" />
-          <el-select v-model="typeFilter" placeholder="全部类型" clearable style="width: 140px">
+          <el-select v-model="typeFilter" placeholder="全部类型" clearable style="width: 140px" @change="onTypeFilterChange">
+            <el-option label="全部类型" :value="''" />
             <el-option label="教师" :value="1" />
             <el-option label="学生" :value="2" />
             <el-option label="管理员" :value="3" />
@@ -187,9 +188,17 @@ const search = ref('')
 const typeFilter = ref('')
 
 const filteredTypeList = computed(() => {
-  if (typeFilter.value === '' || typeFilter.value === null) return list.value
+  // 空值兼容：'' / null / undefined（clearable 清空后为 undefined）均视为全部类型
+  if (typeFilter.value === '' || typeFilter.value === null || typeFilter.value === undefined) {
+    return list.value
+  }
   return list.value.filter((u) => u.userType === typeFilter.value)
 })
+
+// 清空选择时 el-select 会发出 undefined，归一化为 ''，与「全部类型」选项一致
+const onTypeFilterChange = (val) => {
+  if (val === undefined || val === null) typeFilter.value = ''
+}
 
 // 新增/编辑
 const userDialogVisible = ref(false)

@@ -20,4 +20,6 @@ public interface CategoryMapper {
     void update(Category category);
 
     void updateStatusBatch(@Param("ids") List<Long> ids, @Param("status") Integer status);
+
+    void deleteByIds(@Param("ids") List<Long> ids);
 }

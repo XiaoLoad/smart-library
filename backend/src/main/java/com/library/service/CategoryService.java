@@ -3,12 +3,15 @@ package com.library.service;
 import com.library.common.exception.BusinessException;
 import com.library.dto.CategoryUpdateRequest;
 import com.library.entity.Category;
+import com.library.mapper.BookMapper;
 import com.library.mapper.CategoryMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 分类服务
@@ -19,12 +22,17 @@ public class CategoryService {
     @Autowired
     private CategoryMapper categoryMapper;
 
+    @Autowired
+    private BookMapper bookMapper;
+
     /**
-     * 获取分类树
+     * 获取分类树（含每个分类的图书数量，按"自身 + 全部子孙"汇总）
      */
     public List<Category> categoryTree() {
         List<Category> all = categoryMapper.selectAll();
-        return buildTree(all, 0L);
+        List<Category> tree = buildTree(all, 0L);
+        fillBookCount(tree);
+        return tree;
     }
 
     private List<Category> buildTree(List<Category> all, Long parentId) {
@@ -36,6 +44,37 @@ public class CategoryService {
             }
         }
         return tree;
+    }
+
+    /**
+     * 为树中每个分类填充图书数量：
+     * 先按分类汇总直接挂载的图书数，再后序遍历累加子孙数量，
+     * 使父分类数量 = 自身图书 + 所有子分类图书（与点击分类筛选图书的范围一致）。
+     */
+    private void fillBookCount(List<Category> tree) {
+        Map<Long, Integer> directCount = new HashMap<>();
+        for (Map<String, Object> row : bookMapper.countGroupByCategory()) {
+            Object cid = row.get("categoryId");
+            Object cnt = row.get("cnt");
+            if (cid != null && cnt != null) {
+                directCount.put(((Number) cid).longValue(), ((Number) cnt).intValue());
+            }
+        }
+        for (Category root : tree) {
+            accumulateBookCount(root, directCount);
+        }
+    }
+
+    /** 后序遍历累加，返回该分类（含子孙）的图书总数 */
+    private int accumulateBookCount(Category node, Map<Long, Integer> directCount) {
+        int count = directCount.getOrDefault(node.getId(), 0);
+        if (node.getChildren() != null) {
+            for (Category child : node.getChildren()) {
+                count += accumulateBookCount(child, directCount);
+            }
+        }
+        node.setBookCount(count);
+        return count;
     }
 
     /**
@@ -139,6 +178,27 @@ public class CategoryService {
         category.setStatus(1);
         categoryMapper.update(category);
         return 1;
+    }
+
+    /**
+     * 删除分类（含全部子孙分类）。
+     * 若该分类或其任一子孙分类下仍有图书，则拒绝删除，需先迁移/删除图书。
+     *
+     * @return 实际删除的分类数量
+     */
+    public int delete(Long id) {
+        Category category = categoryMapper.selectById(id);
+        if (category == null) {
+            throw new BusinessException("分类不存在");
+        }
+        List<Long> ids = collectDescendantIds(id);
+        int bookCount = bookMapper.countByCategoryIds(ids);
+        if (bookCount > 0) {
+            throw new BusinessException("该分类" + (ids.size() > 1 ? "（含子分类）" : "")
+                    + "下仍有 " + bookCount + " 册图书，请先迁移或删除相关图书");
+        }
+        categoryMapper.deleteByIds(ids);
+        return ids.size();
     }
 
     /**
