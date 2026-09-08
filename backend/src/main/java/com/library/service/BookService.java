@@ -24,6 +24,13 @@ public class BookService {
     private CategoryService categoryService;
 
     /**
+     * 图书详情
+     */
+    public Book getById(Long id) {
+        return bookMapper.selectById(id);
+    }
+
+    /**
      * 图书列表（支持分类递归过滤）
      */
     public PageResult<Book> list(int page, int size, String keyword, Long categoryId) {

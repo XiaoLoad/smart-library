@@ -40,6 +40,18 @@ public class BookController {
         return Result.success(bookService.list(page, size, keyword, categoryId));
     }
 
+    /**
+     * 图书详情（所有登录用户可见）
+     */
+    @GetMapping("/book/{id}")
+    public Result<Book> detail(@PathVariable Long id) {
+        Book book = bookService.getById(id);
+        if (book == null) {
+            return Result.error(404, "图书不存在");
+        }
+        return Result.success(book);
+    }
+
     @GetMapping("/book/category/tree")
     public Result<List<com.library.entity.Category>> categoryTree() {
         return Result.success(categoryService.categoryTree());

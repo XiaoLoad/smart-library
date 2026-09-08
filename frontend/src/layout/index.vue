@@ -81,7 +81,15 @@
           </el-button>
           <el-breadcrumb separator="/">
             <el-breadcrumb-item :to="{ path: '/dashboard' }">首页</el-breadcrumb-item>
-            <el-breadcrumb-item v-if="route.meta.title && route.path !== '/dashboard'">
+            <!-- 三级面包屑：路由 meta.crumbs（如图书详情页）优先 -->
+            <template v-if="route.meta.crumbs">
+              <el-breadcrumb-item
+                v-for="(c, i) in route.meta.crumbs"
+                :key="i"
+                :to="c.path ? { path: c.path } : undefined"
+              >{{ c.title }}</el-breadcrumb-item>
+            </template>
+            <el-breadcrumb-item v-else-if="route.meta.title && route.path !== '/dashboard'">
               {{ route.meta.title }}
             </el-breadcrumb-item>
           </el-breadcrumb>
