@@ -22,6 +22,7 @@
     <mybatis.starter.version>3.0.4</mybatis.starter.version>
     <pagehelper.version>2.1.0</pagehelper.version>
     <jjwt.version>0.12.6</jjwt.version>
+    <langchain4j.version>1.0.0</langchain4j.version>
   </properties>
 
   <dependencies>
@@ -86,6 +87,18 @@
       <groupId>org.projectlombok</groupId>
       <artifactId>lombok</artifactId>
       <optional>true</optional>
+    </dependency>
+
+    <!-- LangChain4j -->
+    <dependency>
+      <groupId>dev.langchain4j</groupId>
+      <artifactId>langchain4j</artifactId>
+      <version>${langchain4j.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>dev.langchain4j</groupId>
+      <artifactId>langchain4j-open-ai</artifactId>
+      <version>${langchain4j.version}</version>
     </dependency>
 
     <!-- 测试 -->

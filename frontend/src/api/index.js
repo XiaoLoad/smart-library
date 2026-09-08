@@ -72,9 +72,12 @@ export const dashboardApi = {
 }
 
 // AI
+// 注：流式对话 SSE 不走 axios（不支持流式解析），在 chat.vue 内用 fetch+ReadableStream 实现
 export const aiApi = {
   conversationList: () => get('/ai/conversation/list'),
   messageList: (conversationId) => get('/ai/message/list', { conversationId }),
+  createConversation: () => post('/ai/conversation/create'),
+  deleteConversation: (id) => service.delete(`/ai/conversation/${id}`),
 }
 
 // 系统设置
@@ -82,4 +85,5 @@ export const systemApi = {
   changePassword: (data) => post('/system/change-password', data),
   getAiConfig: () => get('/system/ai-config'),
   saveAiConfig: (data) => post('/system/ai-config', data),
+  getAiModels: (data) => post('/system/ai-models', data),
 }

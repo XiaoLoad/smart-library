@@ -10,12 +10,14 @@ import com.library.entity.User;
 import com.library.mapper.SystemSettingMapper;
 import com.library.mapper.UserMapper;
 import com.library.security.CurrentUser;
+import com.library.service.AiService;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -33,6 +35,9 @@ public class SystemSettingController {
 
     @Autowired
     private BCryptPasswordEncoder passwordEncoder;
+
+    @Autowired
+    private AiService aiService;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -108,5 +113,24 @@ public class SystemSettingController {
             throw new BusinessException("保存配置失败：" + e.getMessage());
         }
         return Result.success("AI 配置保存成功", null);
+    }
+
+    /**
+     * 动态拉取服务商可用模型列表
+     * <p>
+     * 接收 body: { provider?, apiKey?, endpoint? }（未提供则用已保存配置）
+     */
+    @PostMapping("/ai-models")
+    public Result<Map<String, Object>> fetchModels(@RequestBody(required = false) Map<String, String> body) {
+        CurrentUser cu = CurrentUser.get();
+        if (cu.getUserType() != 3) {
+            return Result.error(403, "仅管理员可操作");
+        }
+        String provider = body != null ? body.get("provider") : null;
+        String apiKey = body != null ? body.get("apiKey") : null;
+        String endpoint = body != null ? body.get("endpoint") : null;
+
+        List<Map<String, String>> list = aiService.fetchAvailableModels(provider, apiKey, endpoint);
+        return Result.success(Map.of("list", list, "total", list.size()));
     }
 }

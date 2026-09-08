@@ -72,14 +72,23 @@
             </el-select>
           </el-form-item>
           <el-form-item label="模型" prop="model">
-            <el-select v-model="aiForm.model" placeholder="请选择模型" style="width: 100%" :disabled="!aiForm.provider" filterable allow-create>
-              <el-option
-                v-for="m in currentModels"
-                :key="m.value"
-                :label="m.label"
-                :value="m.value"
-              />
-            </el-select>
+            <div class="model-row">
+              <el-select v-model="aiForm.model" placeholder="请选择模型" style="flex:1" :disabled="!aiForm.provider" filterable allow-create>
+                <el-option
+                  v-for="m in currentModels"
+                  :key="m.value"
+                  :label="m.label"
+                  :value="m.value"
+                />
+              </el-select>
+              <el-button :icon="Refresh" :loading="modelsLoading" @click="fetchModels" :disabled="!aiForm.provider">
+                拉取模型
+              </el-button>
+            </div>
+            <div v-if="fetchedModels" class="field-hint">
+              <el-icon><InfoFilled /></el-icon>
+              <span>已从服务商 API 拉取 {{ fetchedModels.length }} 个模型（切换服务商将恢复默认列表）</span>
+            </div>
           </el-form-item>
           <el-form-item label="API Key" prop="apiKey">
             <el-input
@@ -117,7 +126,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
-import { Lock, ChatDotSquare, CircleCheckFilled, InfoFilled } from '@element-plus/icons-vue'
+import { Lock, ChatDotSquare, CircleCheckFilled, InfoFilled, Refresh } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { systemApi } from '@/api'
 
@@ -292,19 +301,52 @@ const aiForm = reactive({
   endpoint: 'https://api.deepseek.com/v1/chat/completions',
 })
 
+// 从 API 拉取的模型列表（null 表示未拉取，用内置默认列表）
+const fetchedModels = ref(null)
+const modelsLoading = ref(false)
+
 const aiRules = {
   provider: [{ required: true, message: '请选择服务商', trigger: 'change' }],
   model: [{ required: true, message: '请选择或输入模型名', trigger: 'blur' }],
 }
 
 const currentProviderInfo = computed(() => providers.find((p) => p.value === aiForm.provider))
-const currentModels = computed(() => currentProviderInfo.value?.models || [])
+const currentModels = computed(() => {
+  if (fetchedModels.value) {
+    return fetchedModels.value.map((m) => ({ value: m.id, label: m.name || m.id }))
+  }
+  return currentProviderInfo.value?.models || []
+})
 
 const onProviderChange = () => {
   const info = currentProviderInfo.value
   if (!info) return
   aiForm.model = info.defaultModel
   aiForm.endpoint = info.defaultEndpoint
+  fetchedModels.value = null // 切换服务商恢复默认列表
+}
+
+const fetchModels = async () => {
+  if (!aiForm.provider) return
+  // API Key 未输入且未保存时提示
+  if (!aiForm.apiKey && !aiForm.apiKeySet) {
+    ElMessage.warning('请先输入 API Key')
+    return
+  }
+  modelsLoading.value = true
+  try {
+    const data = await systemApi.getAiModels({
+      provider: aiForm.provider,
+      apiKey: aiForm.apiKey || undefined, // 未输入则后端用已保存的
+      endpoint: aiForm.endpoint || undefined,
+    })
+    fetchedModels.value = data.list || []
+    ElMessage.success(`已拉取 ${fetchedModels.value.length} 个模型`)
+  } catch (e) {
+    // 错误已由拦截器提示
+  } finally {
+    modelsLoading.value = false
+  }
 }
 
 const loadAiConfig = async () => {
@@ -403,6 +445,12 @@ onMounted(() => {
 
 .settings-form {
   max-width: 460px;
+}
+
+.model-row {
+  display: flex;
+  gap: var(--space-2);
+  width: 100%;
 }
 
 .field-hint {
