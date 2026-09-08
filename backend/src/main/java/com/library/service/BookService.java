@@ -51,6 +51,8 @@ public class BookService {
         if (bookMapper.selectByIsbn(book.getIsbn()) != null) {
             throw new BusinessException("ISBN 已存在");
         }
+        // 分类自身及祖先链必须全部启用
+        categoryService.assertSelectable(book.getCategoryId());
         if (book.getTotalCount() == null || book.getTotalCount() < 1) {
             book.setTotalCount(1);
         }
@@ -76,6 +78,8 @@ public class BookService {
         if (sameIsbn != null && !sameIsbn.getId().equals(book.getId())) {
             throw new BusinessException("ISBN 已存在");
         }
+        // 分类自身及祖先链必须全部启用
+        categoryService.assertSelectable(book.getCategoryId());
         if (book.getTotalCount() == null || book.getTotalCount() < 1) {
             book.setTotalCount(1);
         }

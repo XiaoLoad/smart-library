@@ -39,4 +39,12 @@
         WHERE id = #{id}
     </update>
 
+    <update id="updateStatusBatch">
+        UPDATE categories SET status = #{status}
+        WHERE id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </update>
+
 </mapper>

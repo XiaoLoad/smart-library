@@ -25,6 +25,7 @@ export const bookApi = {
   update: (data) => post('/book/update', data),
   addCategory: (data) => post('/category/add', data),
   updateCategory: (data) => post('/category/update', data),
+  updateCategoryStatus: (data) => post('/category/status', data),
 }
 
 // 文件上传（multipart）

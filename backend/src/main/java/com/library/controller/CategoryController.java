@@ -2,6 +2,7 @@ package com.library.controller;
 
 import com.library.common.Result;
 import com.library.dto.CategoryAddRequest;
+import com.library.dto.CategoryStatusRequest;
 import com.library.dto.CategoryUpdateRequest;
 import com.library.entity.Category;
 import com.library.security.CurrentUser;
@@ -44,5 +45,18 @@ public class CategoryController {
         }
         Category category = categoryService.update(req);
         return Result.success("更新成功", category);
+    }
+
+    @PostMapping("/category/status")
+    public Result<Void> changeStatus(@Valid @RequestBody CategoryStatusRequest req) {
+        CurrentUser cu = CurrentUser.get();
+        if (cu.getUserType() != 3) {
+            return Result.error(403, "仅管理员可修改分类状态");
+        }
+        int affected = categoryService.changeStatus(req.getId(), req.getStatus());
+        String message = req.getStatus() == 1
+                ? "已启用"
+                : (affected > 1 ? "已禁用（含 " + (affected - 1) + " 个子分类）" : "已禁用");
+        return Result.success(message, null);
     }
 }

@@ -59,6 +59,9 @@ public class CategoryService {
             if (parent == null) {
                 throw new BusinessException("父分类不存在");
             }
+            if (parent.getStatus() == null || parent.getStatus() == 0) {
+                throw new BusinessException("上级分类「" + parent.getCategoryName() + "」已禁用，无法在其下新增子分类");
+            }
             category.setLevel(parent.getLevel() + 1);
         }
         categoryMapper.insert(category);
@@ -101,6 +104,82 @@ public class CategoryService {
                 out.add(c.getId());
                 collectChildren(all, c.getId(), out);
             }
+        }
+    }
+
+    /**
+     * 切换分类启用状态
+     * 禁用：级联禁用自身及全部子孙分类（避免"父禁用子启用"的矛盾状态）
+     * 启用：要求父链全部启用，仅启用自身（子分类的禁用状态保持独立）
+     *
+     * @return 本次受影响的分类数量
+     */
+    public int changeStatus(Long id, Integer status) {
+        Category category = categoryMapper.selectById(id);
+        if (category == null) {
+            throw new BusinessException("分类不存在");
+        }
+        int current = category.getStatus() == null ? 1 : category.getStatus();
+        if (status == null || (status != 0 && status != 1)) {
+            throw new BusinessException("状态参数不合法");
+        }
+        if (status == current) {
+            throw new BusinessException(status == 1 ? "分类已是启用状态" : "分类已是禁用状态");
+        }
+        if (status == 0) {
+            List<Long> ids = collectDescendantIds(id);
+            categoryMapper.updateStatusBatch(ids, 0);
+            return ids.size();
+        }
+        // 启用：沿父链向上校验
+        String disabledParent = findDisabledAncestor(category.getParentId());
+        if (disabledParent != null) {
+            throw new BusinessException("请先启用上级分类「" + disabledParent + "」");
+        }
+        category.setStatus(1);
+        categoryMapper.update(category);
+        return 1;
+    }
+
+    /**
+     * 向上查找最近一个被禁用的祖先分类，无则返回 null
+     */
+    private String findDisabledAncestor(Long parentId) {
+        Long cur = parentId;
+        while (cur != null && cur > 0) {
+            Category parent = categoryMapper.selectById(cur);
+            if (parent == null) {
+                break;
+            }
+            if (parent.getStatus() == null || parent.getStatus() == 0) {
+                return parent.getCategoryName();
+            }
+            cur = parent.getParentId();
+        }
+        return null;
+    }
+
+    /**
+     * 分类是否可用（自身及全部祖先均启用），图书新增/编辑时校验
+     */
+    public void assertSelectable(Long categoryId) {
+        if (categoryId == null) {
+            throw new BusinessException("请选择图书分类");
+        }
+        Category self = categoryMapper.selectById(categoryId);
+        if (self == null) {
+            throw new BusinessException("所选分类不存在");
+        }
+        Long cur = categoryId;
+        while (cur != null && cur > 0) {
+            Category c = categoryMapper.selectById(cur);
+            if (c == null) {
+                throw new BusinessException("所选分类不存在");
+            }
+            if (c.getStatus() == null || c.getStatus() == 0) {
+                throw new BusinessException("分类「" + c.getCategoryName() + "」已禁用，请重新选择");
+            }
+            cur = c.getParentId();
         }
     }
 }
