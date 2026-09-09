@@ -70,6 +70,31 @@
             <div v-else class="msg-row assistant">
               <div class="msg-avatar"><span>智</span></div>
               <div class="msg-body">
+                <!-- 深度思考（思维链）面板：思考中流式展开，正文开始后自动折叠 -->
+                <div
+                  v-if="m.reasoningSegments && m.reasoningSegments.length"
+                  class="reason-panel"
+                >
+                  <button class="reason-head" @click="m.reasoningOpen = !m.reasoningOpen">
+                    <span class="reason-mark">
+                      <span v-if="m.reasoningStreaming" class="reason-dot"></span>
+                      <AppIcon v-else name="sparkles" :size="13" />
+                    </span>
+                    <span class="reason-title">{{ m.reasoningStreaming ? '深度思考中' : '已深度思考' }}</span>
+                    <span class="reason-chevron" :class="{ open: m.reasoningOpen }">
+                      <AppIcon name="chevron-down" :size="12" />
+                    </span>
+                  </button>
+                  <transition name="reason-expand">
+                    <div v-if="m.reasoningOpen" class="reason-body">
+                      <template v-for="(seg, si) in m.reasoningSegments" :key="si">
+                        <div v-if="si > 0" class="reason-sep"><span></span></div>
+                        <div class="reason-seg">{{ seg }}</div>
+                      </template>
+                    </div>
+                  </transition>
+                </div>
+
                 <!-- 工具调用过程卡片 -->
                 <div v-if="m.toolEvents && m.toolEvents.length" class="tool-events">
                   <!-- 多工具串联计数：调用 ≥ 2 个时显示链路概览 -->
@@ -352,6 +377,10 @@ const switchConv = async (id) => {
     messages.value = (data.list || []).map((m) => ({
       ...m,
       toolEvents: [], // 历史消息无工具调用记录
+      // 历史消息不持久化思维链（与工具中间态一致），仅本轮流式生成时展示
+      reasoningSegments: [],
+      reasoningOpen: false,
+      reasoningStreaming: false,
     }))
   } catch (e) {
     messages.value = []
@@ -492,6 +521,12 @@ const send = async () => {
           role: 'assistant',
           content: '',
           toolEvents: [],
+          // 深度思考：reasoningSegments 按「思考轮次」分段（工具调用会产生多段）；
+          // reasoningStreaming 控制头部「思考中/已思考」与脉冲；reasoningOpen 控制折叠
+          reasoningSegments: [],
+          reasoningOpen: false,
+          reasoningStreaming: false,
+          _reasonSegOpen: false,
           createTime: new Date().toISOString(),
         })
         messages.value.push(assistantMsg)
@@ -513,14 +548,36 @@ const send = async () => {
         }
       }
       const data = dataParts.join('\n')
-      if (event === 'delta') {
+      if (event === 'thinking') {
+        // 深度思考思维链增量：流式追加到当前思考段，面板保持展开
         const msg = ensureAssistantMsg()
+        if (data) {
+          if (!msg._reasonSegOpen) {
+            // 上一段思维链已被工具调用/正文截断 → 新开一段（多轮工具调用场景）
+            msg.reasoningSegments.push('')
+            msg._reasonSegOpen = true
+          }
+          const segs = msg.reasoningSegments
+          segs[segs.length - 1] += data
+          msg.reasoningStreaming = true
+          msg.reasoningOpen = true
+          scrollToBottom()
+        }
+      } else if (event === 'delta') {
+        const msg = ensureAssistantMsg()
+        // 正文开始：思维链阶段结束，自动折叠面板（DeepSeek 式交互）
+        msg._reasonSegOpen = false
+        msg.reasoningStreaming = false
+        msg.reasoningOpen = false
         msg.content += data
         scrollToBottom()
       } else if (event === 'reset') {
         // 进入工具调用轮：清空工具调用前的过渡文本（正文只保留最终回答，
-        // 工具调用过程由工具卡片承载）
+        // 工具调用过程由工具卡片承载）；本段思维链结束，面板折叠
         const msg = ensureAssistantMsg()
+        msg._reasonSegOpen = false
+        msg.reasoningStreaming = false
+        msg.reasoningOpen = false
         msg.content = ''
       } else if (event === 'final') {
         // 后端完成回答后的最终文本（已剔除误输出的工具调用代码），整体替换流式拼接内容
@@ -579,12 +636,20 @@ const send = async () => {
         scrollToBottom()
       } else if (event === 'done') {
         thinking.value = false
+        if (assistantMsg) {
+          assistantMsg._reasonSegOpen = false
+          assistantMsg.reasoningStreaming = false
+          assistantMsg.reasoningOpen = false
+        }
         if (isFirstMsg && conv) {
           conv.title = content.length > 20 ? content.substring(0, 20) + '…' : content
         }
       } else if (event === 'error') {
         thinking.value = false
         const msg = ensureAssistantMsg()
+        msg._reasonSegOpen = false
+        msg.reasoningStreaming = false
+        msg.reasoningOpen = false
         msg.content = `⚠️ ${data || 'AI 请求出错'}`
         scrollToBottom()
       }
@@ -620,6 +685,11 @@ const send = async () => {
       assistantMsg.toolEvents.forEach((t) => {
         if (t.phase === 'start') t.phase = 'end'
       })
+    }
+    // 思维链状态兜底：中断/异常时停止「思考中」脉冲并折叠
+    if (assistantMsg) {
+      assistantMsg._reasonSegOpen = false
+      assistantMsg.reasoningStreaming = false
     }
   }
 }
@@ -948,6 +1018,103 @@ onMounted(loadConversations)
 @keyframes pulse {
   0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
   40% { transform: scale(1); opacity: 1; }
+}
+
+/* —— 深度思考（思维链）面板 —— */
+.reason-panel {
+  margin-bottom: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-subtle);
+  overflow: hidden;
+}
+.reason-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: var(--fs-caption);
+  color: var(--color-text-tertiary);
+  transition: background var(--duration-fast) var(--ease-soft);
+}
+.reason-head:hover { background: var(--color-bg-muted); }
+.reason-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+  flex-shrink: 0;
+}
+.reason-title {
+  font-family: var(--font-serif);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.reason-chevron {
+  margin-left: auto;
+  display: inline-flex;
+  transition: transform var(--duration-fast) var(--ease-soft);
+  color: var(--color-text-tertiary);
+}
+.reason-chevron.open { transform: rotate(180deg); }
+
+/* 思考中脉冲点（与等待态 .dot 同款呼吸节奏，尺寸更小） */
+.reason-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  animation: reason-pulse 1.2s infinite ease-in-out both;
+}
+@keyframes reason-pulse {
+  0%, 80%, 100% { transform: scale(0.7); opacity: 0.45; }
+  40% { transform: scale(1.15); opacity: 1; }
+}
+
+/* 思维链正文：小号次级文字，限高内滚，避免超长推理撑爆对话区 */
+.reason-body {
+  padding: 0 12px 10px 38px;
+  max-height: 240px;
+  overflow-y: auto;
+  font-size: var(--fs-caption);
+  line-height: 1.75;
+  color: var(--color-text-secondary);
+}
+.reason-seg {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+/* 多轮思考之间的分隔（工具调用后再次思考） */
+.reason-sep {
+  display: flex;
+  align-items: center;
+  margin: 8px 0;
+}
+.reason-sep span {
+  flex: 1;
+  height: 1px;
+  background: var(--color-border);
+}
+
+/* 展开/折叠过渡：与工具数据抽屉同款动效 */
+.reason-expand-enter-active,
+.reason-expand-leave-active {
+  transition: opacity var(--duration-fast) var(--ease-soft),
+              transform var(--duration-fast) var(--ease-soft);
+  transform-origin: top;
+}
+.reason-expand-enter-from,
+.reason-expand-leave-to {
+  opacity: 0;
+  transform: translateY(-4px) scaleY(0.96);
 }
 
 /* —— 工具调用卡片 —— */
