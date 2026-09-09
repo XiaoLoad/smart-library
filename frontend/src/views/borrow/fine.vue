@@ -26,6 +26,33 @@
       </div>
     </div>
 
+    <!-- 馆内规则 -->
+    <div class="rules-card fade-in">
+      <div class="rules-grid">
+        <div class="rule-item">
+          <span class="rule-no">壹</span>
+          <div class="rule-body">
+            <div class="rule-title">逾期罚款</div>
+            <p class="rule-desc">图书逾期归还，自应还日期起按 <b>0.5 元 / 天</b> 计收滞纳金，归还确认时一并结算。</p>
+          </div>
+        </div>
+        <div class="rule-item">
+          <span class="rule-no">贰</span>
+          <div class="rule-body">
+            <div class="rule-title">丢失 / 损坏赔偿</div>
+            <p class="rule-desc">图书丢失或污损，须按图书定价赔偿，成色折算以服务台现场核定为准。</p>
+          </div>
+        </div>
+        <div class="rule-item">
+          <span class="rule-no">叁</span>
+          <div class="rule-body">
+            <div class="rule-title">缴纳方式</div>
+            <p class="rule-desc">罚款请在服务台缴清核销，未缴罚款将记录在您的账户中。</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div class="data-table">
       <div class="table-toolbar">
         <div class="left">
@@ -136,6 +163,65 @@ onMounted(load)
 
 .stat-value.danger { color: var(--color-danger); }
 .stat-value.success { color: var(--color-success); }
+
+/* —— 馆内规则卡：编辑风三栏，serif 序号 + 左色条 —— */
+.rules-card {
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-primary);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4) var(--space-5);
+  margin-bottom: var(--space-5);
+}
+
+.rules-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-5);
+}
+
+.rule-item {
+  display: flex;
+  gap: var(--space-3);
+}
+
+.rule-no {
+  font-family: var(--font-serif);
+  font-size: 1.5rem;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--color-primary);
+  opacity: 0.55;
+  flex-shrink: 0;
+  padding-top: 2px;
+}
+
+.rule-title {
+  font-family: var(--font-serif);
+  font-size: var(--fs-body);
+  font-weight: 600;
+  color: var(--color-text);
+  margin-bottom: 4px;
+}
+
+.rule-desc {
+  margin: 0;
+  font-size: var(--fs-caption);
+  line-height: 1.7;
+  color: var(--color-text-secondary);
+}
+
+.rule-desc b {
+  color: var(--color-warning);
+  font-weight: 600;
+}
+
+@media (max-width: 1024px) {
+  .rules-grid {
+    grid-template-columns: 1fr;
+    gap: var(--space-4);
+  }
+}
 
 .mono-text {
   font-family: var(--font-mono);

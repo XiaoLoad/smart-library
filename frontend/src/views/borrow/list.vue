@@ -53,14 +53,14 @@
             </el-tooltip>
           </template>
         </el-table-column>
-        <el-table-column label="借阅时间" width="160">
+        <el-table-column label="借阅时间" width="150">
           <template #default="{ row }">
-            <span class="time-text">{{ row.borrowTime || '—' }}</span>
+            <span class="time-text">{{ formatDateTime(row.borrowTime) }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="应还时间" width="160">
+        <el-table-column label="应还时间" width="150">
           <template #default="{ row }">
-            <span class="time-text" :class="{ danger: row.status === 3 }">{{ row.dueTime || '—' }}</span>
+            <span class="time-text" :class="{ danger: row.status === 3 }">{{ formatDateTime(row.dueTime) }}</span>
           </template>
         </el-table-column>
         <el-table-column prop="renewCount" label="续借" width="80">
@@ -68,7 +68,7 @@
             <span>{{ row.renewCount }}/{{ row.renewMaxCount || '-' }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="100">
+        <el-table-column label="状态" width="118">
           <template #default="{ row }">
             <span class="status-tag" :class="statusClass(row.status)">
               {{ statusText(row.status) }}
@@ -133,6 +133,7 @@ import { Search, Tickets, Checked } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { borrowApi } from '@/api'
 import { useUserStore } from '@/stores/user'
+import { formatDateTime } from '@/utils/datetime.js'
 import BorrowCodeDialog from '@/components/BorrowCodeDialog.vue'
 import BorrowProcessDialog from '@/components/BorrowProcessDialog.vue'
 
