@@ -35,7 +35,8 @@
             </if>
             <if test="search != null and search != ''">
                 AND (user_name LIKE CONCAT('%', #{search}, '%')
-                  OR borrow_no LIKE CONCAT('%', #{search}, '%'))
+                  OR borrow_no LIKE CONCAT('%', #{search}, '%')
+                  OR book_title LIKE CONCAT('%', #{search}, '%'))
             </if>
         </where>
         ORDER BY apply_time DESC

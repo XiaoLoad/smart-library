@@ -80,8 +80,15 @@ public class BorrowService {
      */
     @Transactional
     public Borrow apply(Long bookId) {
-        CurrentUser cu = CurrentUser.get();
-        User user = userMapper.selectById(cu.getUserId());
+        return apply(CurrentUser.get().getUserId(), bookId);
+    }
+
+    /**
+     * 借阅申请（显式操作人，供 AI 工具在无 ThreadLocal 的异步线程中调用）
+     */
+    @Transactional
+    public Borrow apply(Long operatorUserId, Long bookId) {
+        User user = userMapper.selectById(operatorUserId);
         if (user == null || user.getStatus() != 1) {
             throw new BusinessException(403, "用户不存在或已禁用");
         }
@@ -143,12 +150,19 @@ public class BorrowService {
     /**
      * 取书确认（管理员，支持批量，供借阅码弹窗等场景）
      */
-    @Transactional
     public PickupResultVo pickup(List<String> borrowNos) {
         CurrentUser cu = CurrentUser.get();
         if (cu.getUserType() != 3) {
             throw new BusinessException(403, "仅管理员可取书确认");
         }
+        return pickup(borrowNos, cu.getUserId());
+    }
+
+    /**
+     * 取书确认（显式管理员 ID，供 AI 工具调用）
+     */
+    @Transactional
+    public PickupResultVo pickup(List<String> borrowNos, Long adminId) {
         List<Map<String, Object>> results = new ArrayList<>();
         int success = 0;
         for (String no : borrowNos) {
@@ -159,7 +173,7 @@ public class BorrowService {
                 if (record == null) {
                     throw new BusinessException("借阅码不存在");
                 }
-                doPickup(record, cu);
+                doPickup(record, adminId);
                 r.put("success", true);
                 r.put("record", record);
                 success++;
@@ -175,7 +189,7 @@ public class BorrowService {
     /**
      * 执行取书：0 → 1，按借阅人类型计算应还时间
      */
-    private void doPickup(Borrow record, CurrentUser cu) {
+    private void doPickup(Borrow record, Long adminId) {
         if (record.getStatus() != 0) {
             throw new BusinessException("该记录非待取书状态");
         }
@@ -188,7 +202,7 @@ public class BorrowService {
         borrowMapper.updatePickup(
                 record.getId(), 1, now,
                 now.plusDays(limit.getLoanDays()), "",
-                cu.getUserId()
+                adminId
         );
     }
 
@@ -197,21 +211,28 @@ public class BorrowService {
      * 用户：发起归还申请 1/3 → 5（待确认归还），库存不变，需管理员确认
      * 管理员：直接归还 1/3 → 2（柜台现场收书场景），库存 +1
      */
-    @Transactional
     public Borrow returnBook(Long id, String borrowNo) {
+        CurrentUser cu = CurrentUser.get();
+        return returnBook(cu.getUserId(), cu.getUserType(), id, borrowNo);
+    }
+
+    /**
+     * 归还入口（显式操作人，供 AI 工具在无 ThreadLocal 的异步线程中调用）
+     */
+    @Transactional
+    public Borrow returnBook(Long operatorUserId, Integer operatorUserType, Long id, String borrowNo) {
         Borrow record = findRecord(id, borrowNo);
         // 非管理员只能操作本人记录
-        CurrentUser cu = CurrentUser.get();
-        if (cu.getUserType() != 3 && !record.getUserId().equals(cu.getUserId())) {
+        if (operatorUserType != 3 && !record.getUserId().equals(operatorUserId)) {
             throw new BusinessException(403, "只能归还本人借阅的图书");
         }
         if (record.getStatus() != 1 && record.getStatus() != 3) {
             throw new BusinessException("该记录状态不可归还");
         }
         LocalDateTime now = LocalDateTime.now();
-        if (cu.getUserType() == 3) {
+        if (operatorUserType == 3) {
             // 管理员直接归还，罚款按当前时间结算
-            return completeReturn(record, now, cu.getUserId(), "已归还（管理员确认）");
+            return completeReturn(record, now, operatorUserId, "已归还（管理员确认）");
         }
         // 用户发起归还申请，进入待确认归还
         borrowMapper.updateReturnRequest(record.getId(), now, "待确认归还");
@@ -304,12 +325,20 @@ public class BorrowService {
      * 取书 / 归还 / 归还确认本质是同一笔柜台事务，仅目的不同，
      * 按记录状态自动分流：0 待取书 → 取书；1/3 → 直接归还；5 → 归还确认
      */
-    @Transactional
     public PickupResultVo batchProcess(List<Long> ids, List<String> borrowNos) {
         CurrentUser cu = CurrentUser.get();
         if (cu.getUserType() != 3) {
             throw new BusinessException(403, "仅管理员可批量办理");
         }
+        return batchProcess(ids, borrowNos, cu.getUserId());
+    }
+
+    /**
+     * 批量办理（显式管理员 ID，供 AI 工具在无 ThreadLocal 的异步线程中调用）。
+     * 调用方需自行保证操作者为管理员。
+     */
+    @Transactional
+    public PickupResultVo batchProcess(List<Long> ids, List<String> borrowNos, Long adminId) {
         List<Long> idList = ids == null ? Collections.emptyList() : ids;
         List<String> noList = borrowNos == null ? Collections.emptyList() : borrowNos;
         List<Map<String, Object>> results = new ArrayList<>(idList.size() + noList.size());
@@ -317,13 +346,13 @@ public class BorrowService {
         for (Long id : idList) {
             Map<String, Object> r = new HashMap<>();
             r.put("requestId", id);
-            success += processOne(r, id, null, cu);
+            success += processOne(r, id, null, adminId);
             results.add(r);
         }
         for (String no : noList) {
             Map<String, Object> r = new HashMap<>();
             r.put("requestBorrowNo", no);
-            success += processOne(r, null, no, cu);
+            success += processOne(r, null, no, adminId);
             results.add(r);
         }
         return new PickupResultVo(results, success, idList.size() + noList.size() - success);
@@ -333,7 +362,7 @@ public class BorrowService {
      * 按状态分流办理单条记录
      * @return 1 成功 / 0 失败（失败原因写入 result.message）
      */
-    private int processOne(Map<String, Object> result, Long id, String borrowNo, CurrentUser cu) {
+    private int processOne(Map<String, Object> result, Long id, String borrowNo, Long adminId) {
         try {
             Borrow record = findRecord(id, borrowNo);
             result.put("id", record.getId());
@@ -343,17 +372,17 @@ public class BorrowService {
             String action;
             switch (record.getStatus()) {
                 case 0 -> {
-                    doPickup(record, cu);
+                    doPickup(record, adminId);
                     action = "pickup";
                 }
                 case 1, 3 -> {
-                    completeReturn(record, LocalDateTime.now(), cu.getUserId(), "已归还（柜台办理）");
+                    completeReturn(record, LocalDateTime.now(), adminId, "已归还（柜台办理）");
                     action = "return";
                 }
                 case 5 -> {
                     LocalDateTime effective = record.getReturnRequestTime() != null
                             ? record.getReturnRequestTime() : LocalDateTime.now();
-                    completeReturn(record, effective, cu.getUserId(), "已归还");
+                    completeReturn(record, effective, adminId, "已归还");
                     action = "confirm";
                 }
                 default -> throw new BusinessException("该状态无需柜台办理");
@@ -373,6 +402,16 @@ public class BorrowService {
      */
     @Transactional
     public Borrow renew(Long id, String borrowNo) {
+        CurrentUser cu = CurrentUser.get();
+        return renew(cu.getUserId(), cu.getUserType(), id, borrowNo);
+    }
+
+    /**
+     * 续借（显式操作人，供 AI 工具在无 ThreadLocal 的异步线程中调用）。
+     * 非管理员只能续借本人记录。
+     */
+    @Transactional
+    public Borrow renew(Long operatorUserId, Integer operatorUserType, Long id, String borrowNo) {
         Borrow record;
         if (id != null) {
             record = borrowMapper.selectById(id);
@@ -383,6 +422,9 @@ public class BorrowService {
         }
         if (record == null) {
             throw new BusinessException("借阅记录不存在");
+        }
+        if (operatorUserType != 3 && !record.getUserId().equals(operatorUserId)) {
+            throw new BusinessException(403, "只能续借本人借阅的图书");
         }
         if (record.getStatus() != 1) {
             throw new BusinessException("只有借阅中的记录可续借");
