@@ -27,4 +27,9 @@ public class AiChannelRequest {
     private String endpoint;
     /** 是否启用（新增时默认启用） */
     private Boolean enabled;
+    /**
+     * 是否开启深度思考（思维链）。默认 false；
+     * 仅思考型模型（如 DeepSeek V3.1+/V4）生效，开启后响应更慢、Token 消耗更高。
+     */
+    private Boolean thinkingEnabled;
 }

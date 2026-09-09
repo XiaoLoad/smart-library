@@ -96,6 +96,21 @@
             <el-switch v-model="form.enabled" />
           </div>
         </el-form-item>
+
+        <el-form-item>
+          <div class="enable-row" :class="{ 'is-off': !form.enabled }">
+            <div>
+              <div class="enable-label">
+                <AppIcon name="sparkles" :size="14" class="label-icon" />深度思考
+              </div>
+              <div class="enable-note">
+                开启后模型先输出思维链再回答，复杂问题更严谨，但响应更慢、Token 消耗更高；
+                仅思考型模型生效（如 DeepSeek V3.1+/V4），默认关闭。
+              </div>
+            </div>
+            <el-switch v-model="form.thinkingEnabled" :disabled="!form.enabled" />
+          </div>
+        </el-form-item>
       </el-form>
     </div>
 
@@ -259,6 +274,7 @@ const submit = () => {
         endpoint: form.endpoint,
         model: form.model,
         enabled: form.enabled,
+        thinkingEnabled: form.thinkingEnabled,
       }
       if (form.apiKey) {
         payload.apiKey = form.apiKey
@@ -401,6 +417,16 @@ const submit = () => {
   font-size: var(--fs-body);
   font-weight: 500;
   color: var(--color-text);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.label-icon { color: var(--color-primary); }
+
+/* 渠道停用时，深度思考行整体降透明度并禁用开关 */
+.enable-row.is-off {
+  opacity: 0.55;
 }
 
 .enable-note {
