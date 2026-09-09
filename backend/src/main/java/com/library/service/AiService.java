@@ -37,7 +37,8 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * AI 对话服务：基于 LangChain4j 1.0.0 + OpenAI 兼容接口（DeepSeek/OpenAI 等）。
+ * AI 对话服务：基于 LangChain4j 1.20 + OpenAI 兼容接口（DeepSeek/OpenAI 等），
+ * 支持深度思考模式（reasoning_content 解析与回传由框架原生处理）。
  * <p>
  * 提供：会话增删、SSE 流式对话（含历史记忆 + 工具调用 + 首条消息自动生成标题）。
  * <p>
@@ -311,6 +312,18 @@ public class AiService {
                     .build();
 
             assistant.chat(content)
+                    .onPartialThinking(partial -> {
+                        // 深度思考思维链增量（reasoning_content）：独立 thinking 事件推给前端展示，
+                        // 不落库、不计入回答正文（与工具中间态一致，避免污染历史）
+                        try {
+                            String t = partial.text();
+                            if (t != null && !t.isEmpty()) {
+                                emitter.send(SseEmitter.event().name("thinking").data(t));
+                            }
+                        } catch (IOException e) {
+                            // 客户端已断开，忽略
+                        }
+                    })
                     .onPartialResponse(partial -> {
                         try {
                             emitter.send(SseEmitter.event().name("delta").data(partial));
@@ -570,9 +583,13 @@ public class AiService {
                 .baseUrl(baseUrl)
                 .apiKey(cfg.apiKey())
                 .modelName(cfg.model())
-                // 自定义 HTTP 客户端：对 DeepSeek 模型自动关闭 thinking 模式，
-                // 规避 reasoning_content 在多轮/工具调用时必须回传而 LangChain4j 不支持的问题
-                .httpClientBuilder(new DeepSeekCompatHttpClient.Builder())
+                // 深度思考（思维链）：returnThinking 解析响应中的 reasoning_content，
+                // sendThinking 在后续轮次（含工具调用）自动回传思维链——满足 DeepSeek 思考模式
+                // 「工具调用轮必须回传 reasoning_content」的协议要求，由框架原生处理。
+                // 无 reasoning_content 的服务商（通义/Kimi 等未开启思考时）该字段为 null，
+                // 不会序列化进请求体，互不影响。
+                .returnThinking(true)
+                .sendThinking(true)
                 // 模型调用超时：避免长时间无响应卡死 SSE（参考 langchain4j-examples）
                 .timeout(Duration.ofSeconds(MODEL_TIMEOUT_SECONDS))
                 // 请求/响应日志：便于排查调用失败、token 用量等问题
