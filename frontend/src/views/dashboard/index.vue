@@ -34,7 +34,7 @@
         <div class="todo-body">
           <div class="todo-num">{{ ops.pendingPickup }}<span class="todo-num-unit">单</span></div>
           <div class="todo-label">待取书预约</div>
-          <div class="todo-sub">读者已申请，等待到馆取书</div>
+          <EllipsisText class="todo-sub" content="读者已申请，等待到馆取书" />
         </div>
         <div class="todo-go">办理<el-icon><ArrowRight /></el-icon></div>
       </router-link>
@@ -44,7 +44,7 @@
         <div class="todo-body">
           <div class="todo-num">{{ ops.pendingReturnConfirm }}<span class="todo-num-unit">单</span></div>
           <div class="todo-label">归还待确认</div>
-          <div class="todo-sub">读者已还书，等待柜台确认</div>
+          <EllipsisText class="todo-sub" content="读者已还书，等待柜台确认" />
         </div>
         <div class="todo-go">办理<el-icon><ArrowRight /></el-icon></div>
       </router-link>
@@ -54,7 +54,7 @@
         <div class="todo-body">
           <div class="todo-num">{{ ops.overdue }}<span class="todo-num-unit">本</span></div>
           <div class="todo-label">逾期未还</div>
-          <div class="todo-sub">超期图书，需要催还处理</div>
+          <EllipsisText class="todo-sub" content="超期图书，需要催还处理" />
         </div>
         <div class="todo-go">催还<el-icon><ArrowRight /></el-icon></div>
       </router-link>
@@ -130,7 +130,7 @@
           <li v-for="book in data.hotBooks" :key="book.rank" class="hot-item">
             <div class="rank" :class="`rank-${book.rank}`">{{ book.rank }}</div>
             <div class="book-meta">
-              <div class="book-title">{{ book.title }}</div>
+              <EllipsisText class="book-title" :content="book.title" />
               <div class="book-author">{{ book.author }}</div>
               <div class="hot-bar">
                 <span
@@ -160,7 +160,7 @@
           <li v-for="notice in notices" :key="notice.id" class="notice-item">
             <div class="notice-dot" :class="{ top: notice.top }"></div>
             <div class="notice-content">
-              <div class="notice-title">{{ notice.title }}</div>
+              <EllipsisText class="notice-title" :content="notice.title" :lines="2" />
               <div class="notice-time">{{ formatTime(notice.publishTime) }}</div>
             </div>
           </li>
@@ -189,6 +189,7 @@ import {
 } from '@element-plus/icons-vue'
 import { dashboardApi, announcementApi } from '@/api'
 import { useUserStore } from '@/stores/user'
+import EllipsisText from '@/components/EllipsisText.vue'
 
 use([CanvasRenderer, LineChart, PieChart, BarChart, GridComponent, TooltipComponent, LegendComponent, TitleComponent, GraphicComponent])
 
@@ -416,7 +417,8 @@ const loadData = async () => {
     announcementApi.list(),
   ])
   data.value = stats
-  notices.value = (noticeData.list || []).slice(0, 4)
+  // 公告拉满与排行卡同行的可视高度（约 8 条），超出部分列表内滚动
+  notices.value = (noticeData.list || []).slice(0, 8)
 }
 
 onMounted(loadData)
@@ -515,12 +517,10 @@ onMounted(loadData)
   margin: 2px 0;
 }
 
+/* todo-sub 的截断与悬停全文由 EllipsisText 组件提供 */
 .todo-sub {
   font-size: var(--fs-caption);
   color: var(--color-text-tertiary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .todo-go {
@@ -638,6 +638,29 @@ onMounted(loadData)
 }
 
 /* 热门图书 */
+/* 底部两卡同行等高拉伸：列表统一限高内滚，内容多时滚动，杜绝大片留白 */
+.hot-list,
+.notice-list {
+  max-height: 440px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border-strong) transparent;
+}
+
+.hot-list::-webkit-scrollbar,
+.notice-list::-webkit-scrollbar {
+  width: 5px;
+}
+.hot-list::-webkit-scrollbar-thumb,
+.notice-list::-webkit-scrollbar-thumb {
+  border-radius: 3px;
+  background: var(--color-border-strong);
+}
+.hot-list::-webkit-scrollbar-track,
+.notice-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
 .hot-list {
   list-style: none;
   display: flex;
@@ -674,14 +697,12 @@ onMounted(loadData)
 .rank-3 { background: var(--color-warning); color: var(--color-text-inverse); }
 
 .book-meta { flex: 1; min-width: 0; }
+/* book-title 的截断与悬停全文由 EllipsisText 组件提供 */
 .book-title {
   font-size: var(--fs-body);
   font-weight: 500;
   color: var(--color-text);
   margin-bottom: 2px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .book-author {
   font-size: var(--fs-caption);
@@ -738,6 +759,8 @@ onMounted(loadData)
 
 .notice-list {
   list-style: none;
+  /* 公告条目较矮，与排行卡等高时富余空间锚定顶部，视觉均衡 */
+  align-content: start;
 }
 
 .notice-item {
@@ -764,16 +787,12 @@ onMounted(loadData)
 }
 
 .notice-content { flex: 1; min-width: 0; }
+/* notice-title 的两行截断与悬停全文由 EllipsisText 组件提供 */
 .notice-title {
   font-size: var(--fs-body);
   color: var(--color-text);
   line-height: var(--lh-snug);
   margin-bottom: 4px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
 }
 .notice-time {
   font-size: var(--fs-caption);
