@@ -60,7 +60,8 @@ public class CommonTools extends BaseLibraryTools {
      */
     @Tool("按条件检索馆藏图书，最多返回 15 条。支持：关键词（匹配书名/作者/ISBN）、"
             + "分类ID（来自 queryCategories，自动包含其全部子分类）、是否只看可借。"
-            + "三个参数均可省略；不传任何条件时返回最新入库图书")
+            + "三个参数均可省略；不传任何条件时返回最新入库图书。"
+            + "返回字段含 description=图书内容简介，用户要求介绍/推荐某本书时应据此概述其内容")
     public Map<String, Object> queryBooks(@P("检索关键词：书名/作者/ISBN 片段，可省略") String keyword,
                                           @P("分类ID，必须来自 queryCategories 返回的 id；传该ID自动包含所有子分类，可省略") Long categoryId,
                                           @P("是否只看当前可借的书：true=只看可借数量>0，false 或省略=全部") Boolean availableOnly) {
@@ -99,6 +100,7 @@ public class CommonTools extends BaseLibraryTools {
                 m.put("isbn", b.getIsbn());
                 m.put("category", b.getCategoryId() == null ? null : cateNames.get(b.getCategoryId()));
                 m.put("location", b.getLocation());
+                m.put("description", b.getDescription());
                 m.put("availableCount", b.getAvailableCount());
                 m.put("totalCount", b.getTotalCount());
                 m.put("available", b.getAvailableCount() != null && b.getAvailableCount() > 0);

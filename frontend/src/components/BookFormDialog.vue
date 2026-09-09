@@ -136,6 +136,22 @@
             <span class="field-tip">入库即全部可借</span>
           </el-form-item>
         </div>
+
+        <div class="bf-section">内容简介</div>
+        <div class="bf-fields">
+          <el-form-item label="简介" class="span-2">
+            <el-input
+              v-model="form.description"
+              type="textarea"
+              :rows="4"
+              maxlength="500"
+              show-word-limit
+              resize="none"
+              placeholder="简要介绍书籍的内容主旨、作者背景与阅读价值，选填，将展示在图书详情页"
+            />
+            <span class="field-tip">最多 500 字，留空则详情页显示「暂无简介」</span>
+          </el-form-item>
+        </div>
       </el-form>
     </div>
 
@@ -187,6 +203,7 @@ const coverImgError = ref(false)
 const form = reactive({
   title: '', author: '', isbn: '', categoryId: null,
   publisher: '', location: '', price: 10, totalCount: 1, coverUrl: '',
+  description: '',
 })
 
 const rules = {
@@ -227,6 +244,7 @@ watch(() => props.modelValue, (v) => {
       price: props.book.price != null ? Number(props.book.price) : 10,
       totalCount: props.book.totalCount ?? 1,
       coverUrl: props.book.coverUrl || '',
+      description: props.book.description || '',
     })
     coverLink.value = props.book.coverUrl && /^https?:\/\//i.test(props.book.coverUrl)
       ? props.book.coverUrl
@@ -283,6 +301,7 @@ const resetForm = () => {
   Object.assign(form, {
     title: '', author: '', isbn: '', categoryId: null,
     publisher: '', location: '', price: 10, totalCount: 1, coverUrl: '',
+    description: '',
   })
   coverLink.value = ''
   coverMode.value = 'local'
@@ -327,6 +346,8 @@ const submit = async () => {
 }
 .book-form-dialog .el-dialog__body {
   padding: 18px 32px 6px;
+  max-height: 72vh;
+  overflow-y: auto;
 }
 .book-form-dialog .el-dialog__footer {
   padding: 14px 32px 22px;
