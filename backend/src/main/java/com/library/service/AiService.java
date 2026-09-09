@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.library.common.exception.BusinessException;
 import com.library.entity.AiConversation;
 import com.library.entity.SystemSetting;
+import com.library.entity.User;
 import com.library.mapper.*;
 import com.library.security.CurrentUser;
 import dev.langchain4j.data.message.AiMessage;
@@ -140,6 +141,12 @@ public class AiService {
                先调用 queryCategories 获取分类ID，再调用 queryBooks 并传 categoryId（自动包含子分类）；
                不要只靠关键词模糊匹配代替分类检索。
                理由：分类查询是精确的结构化检索，关键词匹配会漏检。
+
+            8. 回答正文只允许自然语言：禁止在回答中出现任何工具调用相关内容——包括工具名与参数的代码块、
+               JSON、函数调用片段（如 queryBooks(...)、{"name":"queryBooks","arguments":{...}} 等），
+               也不要在正文解释"我将调用哪个工具"或贴出调用过程。工具由系统自动执行，
+               调用过程会自动以工具卡片形式展示给用户，你只需用自然语言呈现查询结果与结论。
+               理由：工具调用代码属于内部实现细节，普通用户看不懂且严重干扰阅读。
             """;
 
     /**
@@ -258,7 +265,11 @@ public class AiService {
                 ? new AdminTools(cu.getUserId(), cu.getUserType(), toolCtx)
                 : new ReaderTools(cu.getUserId(), cu.getUserType(), toolCtx);
 
-        String displayName = cu.getUsername() == null ? "用户" : cu.getUsername();
+        // 称呼优先使用真实姓名（real_name），无姓名时兜底登录账号，再兜底"用户"
+        User me = userMapper.selectById(cu.getUserId());
+        String displayName = (me != null && me.getRealName() != null && !me.getRealName().isBlank())
+                ? me.getRealName()
+                : (cu.getUsername() != null && !cu.getUsername().isBlank() ? cu.getUsername() : "用户");
         boolean needsTitle = conv.getTitle() == null || conv.getTitle().isBlank()
                 || "新对话".equals(conv.getTitle());
 
@@ -268,6 +279,12 @@ public class AiService {
         // P2.10 结构化输出：end 阶段携带 data 字段（工具返回的精简 JSON 快照）
         BaseLibraryTools.ToolEventEmitter emitterCb = (toolName, phase, detail, data) -> {
             try {
+                // 工具开始执行标志着一轮工具调用开始：此前流式输出的文本都是
+                // 工具调用前的过渡语（模型也可能误输出工具调用代码块），
+                // 通知前端清空正文——工具调用过程由工具卡片承载，正文只保留最终回答
+                if ("start".equals(phase)) {
+                    emitter.send(SseEmitter.event().name("reset").data("[RESET]"));
+                }
                 Map<String, Object> payload = new java.util.LinkedHashMap<>();
                 payload.put("name", toolName);
                 payload.put("phase", phase);
@@ -305,14 +322,24 @@ public class AiService {
                         }
                     })
                     .onCompleteResponse(response -> {
-                        // 落库最终 AI 回答：取最终一轮模型响应的文本（不含工具轮过渡语）
+                        // 落库最终 AI 回答：取最终一轮模型响应的文本（不含工具轮过渡语），
+                        // 并剔除模型误输出到正文的工具调用代码块/函数调用片段
                         AiMessage finalAi = response.aiMessage();
                         String answer = finalAi == null ? null : finalAi.text();
-                        if (answer != null && !answer.isBlank()) {
+                        String sanitized = stripToolCallArtifacts(answer);
+                        if (sanitized != null && !sanitized.isBlank()) {
+                            // 正文被消毒过：推送 final 事件替换前端已流式拼接的内容
+                            if (answer != null && !sanitized.equals(answer)) {
+                                try {
+                                    emitter.send(SseEmitter.event().name("final").data(sanitized));
+                                } catch (IOException e) {
+                                    // 忽略
+                                }
+                            }
                             com.library.entity.AiMessage aiMsg = new com.library.entity.AiMessage();
                             aiMsg.setConversationId(conversationId);
                             aiMsg.setRole("assistant");
-                            aiMsg.setContent(answer);
+                            aiMsg.setContent(sanitized);
                             aiMsg.setCreateTime(LocalDateTime.now());
                             messageMapper.insert(aiMsg);
                             evictMemory(conversationId);
@@ -371,21 +398,99 @@ public class AiService {
     // ===== 内部方法 =====
 
     /**
+     * 已注册的全部工具名（与 CommonTools/ReaderTools/AdminTools 的 @Tool 方法名保持一致），
+     * 用于识别模型误输出到回答正文中的工具调用代码。
+     */
+    private static final List<String> TOOL_NAMES = List.of(
+            "queryCategories", "queryBooks", "queryHotBooks", "queryAnnouncements",
+            "queryMyBorrows", "queryMyFines", "queryBorrowQuota", "queryMyNotifications",
+            "applyBorrow", "renewMyBorrow", "requestReturn",
+            "adminQueryBorrows", "adminQueryFines", "adminQueryUsers",
+            "adminQueryStats", "adminCounterProcess");
+
+    /** 围栏代码块（``` ... ```） */
+    private static final java.util.regex.Pattern FENCED_BLOCK =
+            java.util.regex.Pattern.compile("```[\\s\\S]*?```");
+
+    /** 独立成行的工具函数调用，如 queryBooks(keyword="哲学") */
+    private static final java.util.regex.Pattern STANDALONE_CALL =
+            java.util.regex.Pattern.compile("^\\s*([a-zA-Z_]\\w*)\\s*\\(.*\\)\\s*;?\\s*$");
+
+    /**
+     * 剔除模型误输出到回答正文中的工具调用痕迹：
+     * <ol>
+     *   <li>函数调用特殊标记（FunctionCallBegin/End、tool_call 标签）</li>
+     *   <li>内容为工具调用 JSON/函数名的围栏代码块</li>
+     *   <li>独立成行的工具函数调用语句</li>
+     * </ol>
+     * 最后压缩多余空行。
+     */
+    private String stripToolCallArtifacts(String text) {
+        if (text == null || text.isBlank()) {
+            return text;
+        }
+        String s = text;
+        // 1. 特殊函数调用标记
+        s = s.replaceAll("(?s)<\\|?FunctionCallBegin\\|?>.*?<\\|?FunctionCallEnd\\|?>", "");
+        s = s.replaceAll("(?s)</?tool_call>", "");
+        // 2. 工具调用代码块
+        java.util.regex.Matcher m = FENCED_BLOCK.matcher(s);
+        StringBuilder sb = new StringBuilder();
+        while (m.find()) {
+            String block = m.group();
+            if (looksLikeToolCallCode(block)) {
+                m.appendReplacement(sb, "");
+            } else {
+                m.appendReplacement(sb, java.util.regex.Matcher.quoteReplacement(block));
+            }
+        }
+        m.appendTail(sb);
+        s = sb.toString();
+        // 3. 独立成行的工具函数调用
+        StringBuilder lineOut = new StringBuilder();
+        for (String line : s.split("\n", -1)) {
+            java.util.regex.Matcher lm = STANDALONE_CALL.matcher(line);
+            if (lm.matches() && TOOL_NAMES.contains(lm.group(1))) {
+                continue;
+            }
+            lineOut.append(line).append('\n');
+        }
+        s = lineOut.toString();
+        // 4. 压缩 3+ 连续换行为 2 个，去掉首尾空白
+        s = s.replaceAll("\\n{3,}", "\n\n").trim();
+        return s;
+    }
+
+    /** 判断围栏代码块内容是否为工具调用代码（工具名 / 函数调用 JSON 特征） */
+    private boolean looksLikeToolCallCode(String block) {
+        String lower = block.toLowerCase();
+        for (String name : TOOL_NAMES) {
+            if (lower.contains(name.toLowerCase())) {
+                return true;
+            }
+        }
+        boolean jsonLike = lower.contains("{") && (lower.contains("\"arguments\"") || lower.contains("\"tool\""));
+        return jsonLike || lower.contains("function_call") || lower.contains("tool_call");
+    }
+
+    /**
      * 构建系统 Prompt = 核心规则（硬编码） + 当前用户身份 + 可调整段（热加载）。
      * <p>
      * 核心规则始终注入且不可被外部文件覆盖，保证业务正确性底线；
      * 可调整段只管人设/语气/称呼，外部文件改了不会影响工具调用和数据呈现。
      *
-     * @param username 当前用户名（替换 {username} 占位符）
-     * @param userType 当前用户类型（3=管理员，其余=读者），用于角色感知
+     * @param displayName 当前用户称呼（真实姓名，兜底登录账号；替换 {username}/{name} 占位符）
+     * @param userType    当前用户类型（3=管理员，其余=读者），用于角色感知
      */
-    private String buildSystemPrompt(String username, Integer userType) {
-        String customizable = loadCustomizablePromptSegment().replace("{username}", username);
+    private String buildSystemPrompt(String displayName, Integer userType) {
+        String customizable = loadCustomizablePromptSegment()
+                .replace("{username}", displayName)
+                .replace("{name}", displayName);
         boolean admin = userType != null && userType == 3;
         String roleLine = admin
-                ? "当前对话用户：" + username + "，身份：图书馆管理员。你已注册管理员工具（admin 开头），"
+                ? "当前对话用户：" + displayName + "，身份：图书馆管理员。你已注册管理员工具（admin 开头），"
                 + "可查询全馆借阅/罚款/读者数据、统计概览并办理柜台业务；回答管理问题时直接使用这些工具。"
-                : "当前对话用户：" + username + "，身份：读者（教师/学生）。你只能查询和操作该读者本人的数据，"
+                : "当前对话用户：" + displayName + "，身份：读者（教师/学生）。你只能查询和操作该读者本人的数据，"
                 + "馆藏图书与公告为全馆公开信息可正常检索；不存在「管理员工具」，不要声称可以执行管理员操作。";
         // 核心规则在前（权重更高），身份行居中，可调整段在后
         return CORE_RULES + "\n\n" + roleLine + "\n\n" + customizable;
