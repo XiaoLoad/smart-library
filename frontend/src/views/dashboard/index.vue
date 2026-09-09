@@ -140,7 +140,7 @@ const greeting = computed(() => {
 const pageTitle = computed(() => userStore.isAdmin ? '今日图书馆' : '我的图书馆')
 const pageDesc = computed(() => userStore.isAdmin ? '这是您馆藏的实时状态。' : '这是您的借阅与阅读概况。')
 const trendTitle = computed(() => userStore.isAdmin ? '近六月借阅流转' : '近六月我的借阅')
-const distTitle = computed(() => userStore.isAdmin ? '馆藏分类' : '我的阅读分类')
+const distTitle = computed(() => userStore.isAdmin ? '借阅分类（按借阅次数）' : '我的阅读分类')
 
 const borrowTrendOption = computed(() => ({
   tooltip: {

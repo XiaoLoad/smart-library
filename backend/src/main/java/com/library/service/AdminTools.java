@@ -122,13 +122,23 @@ public class AdminTools extends BaseLibraryTools {
     /**
      * 全馆运营统计概览（管理员）。
      */
-    @Tool("【管理员】查询全馆运营统计概览：馆藏图书总量、在册读者数、当前借阅中、逾期未还、"
-            + "近6个月借阅/归还趋势、热门图书借阅排行 Top5、图书分类借阅分布。"
-            + "用于回答「馆里有多少书/多少读者/多少人在借/逾期情况/最热门的书/借阅趋势」类问题")
+    @Tool("【管理员】查询全馆运营统计概览，返回："
+            + "collection=馆藏总量（titles=图书种数，copies=总册数，availableCopies=当前可借册数）；"
+            + "categoryBookDist=各一级分类的【藏书】分布（name/titles 种数/copies 册数/availableCopies 可借册数，"
+            + "回答「某类有多少书/馆藏分类统计」必须用本字段）；"
+            + "metrics=运营指标（在册读者、当前借阅中、逾期未还等）；"
+            + "categoryBorrowDist=各一级分类的【借阅次数】分布（这是借还流水次数，不是藏书量，禁止当藏书数播报）；"
+            + "borrowTrend=近6个月借阅/归还趋势；hotBooks=热门图书借阅排行 Top5。"
+            + "用于回答「馆里有多少书/各分类多少书/多少读者/多少人在借/逾期情况/最热门的书/借阅趋势」类问题")
     public Map<String, Object> adminQueryStats() {
         return withEvent("adminQueryStats", null, v -> {
             Map<String, Object> o = ctx.statsService.overview(3, null);
             Map<String, Object> m = new LinkedHashMap<>();
+
+            // 馆藏总量（种/册/可借）
+            m.put("collection", o.get("collection"));
+            // 各一级分类【藏书】分布
+            m.put("categoryBookDist", o.get("categoryBookDist"));
 
             // 指标卡片 → 扁平指标
             Map<String, Object> metrics = new LinkedHashMap<>();
@@ -148,7 +158,8 @@ public class AdminTools extends BaseLibraryTools {
             m.put("metrics", metrics);
             m.put("borrowTrend", o.get("borrowTrend"));
             m.put("hotBooks", o.get("hotBooks"));
-            m.put("categoryDist", o.get("categoryDist"));
+            // 借阅次数分布（非藏书量）
+            m.put("categoryBorrowDist", o.get("categoryDist"));
             return m;
         });
     }
