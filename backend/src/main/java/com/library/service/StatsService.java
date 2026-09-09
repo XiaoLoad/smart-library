@@ -59,8 +59,57 @@ public class StatsService {
         data.put("stats", buildStats(type, allBooks, allUsers, allBorrows, myBorrows));
         data.put("borrowTrend", buildBorrowTrend(type, allBorrows, myBorrows));
         data.put("hotBooks", buildHotBooks(type, allBorrows, myBorrows, allBooks));
+        // 注意：categoryDist 是「借阅次数」分布（基于借阅记录），不是藏书量
         data.put("categoryDist", buildCategoryDist(type, allBorrows, myBorrows, allBooks, categories));
+        // 馆藏口径数据：分类藏书分布（基于图书）+ 馆藏总量汇总
+        data.put("categoryBookDist", buildCategoryBookDist(allBooks, categories));
+        data.put("collection", buildCollectionSummary(allBooks));
         return data;
+    }
+
+    /**
+     * 馆藏总量汇总：种数（图书记录数）、册数（totalCount 之和）、可借册数。
+     */
+    private Map<String, Object> buildCollectionSummary(List<Book> allBooks) {
+        long copies = allBooks.stream()
+                .mapToLong(b -> b.getTotalCount() == null ? 0 : b.getTotalCount()).sum();
+        long available = allBooks.stream()
+                .mapToLong(b -> b.getAvailableCount() == null ? 0 : b.getAvailableCount()).sum();
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("titles", allBooks.size());
+        m.put("copies", copies);
+        m.put("availableCopies", available);
+        return m;
+    }
+
+    /**
+     * 构建馆藏分类分布（按一级分类统计图书种数与册数，基于馆藏图书而非借阅记录）。
+     * 未挂分类的图书归入「未分类」。
+     */
+    private List<Map<String, Object>> buildCategoryBookDist(List<Book> allBooks, List<Category> categories) {
+        Map<Long, String> cateNames = categories.stream()
+                .collect(Collectors.toMap(Category::getId, Category::getCategoryName));
+        // rootId -> [种数, 册数, 可借册数]；-1 表示未分类
+        Map<Long, long[]> agg = new HashMap<>();
+        for (Book b : allBooks) {
+            Long rootId = (b.getCategoryId() == null)
+                    ? -1L : findRootCategory(categories, b.getCategoryId());
+            long[] a = agg.computeIfAbsent(rootId, k -> new long[3]);
+            a[0] += 1;
+            a[1] += b.getTotalCount() == null ? 0 : b.getTotalCount();
+            a[2] += b.getAvailableCount() == null ? 0 : b.getAvailableCount();
+        }
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Map.Entry<Long, long[]> e : agg.entrySet()) {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("name", e.getKey() == -1L ? "未分类" : cateNames.getOrDefault(e.getKey(), "其他"));
+            m.put("titles", e.getValue()[0]);
+            m.put("copies", e.getValue()[1]);
+            m.put("availableCopies", e.getValue()[2]);
+            result.add(m);
+        }
+        result.sort((x, y) -> Long.compare((Long) y.get("copies"), (Long) x.get("copies")));
+        return result;
     }
 
     /**
@@ -70,8 +119,10 @@ public class StatsService {
                                                   List<Borrow> allBorrows, List<Borrow> myBorrows) {
         List<Map<String, Object>> stats = new ArrayList<>();
         if (type == 3) {
-            // 管理员：全局统计
-            stats.add(statItem("books", "馆藏图书", allBooks.size(), "册", "Reading", "+" + allBooks.size() + " 总计"));
+            // 管理员：全局统计（藏书主指标用总册数，副标注种数）
+            long totalCopies = allBooks.stream()
+                    .mapToLong(b -> b.getTotalCount() == null ? 0 : b.getTotalCount()).sum();
+            stats.add(statItem("books", "馆藏图书", totalCopies, "册", "Reading", "共 " + allBooks.size() + " 种"));
             stats.add(statItem("users", "在册读者", allUsers.stream().filter(u -> u.getStatus() == 1).count(), "人", "User", "+" + allUsers.size() + " 注册"));
             stats.add(statItem("borrowing", "借阅中", allBorrows.stream().filter(b -> b.getStatus() == 1).count(), "本", "Tickets", "实时"));
             long overdue = allBorrows.stream().filter(b -> b.getStatus() == 3).count();
