@@ -106,6 +106,13 @@
       <artifactId>langchain4j-open-ai</artifactId>
       <version>${langchain4j.version}</version>
     </dependency>
+    <!-- open-ai 仅以 runtime 作用域传递 JDK HTTP 客户端；DeepSeekThinkingDisableHttpClient
+         装饰器在编译期引用 JdkHttpClientBuilder，需显式声明为 compile -->
+    <dependency>
+      <groupId>dev.langchain4j</groupId>
+      <artifactId>langchain4j-http-client-jdk</artifactId>
+      <version>${langchain4j.version}</version>
+    </dependency>
 
     <!-- 测试 -->
     <dependency>

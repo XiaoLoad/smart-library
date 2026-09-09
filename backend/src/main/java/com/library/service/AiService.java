@@ -545,22 +545,25 @@ public class AiService {
      * AI 配置：来自当前启用的 AI 渠道（多渠道中按排序取第一个启用者，见 {@link LibraryConfigService}）。
      * 无启用渠道时各字段返回空串，由调用方给出「未配置」提示。
      */
-    private record AiConfig(String provider, String apiKey, String model, String endpoint) {}
+    private record AiConfig(String provider, String apiKey, String model, String endpoint,
+                            boolean thinkingEnabled) {}
 
     private AiConfig loadConfig() {
         LibraryConfigService.Channel ch = libraryConfigService.getActiveChannel();
         if (ch == null) {
-            return new AiConfig("", "", "", "");
+            return new AiConfig("", "", "", "", false);
         }
         return new AiConfig(
                 str(ch.getProvider(), ""),
                 str(ch.getApiKey(), ""),
                 str(ch.getModel(), ""),
-                str(ch.getEndpoint(), ""));
+                str(ch.getEndpoint(), ""),
+                Boolean.TRUE.equals(ch.getThinkingEnabled()));
     }
 
     private OpenAiStreamingChatModel getOrBuildModel(AiConfig cfg) {
-        String hash = cfg.provider() + "|" + cfg.apiKey() + "|" + cfg.model() + "|" + cfg.endpoint();
+        String hash = cfg.provider() + "|" + cfg.apiKey() + "|" + cfg.model() + "|" + cfg.endpoint()
+                + "|thinking=" + cfg.thinkingEnabled();
         if (cachedModel != null && hash.equals(cachedConfigHash)) {
             return cachedModel;
         }
@@ -579,17 +582,24 @@ public class AiService {
                 default -> "https://api.deepseek.com";
             };
         }
-        OpenAiStreamingChatModel model = OpenAiStreamingChatModel.builder()
+        var builder = OpenAiStreamingChatModel.builder()
                 .baseUrl(baseUrl)
                 .apiKey(cfg.apiKey())
-                .modelName(cfg.model())
-                // 深度思考（思维链）：returnThinking 解析响应中的 reasoning_content，
-                // sendThinking 在后续轮次（含工具调用）自动回传思维链——满足 DeepSeek 思考模式
-                // 「工具调用轮必须回传 reasoning_content」的协议要求，由框架原生处理。
-                // 无 reasoning_content 的服务商（通义/Kimi 等未开启思考时）该字段为 null，
-                // 不会序列化进请求体，互不影响。
-                .returnThinking(true)
-                .sendThinking(true)
+                .modelName(cfg.model());
+        if (cfg.thinkingEnabled()) {
+            // 深度思考（思维链）开启：returnThinking 解析响应中的 reasoning_content，
+            // sendThinking 在后续轮次（含工具调用）自动回传思维链——满足 DeepSeek 思考模式
+            // 「工具调用轮必须回传 reasoning_content」的协议要求，由框架原生处理。
+            // 无 reasoning_content 的服务商（通义/Kimi 等未开启思考时）该字段为 null，
+            // 不会序列化进请求体，互不影响。
+            builder.returnThinking(true).sendThinking(true);
+        } else {
+            // 深度思考关闭：DeepSeek V3.1+/V4 默认开启思考且无法通过缺省参数关闭，
+            // 需装饰 HTTP 客户端在请求体注入 thinking:disabled；其他厂商默认即不思考，
+            // 装饰器只改写 DeepSeek 模型请求，不影响其他渠道。
+            builder.httpClientBuilder(new DeepSeekThinkingDisableHttpClient.Builder());
+        }
+        OpenAiStreamingChatModel model = builder
                 // 模型调用超时：避免长时间无响应卡死 SSE（参考 langchain4j-examples）
                 .timeout(Duration.ofSeconds(MODEL_TIMEOUT_SECONDS))
                 // 请求/响应日志：便于排查调用失败、token 用量等问题

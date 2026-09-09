@@ -80,6 +80,12 @@ public class LibraryConfigService {
         private String model;
         private String endpoint;
         private Boolean enabled;
+        /**
+         * 是否开启深度思考（思维链 reasoning_content）。默认关闭：
+         * 开启后回答更严谨但首字响应更慢、Token 消耗更高；仅思考型模型有效
+         * （如 DeepSeek V3.1+/V4）。由管理员按渠道控制，读者无权切换。
+         */
+        private Boolean thinkingEnabled;
         /** 排序值，越小优先级越高 */
         private Integer sort;
     }
@@ -164,6 +170,7 @@ public class LibraryConfigService {
         if (req.getEnabled() != null) {
             target.setEnabled(req.getEnabled());
         }
+        target.setThinkingEnabled(Boolean.TRUE.equals(req.getThinkingEnabled()));
         persistStore(store);
         log.info("[配置] 更新 AI 渠道：id={} name={}", target.getId(), target.getName());
         return target;

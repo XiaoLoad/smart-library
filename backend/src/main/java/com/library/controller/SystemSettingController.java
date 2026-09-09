@@ -103,6 +103,7 @@ public class SystemSettingController {
             m.put("model", c.getModel());
             m.put("endpoint", c.getEndpoint());
             m.put("enabled", Boolean.TRUE.equals(c.getEnabled()));
+            m.put("thinkingEnabled", Boolean.TRUE.equals(c.getThinkingEnabled()));
             m.put("sort", c.getSort());
             m.put("apiKeySet", c.getApiKey() != null && !c.getApiKey().isBlank());
             m.put("active", active != null && active.getId().equals(c.getId()));

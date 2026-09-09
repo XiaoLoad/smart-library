@@ -134,6 +134,9 @@
                     <span class="key-tag" :class="ch.apiKeySet ? 'is-ok' : 'is-warn'">
                       {{ ch.apiKeySet ? 'API Key 已配置' : 'API Key 未配置' }}
                     </span>
+                    <span v-if="ch.thinkingEnabled" class="think-tag" title="该渠道已开启深度思考">
+                      <AppIcon name="sparkles" :size="12" />深度思考
+                    </span>
                   </div>
                   <EllipsisText :content="ch.endpoint" class="channel-endpoint" />
                 </div>
@@ -905,6 +908,20 @@ onMounted(() => {
 
 .key-tag.is-warn {
   color: var(--color-warning);
+}
+
+/* 深度思考开启徽标 */
+.think-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  white-space: nowrap;
+  padding: 2px 9px;
+  border-radius: var(--radius-pill);
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+  font-weight: 500;
 }
 
 .channel-endpoint {
