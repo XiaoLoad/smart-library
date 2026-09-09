@@ -72,14 +72,42 @@
               <div class="msg-body">
                 <!-- 工具调用过程卡片 -->
                 <div v-if="m.toolEvents && m.toolEvents.length" class="tool-events">
+                  <!-- 多工具串联计数：调用 ≥ 2 个时显示链路概览 -->
+                  <div v-if="m.toolEvents.length >= 2" class="tool-chain-head">
+                    <el-icon class="chain-icon"><Connection /></el-icon>
+                    <span>本次共调用 {{ m.toolEvents.length }} 个工具</span>
+                  </div>
                   <div v-for="(t, ti) in m.toolEvents" :key="ti" class="tool-card" :class="t.phase">
-                    <el-icon class="tool-icon">
-                      <Loading v-if="t.phase === 'start'" />
-                      <Check v-else-if="t.phase === 'end'" />
-                      <Close v-else-if="t.phase === 'error'" />
-                    </el-icon>
-                    <span class="tool-name">{{ toolLabel(t.name) }}</span>
-                    <span v-if="t.detail" class="tool-detail">{{ t.detail }}</span>
+                    <!-- 紧凑 pill 头部：序号 + 图标 + 名称 + 摘要 + 展开按钮 -->
+                    <div class="tool-head">
+                      <span class="tool-seq">{{ ti + 1 }}</span>
+                      <el-icon class="tool-icon">
+                        <Loading v-if="t.phase === 'start'" />
+                        <Check v-else-if="t.phase === 'end'" />
+                        <Close v-else-if="t.phase === 'error'" />
+                      </el-icon>
+                      <span class="tool-name">{{ toolLabel(t.name) }}</span>
+                      <span v-if="t.detail" class="tool-detail">{{ t.detail }}</span>
+                      <button
+                        v-if="t.phase === 'end' && t.data"
+                        class="tool-toggle"
+                        :class="{ active: t.expanded }"
+                        :title="t.expanded ? '折叠数据' : '查看返回数据'"
+                        @click="t.expanded = !t.expanded"
+                      >
+                        <el-icon><ArrowDownBold v-if="!t.expanded" /><ArrowUpBold v-else /></el-icon>
+                      </button>
+                    </div>
+                    <!-- 展开面板：独立于 pill 之外，从下方滑出的抽屉 -->
+                    <transition name="tool-expand">
+                      <div v-if="t.expanded && t.data" class="tool-data">
+                        <div class="tool-data-label">
+                          <el-icon><Document /></el-icon>
+                          <span>返回数据快照</span>
+                        </div>
+                        <pre>{{ formatJson(t.data) }}</pre>
+                      </div>
+                    </transition>
                   </div>
                 </div>
 
@@ -143,7 +171,7 @@
 import { ref, reactive, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import {
   Plus, ChatDotRound, MagicStick, Promotion, Delete,
-  VideoPause, Loading, Check, Close, ArrowDownBold,
+  VideoPause, Loading, Check, Close, ArrowDownBold, ArrowUpBold, Connection, Document,
 } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import MarkdownIt from 'markdown-it'
@@ -177,6 +205,24 @@ const TOOL_LABELS = {
   queryAnnouncements: '查询公告',
 }
 const toolLabel = (name) => TOOL_LABELS[name] || name
+
+/**
+ * 格式化工具返回的 JSON 数据快照用于展示。
+ * 后端推送的 data 已是 JSON 字符串，这里尝试解析后美化输出，失败则原样返回。
+ * @param {string} dataJson 后端推送的 JSON 字符串（可能已截断带省略号）
+ */
+const formatJson = (dataJson) => {
+  if (!dataJson) return ''
+  try {
+    // 截断快照末尾的 "…" 需先去除再解析
+    const trimmed = dataJson.replace(/…$/, '')
+    const obj = JSON.parse(trimmed)
+    return JSON.stringify(obj, null, 2)
+  } catch {
+    // 解析失败（如已截断）原样返回
+    return dataJson
+  }
+}
 
 const renderMarkdown = (content) => {
   if (!content) return ''
@@ -456,6 +502,8 @@ const send = async () => {
               name: info.name || '',
               phase: 'start',
               detail: info.detail || '',
+              data: null,
+              expanded: false,
             })
           } else {
             // end / error：更新对应的 start 卡片（同名且仍在 start 状态的最后一条），
@@ -475,8 +523,18 @@ const send = async () => {
                   ? `${target.detail} · ${endDetail}`
                   : endDetail
               }
+              // P2.10 结构化输出：end 阶段携带数据快照，可展开查看
+              if (info.phase === 'end' && info.data) {
+                target.data = info.data
+              }
             } else {
-              events.push({ name: info.name || '', phase: info.phase, detail: endDetail })
+              events.push({
+                name: info.name || '',
+                phase: info.phase,
+                detail: endDetail,
+                data: info.phase === 'end' ? (info.data || null) : null,
+                expanded: false,
+              })
             }
           }
         } catch {
@@ -863,28 +921,156 @@ onMounted(loadConversations)
   gap: 6px;
   margin-bottom: var(--space-2);
 }
+/* 多工具串联计数头部 */
+.tool-chain-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  background: var(--color-bg-subtle);
+  border: 1px dashed var(--color-border);
+  font-size: var(--fs-caption);
+  color: var(--color-text-tertiary);
+  margin-bottom: 2px;
+}
+.chain-icon { font-size: 12px; }
+
+/* tool-card 是容器，不再承载 pill 样式；负责纵向堆叠 head + data */
 .tool-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
+}
+/* pill 形头部：紧凑横排，永不变形 */
+.tool-head {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  align-self: flex-start;
-  padding: 6px 12px;
+  padding: 6px 12px 6px 24px;
   border-radius: var(--radius-pill);
   background: var(--color-bg-elevated);
   border: 1px solid var(--color-border);
   font-size: var(--fs-caption);
   color: var(--color-text-secondary);
+  position: relative;
   transition: all var(--duration-fast) var(--ease-soft);
 }
-.tool-card.start { border-color: var(--color-primary); color: var(--color-primary); background: var(--color-primary-light); }
-.tool-card.end { border-color: var(--color-success); color: var(--color-success); }
-.tool-card.error { border-color: var(--color-danger); color: var(--color-danger); }
-.tool-card .tool-icon { animation: spin 1s linear infinite; }
-.tool-card.end .tool-icon,
-.tool-card.error .tool-icon { animation: none; }
+.tool-card.start .tool-head { border-color: var(--color-primary); color: var(--color-primary); background: var(--color-primary-light); }
+.tool-card.end .tool-head { border-color: var(--color-success); color: var(--color-success); }
+.tool-card.error .tool-head { border-color: var(--color-danger); color: var(--color-danger); }
+.tool-head .tool-icon { animation: spin 1s linear infinite; }
+.tool-card.end .tool-head .tool-icon,
+.tool-card.error .tool-head .tool-icon { animation: none; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .tool-name { font-weight: 500; }
 .tool-detail { color: var(--color-text-tertiary); }
+
+/* 序号角标：调用顺序，钉在 pill 左侧 */
+.tool-seq {
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--color-bg-subtle);
+  color: var(--color-text-tertiary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  line-height: 1;
+  border: 1px solid var(--color-border);
+}
+.tool-card.start .tool-seq { background: var(--color-primary); color: var(--color-text-inverse); border-color: var(--color-primary); }
+.tool-card.end .tool-seq { background: var(--color-success); color: var(--color-text-inverse); border-color: var(--color-success); }
+.tool-card.error .tool-seq { background: var(--color-danger); color: #fff; border-color: var(--color-danger); }
+
+/* 展开按钮 */
+.tool-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: transparent;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  padding: 0;
+  transition: all var(--duration-fast) var(--ease-soft);
+}
+.tool-toggle:hover,
+.tool-toggle.active {
+  background: var(--color-bg-subtle);
+  color: var(--color-primary);
+}
+
+/* 展开面板：独立于 pill 之外的下沉抽屉，与 pill 视觉关联但边界分明 */
+.tool-data {
+  align-self: stretch;
+  margin-top: 4px;
+  margin-left: 14px;
+  padding: 8px 12px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-subtle);
+  border: 1px solid var(--color-border);
+  border-top: none;
+  border-top-left-radius: 0;
+  border-bottom-right-radius: var(--radius-md);
+  overflow-x: auto;
+  position: relative;
+}
+/* 抽屉左上角与 pill 的视觉连接线 */
+.tool-data::before {
+  content: '';
+  position: absolute;
+  left: -1px;
+  top: -8px;
+  width: 2px;
+  height: 8px;
+  background: var(--color-border);
+}
+.tool-data-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  color: var(--color-text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 4px;
+  font-family: var(--font-mono);
+}
+.tool-data-label .el-icon { font-size: 11px; }
+.tool-data pre {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--color-text);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* 展开/折叠过渡动画 */
+.tool-expand-enter-active,
+.tool-expand-leave-active {
+  transition: opacity var(--duration-fast) var(--ease-soft),
+              transform var(--duration-fast) var(--ease-soft);
+  transform-origin: top;
+}
+.tool-expand-enter-from,
+.tool-expand-leave-to {
+  opacity: 0;
+  transform: translateY(-4px) scaleY(0.96);
+}
 
 /* —— Markdown 排版 —— */
 .msg-content.markdown :deep(p) { margin: 0 0 var(--space-2); }
