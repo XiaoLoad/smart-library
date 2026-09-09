@@ -67,7 +67,7 @@
 
       <div v-if="phase === 'confirm' && anyOverdue" class="fine-note">
         <el-icon><Warning /></el-icon>
-        <span>逾期罚款按{{ hasConfirm ? '归还申请时间' : '办理时间' }}以 {{ FINE_RATE }} 元/天结算，确认后自动生成罚款单</span>
+        <span>逾期罚款按{{ hasConfirm ? '归还申请时间' : '办理时间' }}以 {{ fineRateText }} 元/天结算，确认后自动生成罚款单</span>
       </div>
     </div>
 
@@ -87,7 +87,7 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import { Right, Warning, CircleCheckFilled, CircleCloseFilled } from '@element-plus/icons-vue'
-import { borrowApi } from '@/api'
+import { borrowApi, systemApi } from '@/api'
 
 const props = defineProps({
   modelValue: Boolean,
@@ -97,8 +97,9 @@ const props = defineProps({
 const emit = defineEmits(['update:modelValue', 'completed'])
 
 const STATUS_TEXT = { 0: '待取书', 1: '借阅中', 2: '已归还', 3: '已逾期', 4: '已取消', 5: '待确认归还' }
-/** 与后端 FINE_RATE_PER_DAY 保持一致 */
-const FINE_RATE = 0.5
+/** 逾期罚款费率（元/天），由系统设置·借阅规则配置；拉取失败回退默认 0.5 */
+const fineRate = ref(0.5)
+const fineRateText = computed(() => String(parseFloat(Number(fineRate.value).toFixed(2))))
 const DAY_MS = 86400000
 
 const phase = ref('confirm') // confirm 预览 | result 结果
@@ -136,7 +137,7 @@ const overdueInfo = (row) => {
   const eff = base ? startOfDay(base) : startOfDay(new Date())
   const days = Math.round((eff - startOfDay(due)) / DAY_MS)
   if (days <= 0) return null
-  return { days, fine: (days * FINE_RATE).toFixed(2) }
+  return { days, fine: (days * fineRate.value).toFixed(2) }
 }
 
 const resultOf = (row) => resultMap.value[row.id]
@@ -148,6 +149,13 @@ watch(
     if (v) {
       phase.value = 'confirm'
       resultMap.value = {}
+      // 打开时拉取最新罚款费率，保证预估与后端结算一致
+      systemApi
+        .getLibraryRules()
+        .then((rules) => {
+          if (rules && rules.fineRatePerDay != null) fineRate.value = Number(rules.fineRatePerDay)
+        })
+        .catch(() => {})
     }
   }
 )

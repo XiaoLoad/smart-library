@@ -20,19 +20,15 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
-import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -63,7 +59,6 @@ public class AiService {
     /** 模型调用超时（秒），避免长时间无响应卡死 SSE */
     private static final long MODEL_TIMEOUT_SECONDS = 60L;
 
-    @Autowired private SystemSettingMapper systemSettingMapper;
     @Autowired private AiConversationMapper conversationMapper;
     @Autowired private AiMessageMapper messageMapper;
     @Autowired private ObjectMapper objectMapper;
@@ -79,20 +74,11 @@ public class AiService {
     @Autowired private BorrowService borrowService;
     @Autowired private StatsService statsService;
     @Autowired private CacheManager cacheManager;
+    @Autowired private LibraryConfigService libraryConfigService;
 
     /** 缓存最近构建的流式模型，配置未变时复用，避免重复创建 OkHttpClient */
     private volatile OpenAiStreamingChatModel cachedModel;
     private volatile String cachedConfigHash;
-
-    // ===== Prompt 热加载 =====
-    /** Prompt 模板文件名（classpath 内置 + 外部覆盖） */
-    private static final String PROMPT_RESOURCE_PATH = "prompts/library-system-prompt.txt";
-    /** 外部 Prompt 文件路径（运行目录下 prompts/，优先于 classpath，支持热更新） */
-    private static final Path PROMPT_EXTERNAL_PATH = Path.of("prompts", "library-system-prompt.txt");
-    /** 缓存的 Prompt 模板，通过文件最后修改时间检测热更新 */
-    private volatile String cachedPromptTemplate;
-    private volatile long cachedPromptLastModified;
-    private volatile long cachedPromptLength;
 
     /**
      * 核心行为规则（硬编码，不可被外部文件覆盖）。
@@ -238,7 +224,7 @@ public class AiService {
 
         AiConfig cfg = loadConfig();
         if (cfg.apiKey() == null || cfg.apiKey().isBlank()) {
-            throw new BusinessException(400, "AI 接口未配置，请联系管理员在系统设置中配置 API Key");
+            throw new BusinessException(400, "AI 助手未启用：请管理员在「系统设置 · AI 渠道」中添加并启用渠道");
         }
         OpenAiStreamingChatModel model = getOrBuildModel(cfg);
 
@@ -494,7 +480,8 @@ public class AiService {
      * @param userType    当前用户类型（3=管理员，其余=读者），用于角色感知
      */
     private String buildSystemPrompt(String displayName, Integer userType) {
-        String customizable = loadCustomizablePromptSegment()
+        // 可调整段（人设/语气）由 LibraryConfigService 统一管理（外部文件热加载 + 在线编辑）
+        String customizable = libraryConfigService.loadCustomizablePromptSegment()
                 .replace("{username}", displayName)
                 .replace("{name}", displayName);
         boolean admin = userType != null && userType == 3;
@@ -505,73 +492,6 @@ public class AiService {
                 + "馆藏图书与公告为全馆公开信息可正常检索；不存在「管理员工具」，不要声称可以执行管理员操作。";
         // 核心规则在前（权重更高），身份行居中，可调整段在后
         return CORE_RULES + "\n\n" + roleLine + "\n\n" + customizable;
-    }
-
-    /**
-     * 加载可调整 Prompt 段（人设/语气/称呼，热加载）。
-     * <p>
-     * 加载顺序：
-     * <ol>
-     *   <li>外部文件 {@code prompts/library-system-prompt.txt}（运行目录下，支持运行时热更新）</li>
-     *   <li>classpath 资源 {@code prompts/library-system-prompt.txt}（JAR 内置，只读）</li>
-     *   <li>硬编码默认人设（兜底）</li>
-     * </ol>
-     * 热更新机制：通过文件最后修改时间 + 文件大小检测变更，避免每次请求都读文件。
-     * <p>
-     * 注：此段只包含人设/语气，核心业务规则由 {@link #CORE_RULES} 提供，不可被此文件覆盖。
-     */
-    private String loadCustomizablePromptSegment() {
-        // 1. 尝试外部文件（运行目录下，支持热更新）
-        if (Files.exists(PROMPT_EXTERNAL_PATH)) {
-            try {
-                long lastModified = Files.getLastModifiedTime(PROMPT_EXTERNAL_PATH).toMillis();
-                long fileSize = Files.size(PROMPT_EXTERNAL_PATH);
-                // 文件未变化时直接返回缓存
-                if (cachedPromptTemplate != null
-                        && lastModified == cachedPromptLastModified
-                        && fileSize == cachedPromptLength) {
-                    return cachedPromptTemplate;
-                }
-                String content = Files.readString(PROMPT_EXTERNAL_PATH, StandardCharsets.UTF_8);
-                cachedPromptTemplate = content;
-                cachedPromptLastModified = lastModified;
-                cachedPromptLength = fileSize;
-                log.info("[AI] 可调整 Prompt 段已热加载: {} ({} bytes)", PROMPT_EXTERNAL_PATH, fileSize);
-                return content;
-            } catch (IOException e) {
-                log.warn("[AI] 读取外部 Prompt 文件失败，回退到 classpath: {}", e.getMessage());
-            }
-        }
-
-        // 2. 外部文件不存在或读取失败 → 使用已缓存的模板（可能来自之前的 classpath 加载）
-        if (cachedPromptTemplate != null) {
-            return cachedPromptTemplate;
-        }
-
-        // 3. 首次加载 classpath 资源
-        try {
-            ClassPathResource resource = new ClassPathResource(PROMPT_RESOURCE_PATH);
-            try (InputStream is = resource.getInputStream()) {
-                String content = new String(is.readAllBytes(), StandardCharsets.UTF_8);
-                cachedPromptTemplate = content;
-                log.info("[AI] 可调整 Prompt 段已从 classpath 加载: {} ({} bytes)", PROMPT_RESOURCE_PATH, content.length());
-                return content;
-            }
-        } catch (IOException e) {
-            log.warn("[AI] classpath Prompt 加载失败，使用硬编码默认人设: {}", e.getMessage());
-        }
-
-        // 4. 兜底：硬编码默认人设（不含核心规则，核心规则由 CORE_RULES 单独注入）
-        String fallback = """
-                你是智慧图书借阅管理系统的 AI 助手「智」。
-
-                风格：
-                - 使用中文，简洁友好。
-                - 称呼当前用户为 {username}。
-                - 涉及日期/金额时按返回值原样表述。
-                """;
-        cachedPromptTemplate = fallback;
-        return fallback;
     }
 
     // ===== 对话记忆缓存 =====
@@ -608,25 +528,22 @@ public class AiService {
         }
     }
 
-    /** AI 配置（来自 system_settings.ai_config） */
+    /**
+     * AI 配置：来自当前启用的 AI 渠道（多渠道中按排序取第一个启用者，见 {@link LibraryConfigService}）。
+     * 无启用渠道时各字段返回空串，由调用方给出「未配置」提示。
+     */
     private record AiConfig(String provider, String apiKey, String model, String endpoint) {}
 
     private AiConfig loadConfig() {
-        SystemSetting s = systemSettingMapper.selectByKey("ai_config");
-        if (s == null || s.getSettingValue() == null) {
-            return new AiConfig("deepseek", "", "deepseek-chat", "");
+        LibraryConfigService.Channel ch = libraryConfigService.getActiveChannel();
+        if (ch == null) {
+            return new AiConfig("", "", "", "");
         }
-        try {
-            @SuppressWarnings("unchecked")
-            Map<String, Object> m = objectMapper.readValue(s.getSettingValue(), Map.class);
-            String provider = str(m.get("provider"), "deepseek");
-            String apiKey = str(m.get("apiKey"), "");
-            String model = str(m.get("model"), "deepseek-chat");
-            String endpoint = str(m.get("endpoint"), "");
-            return new AiConfig(provider, apiKey, model, endpoint);
-        } catch (Exception e) {
-            return new AiConfig("deepseek", "", "deepseek-chat", "");
-        }
+        return new AiConfig(
+                str(ch.getProvider(), ""),
+                str(ch.getApiKey(), ""),
+                str(ch.getModel(), ""),
+                str(ch.getEndpoint(), ""));
     }
 
     private OpenAiStreamingChatModel getOrBuildModel(AiConfig cfg) {

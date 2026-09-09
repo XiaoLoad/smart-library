@@ -84,7 +84,21 @@ export const aiApi = {
 // 系统设置
 export const systemApi = {
   changePassword: (data) => post('/system/change-password', data),
-  getAiConfig: () => get('/system/ai-config'),
-  saveAiConfig: (data) => post('/system/ai-config', data),
-  getAiModels: (data) => post('/system/ai-models', data),
+  // AI 渠道（多渠道管理）
+  getChannels: () => get('/system/ai-channels'),
+  addChannel: (data) => post('/system/ai-channels', data),
+  updateChannel: (data) => service.put('/system/ai-channels', data),
+  toggleChannel: (data) => post('/system/ai-channels/toggle', data),
+  moveChannel: (data) => post('/system/ai-channels/move', data),
+  deleteChannel: (data) => post('/system/ai-channels/delete', data),
+  // 测试连通性并拉取模型列表（传 id 测已保存渠道，或传 provider/apiKey/endpoint 测表单）
+  testChannel: (data) => post('/system/ai-channels/test', data),
+  // 借阅规则
+  getBorrowLimits: () => get('/system/borrow-limits'),
+  saveBorrowLimit: (data) => post('/system/borrow-limits', data),
+  getLibraryRules: () => get('/system/library-rules'),
+  saveLibraryRules: (data) => post('/system/library-rules', data),
+  // AI 人设（可调整 Prompt 段）
+  getAiPrompt: () => get('/system/ai-prompt'),
+  saveAiPrompt: (data) => service.put('/system/ai-prompt', data),
 }
