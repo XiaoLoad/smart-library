@@ -279,13 +279,22 @@ let abortController = null
 const isAutoFollow = ref(true)
 const showJumpBtn = ref(false)
 
+// 程序滚动抑制窗口：代码赋值 scrollTop 触发的 scroll 事件回调执行时，
+// DOM 可能又增高（流式渲染），会被误判为"用户上翻中"而关闭自动跟随。
+// 赋值前打时间戳，窗口内的 scroll 事件不参与跟随判定。
+let programmaticScrollUntil = 0
+const suppressScrollUntil = () => {
+  programmaticScrollUntil = performance.now() + 100
+}
+
 const isAtBottom = () => {
   const el = msgListRef.value
   if (!el) return true
-  return el.scrollHeight - el.scrollTop - el.clientHeight < 24
+  return el.scrollHeight - el.scrollTop - el.clientHeight < 40
 }
 
 const onScroll = () => {
+  if (performance.now() < programmaticScrollUntil) return // 程序滚动，非用户操作
   const atBottom = isAtBottom()
   isAutoFollow.value = atBottom
   showJumpBtn.value = !atBottom && messages.value.length > 0
@@ -299,6 +308,7 @@ const scrollToBottom = async () => {
   }
   await nextTick()
   if (msgListRef.value) {
+    suppressScrollUntil()
     msgListRef.value.scrollTop = msgListRef.value.scrollHeight
   }
   showJumpBtn.value = false
@@ -308,6 +318,7 @@ const scrollToBottomForce = async () => {
   isAutoFollow.value = true
   await nextTick()
   if (msgListRef.value) {
+    suppressScrollUntil()
     msgListRef.value.scrollTop = msgListRef.value.scrollHeight
   }
   showJumpBtn.value = false
@@ -437,6 +448,7 @@ const send = async () => {
   showJumpBtn.value = false
   await scrollToBottom()
   thinking.value = true
+  scrollToBottom() // 思考占位渲染增高，保持视口在底部
 
   // SSE 流式请求
   abortController = new AbortController()

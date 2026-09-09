@@ -70,6 +70,7 @@
         :tree-props="{ children: 'children' }"
         :expand-row-keys="expandedKeys"
         :row-class-name="rowClassName"
+        max-height="calc(100vh - 290px)"
         style="width: 100%"
       >
         <el-table-column prop="categoryName" label="分类名称" min-width="220">
@@ -425,6 +426,16 @@ onMounted(load)
 </script>
 
 <style scoped>
+/* ===== 布局：与馆藏图书页（book/list.vue）同款的表格内滚模式 =====
+   表格 max-height=calc(100vh - 290px)：分类多时表格内部滚动，
+   搜索框、展开/收起工具、新增按钮固定在表格上方始终可用。 */
+
+/* 命中路径面板可能很多行：限高内部滚动，不把表格无限推远 */
+.search-panel {
+  max-height: 220px;
+  overflow-y: auto;
+}
+
 .mono-text {
   font-family: var(--font-mono);
   font-size: var(--fs-small);
