@@ -126,10 +126,14 @@ public class AdminTools extends BaseLibraryTools {
             + "collection=馆藏总量（titles=图书种数，copies=总册数，availableCopies=当前可借册数）；"
             + "categoryBookDist=各一级分类的【藏书】分布（name/titles 种数/copies 册数/availableCopies 可借册数，"
             + "回答「某类有多少书/馆藏分类统计」必须用本字段）；"
-            + "metrics=运营指标（在册读者、当前借阅中、逾期未还等）；"
-            + "categoryBorrowDist=各一级分类的【借阅次数】分布（这是借还流水次数，不是藏书量，禁止当藏书数播报）；"
-            + "borrowTrend=近6个月借阅/归还趋势；hotBooks=热门图书借阅排行 Top5。"
-            + "用于回答「馆里有多少书/各分类多少书/多少读者/多少人在借/逾期情况/最热门的书/借阅趋势」类问题")
+            + "operations=今日运营与待办（pendingPickup=待取书单数，pendingReturnConfirm=归还待确认单数，"
+            + "overdue=逾期未还本数，outsideCount=馆外流通本数，todayBorrow=今日借出本数，"
+            + "monthNewBooks=近30天新入藏图书，activeReaders30d=近30天活跃读者数，"
+            + "unpaidFineAmount=未缴罚款总额元，activeStatusDist=在办事务状态分布）；"
+            + "metrics=指标卡片（馆藏/读者/馆外流通/逾期/今日借出/未缴罚款）；"
+            + "categoryBorrowDist=各一级分类的【真实借阅次数】分布（这是实际取书的借还流水次数，不是藏书量，禁止当藏书数播报）；"
+            + "borrowTrend=近6个月借出/归还趋势（借出按实际取书时间）；hotBooks=热门图书排行 Top8（按实际取书次数）。"
+            + "用于回答「馆里有多少书/各分类多少书/多少读者/多少书在外面/逾期情况/今天借出多少/有多少待办/多少罚款/最热门的书/借阅趋势」类问题")
     public Map<String, Object> adminQueryStats() {
         return withEvent("adminQueryStats", null, v -> {
             Map<String, Object> o = ctx.statsService.overview(3, null);
@@ -139,6 +143,8 @@ public class AdminTools extends BaseLibraryTools {
             m.put("collection", o.get("collection"));
             // 各一级分类【藏书】分布
             m.put("categoryBookDist", o.get("categoryBookDist"));
+            // 今日运营与待办
+            m.put("operations", o.get("operations"));
 
             // 指标卡片 → 扁平指标
             Map<String, Object> metrics = new LinkedHashMap<>();

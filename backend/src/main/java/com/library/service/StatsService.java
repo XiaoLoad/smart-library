@@ -3,14 +3,18 @@ package com.library.service;
 import com.library.entity.Book;
 import com.library.entity.Borrow;
 import com.library.entity.Category;
+import com.library.entity.Fine;
 import com.library.entity.User;
 import com.library.mapper.BookMapper;
 import com.library.mapper.BorrowMapper;
 import com.library.mapper.CategoryMapper;
+import com.library.mapper.FineMapper;
 import com.library.mapper.UserMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -18,12 +22,24 @@ import java.util.stream.Collectors;
 /**
  * 统计服务：仪表盘首页与 AI 管理员工具共用同一数据口径。
  * <p>
+ * 口径约定（修复排行榜等统计失真问题）：
+ * <ul>
+ *   <li>「真实借阅」= borrowTime 不为空，即读者实际到馆取过书的记录
+ *       （状态 1/2/3/5）；待取书(0)与已取消(4)从未发生借阅，
+ *       不计入排行榜、借阅分类分布、借出趋势、累计借阅。</li>
+ *   <li>「馆外流通」= 状态 1 借阅中 + 3 已逾期 + 5 待确认归还，
+ *       这三种状态图书均未回库。</li>
+ *   <li>借出趋势按 borrowTime（实际取书时间）统计，而非申请时间。</li>
+ * </ul>
  * 返回结构：
  * <ul>
  *   <li>stats: 卡片数组 [{ key, label, value, unit, icon, trend, danger? }]</li>
+ *   <li>operations: 管理员运营数据（待办/今日借出/近30天新书/未缴罚款/活跃读者/在办状态分布）</li>
  *   <li>borrowTrend: { months: [], borrow: [], return: [] }（近 6 个月）</li>
- *   <li>hotBooks: [{ rank, title, author, count }]（借阅次数 Top5）</li>
- *   <li>categoryDist: [{ name, value }]（按一级分类分布）</li>
+ *   <li>hotBooks: [{ rank, title, author, count }]（真实借阅次数 Top8）</li>
+ *   <li>categoryDist: [{ name, value }]（真实借阅次数按一级分类分布）</li>
+ *   <li>categoryBookDist: [{ name, titles, copies, availableCopies }]（藏书分类分布）</li>
+ *   <li>collection: { titles, copies, availableCopies }（馆藏总量）</li>
  * </ul>
  */
 @Service
@@ -37,6 +53,18 @@ public class StatsService {
     private UserMapper userMapper;
     @Autowired
     private CategoryMapper categoryMapper;
+    @Autowired
+    private FineMapper fineMapper;
+
+    /** 是否为真实借阅记录（读者实际取过书：borrowTime 不为空） */
+    private boolean isActuallyBorrowed(Borrow b) {
+        return b.getBorrowTime() != null;
+    }
+
+    /** 是否在馆外（未回库）：借阅中 / 已逾期 / 待确认归还 */
+    private boolean isOutsideLibrary(Integer status) {
+        return status != null && (status == 1 || status == 3 || status == 5);
+    }
 
     /**
      * 统计概览。
@@ -49,22 +77,84 @@ public class StatsService {
         List<Borrow> allBorrows = borrowMapper.selectList(null, true, null, null);
         List<User> allUsers = userMapper.selectAll();
         List<Category> categories = categoryMapper.selectAll();
+        List<Fine> allFines = fineMapper.selectList(null, true);
 
         // 按角色过滤借阅记录
         List<Borrow> myBorrows = type == 3 ? allBorrows : allBorrows.stream()
                 .filter(b -> b.getUserId() != null && b.getUserId().equals(currentUserId))
                 .collect(Collectors.toList());
+        List<Fine> myFines = type == 3 ? allFines : allFines.stream()
+                .filter(f -> f.getUserId() != null && f.getUserId().equals(currentUserId))
+                .collect(Collectors.toList());
 
         Map<String, Object> data = new HashMap<>();
-        data.put("stats", buildStats(type, allBooks, allUsers, allBorrows, myBorrows));
+        data.put("stats", buildStats(type, allBooks, allUsers, allBorrows, myBorrows, allFines, myFines));
         data.put("borrowTrend", buildBorrowTrend(type, allBorrows, myBorrows));
         data.put("hotBooks", buildHotBooks(type, allBorrows, myBorrows, allBooks));
-        // 注意：categoryDist 是「借阅次数」分布（基于借阅记录），不是藏书量
+        // 注意：categoryDist 是「真实借阅次数」分布（基于借阅记录），不是藏书量
         data.put("categoryDist", buildCategoryDist(type, allBorrows, myBorrows, allBooks, categories));
         // 馆藏口径数据：分类藏书分布（基于图书）+ 馆藏总量汇总
         data.put("categoryBookDist", buildCategoryBookDist(allBooks, categories));
         data.put("collection", buildCollectionSummary(allBooks));
+        // 管理员运营数据（待办/今日/罚款/活跃读者/在办状态分布）
+        data.put("operations", buildOperations(type, allBooks, allBorrows, allFines, myBorrows, myFines));
         return data;
+    }
+
+    /**
+     * 运营数据块。管理员为全馆口径，读者为个人口径（个人只返回部分字段）。
+     */
+    private Map<String, Object> buildOperations(int type, List<Book> allBooks, List<Borrow> allBorrows,
+                                                List<Fine> allFines, List<Borrow> myBorrows, List<Fine> myFines) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime todayStart = LocalDate.now().atStartOfDay();
+        LocalDateTime monthAgo = now.minusDays(30);
+
+        if (type == 3) {
+            // —— 管理员：全馆待办与运营 ——
+            m.put("pendingPickup", allBorrows.stream().filter(b -> b.getStatus() != null && b.getStatus() == 0).count());
+            m.put("pendingReturnConfirm", allBorrows.stream().filter(b -> b.getStatus() != null && b.getStatus() == 5).count());
+            m.put("overdue", allBorrows.stream().filter(b -> b.getStatus() != null && b.getStatus() == 3).count());
+            m.put("outsideCount", allBorrows.stream().filter(b -> isOutsideLibrary(b.getStatus())).count());
+            m.put("todayBorrow", allBorrows.stream()
+                    .filter(b -> b.getBorrowTime() != null && !b.getBorrowTime().isBefore(todayStart)).count());
+            m.put("monthNewBooks", allBooks.stream()
+                    .filter(b -> b.getCreateTime() != null && b.getCreateTime().isAfter(monthAgo)).count());
+            m.put("unpaidFineAmount", sumUnpaidFine(allFines));
+            m.put("activeReaders30d", allBorrows.stream()
+                    .filter(b -> b.getBorrowTime() != null && b.getBorrowTime().isAfter(monthAgo))
+                    .map(Borrow::getUserId).filter(Objects::nonNull).distinct().count());
+            // 在办状态分布（环图用）：只展示未完结的活跃状态
+            m.put("activeStatusDist", List.of(
+                    statusSlice("待取书", allBorrows, 0),
+                    statusSlice("借阅中", allBorrows, 1),
+                    statusSlice("已逾期", allBorrows, 3),
+                    statusSlice("待确认归还", allBorrows, 5)));
+        } else {
+            // —— 读者：个人待办 ——
+            m.put("pendingPickup", myBorrows.stream().filter(b -> b.getStatus() != null && b.getStatus() == 0).count());
+            m.put("pendingReturnConfirm", myBorrows.stream().filter(b -> b.getStatus() != null && b.getStatus() == 5).count());
+            m.put("overdue", myBorrows.stream().filter(b -> b.getStatus() != null && b.getStatus() == 3).count());
+            m.put("outsideCount", myBorrows.stream().filter(b -> isOutsideLibrary(b.getStatus())).count());
+            m.put("unpaidFineAmount", sumUnpaidFine(myFines));
+        }
+        return m;
+    }
+
+    private Map<String, Object> statusSlice(String name, List<Borrow> borrows, int status) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("name", name);
+        m.put("value", borrows.stream().filter(b -> b.getStatus() != null && b.getStatus() == status).count());
+        return m;
+    }
+
+    private String sumUnpaidFine(List<Fine> fines) {
+        BigDecimal sum = fines.stream()
+                .filter(f -> f.getStatus() != null && f.getStatus() == 0 && f.getAmount() != null)
+                .map(Fine::getAmount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        return sum.toPlainString();
     }
 
     /**
@@ -116,33 +206,48 @@ public class StatsService {
      * 构建统计卡片数组
      */
     private List<Map<String, Object>> buildStats(int type, List<Book> allBooks, List<User> allUsers,
-                                                  List<Borrow> allBorrows, List<Borrow> myBorrows) {
+                                                  List<Borrow> allBorrows, List<Borrow> myBorrows,
+                                                  List<Fine> allFines, List<Fine> myFines) {
         List<Map<String, Object>> stats = new ArrayList<>();
         if (type == 3) {
-            // 管理员：全局统计（藏书主指标用总册数，副标注种数）
+            // —— 管理员：全局统计 ——
             long totalCopies = allBooks.stream()
                     .mapToLong(b -> b.getTotalCount() == null ? 0 : b.getTotalCount()).sum();
+            long outside = allBorrows.stream().filter(b -> isOutsideLibrary(b.getStatus())).count();
+            long overdue = allBorrows.stream().filter(b -> b.getStatus() != null && b.getStatus() == 3).count();
+            LocalDateTime todayStart = LocalDate.now().atStartOfDay();
+            long todayBorrow = allBorrows.stream()
+                    .filter(b -> b.getBorrowTime() != null && !b.getBorrowTime().isBefore(todayStart)).count();
             stats.add(statItem("books", "馆藏图书", totalCopies, "册", "Reading", "共 " + allBooks.size() + " 种"));
-            stats.add(statItem("users", "在册读者", allUsers.stream().filter(u -> u.getStatus() == 1).count(), "人", "User", "+" + allUsers.size() + " 注册"));
-            stats.add(statItem("borrowing", "借阅中", allBorrows.stream().filter(b -> b.getStatus() == 1).count(), "本", "Tickets", "实时"));
-            long overdue = allBorrows.stream().filter(b -> b.getStatus() == 3).count();
-            stats.add(statItem("overdue", "逾期未还", overdue, "本", "Warning", overdue > 0 ? "待处理" : "无逾期", overdue > 0));
+            stats.add(statItem("users", "在册读者", allUsers.stream().filter(u -> u.getStatus() == 1).count(), "人", "User",
+                    allUsers.size() + " 人注册"));
+            stats.add(statItem("outside", "馆外流通", outside, "本", "Tickets", "借阅中·逾期·待确认"));
+            stats.add(statItem("overdue", "逾期未还", overdue, "本", "Warning",
+                    overdue > 0 ? "需要催还" : "无逾期", overdue > 0));
+            stats.add(statItem("todayBorrow", "今日借出", todayBorrow, "本", "DataAnalysis",
+                    todayBorrow > 0 ? "柜台实时" : "今日暂无借出"));
+            stats.add(statItem("fine", "未缴罚款", new java.math.BigDecimal(sumUnpaidFine(allFines)), "元", "Coin",
+                    "全馆待缴合计"));
         } else {
-            // 教师/学生：个人统计
-            long borrowing = myBorrows.stream().filter(b -> b.getStatus() == 1).count();
-            long overdue = myBorrows.stream().filter(b -> b.getStatus() == 3).count();
+            // —— 教师/学生：个人统计 ——
+            long outside = myBorrows.stream().filter(b -> isOutsideLibrary(b.getStatus())).count();
+            long overdue = myBorrows.stream().filter(b -> b.getStatus() != null && b.getStatus() == 3).count();
+            long borrowed = myBorrows.stream().filter(this::isActuallyBorrowed).count();
             long dueSoon = myBorrows.stream().filter(b -> {
-                if (b.getStatus() == 1 && b.getDueTime() != null) {
+                if (b.getStatus() != null && b.getStatus() == 1 && b.getDueTime() != null) {
                     return b.getDueTime().isBefore(LocalDateTime.now().plusDays(7));
                 }
                 return false;
             }).count();
-            stats.add(statItem("borrowing", "我的借阅中", borrowing, "本", "Tickets",
-                    dueSoon > 0 ? dueSoon + " 本即将到期" : "无即将到期"));
-            stats.add(statItem("history", "累计借阅", myBorrows.size(), "本", "Reading", "历史总计"));
+            String myFine = sumUnpaidFine(myFines);
+            boolean hasFine = new BigDecimal(myFine).compareTo(BigDecimal.ZERO) > 0;
+            stats.add(statItem("outside", "我借的书", outside, "本", "Tickets",
+                    dueSoon > 0 ? dueSoon + " 本即将到期" : (overdue > 0 ? overdue + " 本已逾期" : "无即将到期")));
+            stats.add(statItem("history", "累计借阅", borrowed, "本", "Reading", "实际取书次数"));
             stats.add(statItem("dueSoon", "即将到期", dueSoon, "本", "Warning",
-                    dueSoon > 0 ? "7 天内" : "无", dueSoon > 0));
-            stats.add(statItem("fine", "待缴罚款", 0, "元", "Warning", "无欠款"));
+                    dueSoon > 0 ? "7 天内到期" : "无", dueSoon > 0));
+            stats.add(statItem("fine", "待缴罚款", new BigDecimal(myFine), "元", "Coin",
+                    hasFine ? "请及时缴纳" : "无欠款", hasFine));
         }
         return stats;
     }
@@ -164,7 +269,8 @@ public class StatsService {
     }
 
     /**
-     * 构建借阅趋势（近 6 个月）
+     * 构建借阅趋势（近 6 个月）。
+     * 借出按 borrowTime（实际取书时间，仅真实借阅），归还按 returnTime。
      */
     private Map<String, Object> buildBorrowTrend(int type, List<Borrow> allBorrows, List<Borrow> myBorrows) {
         List<Borrow> trendBorrows = type == 3 ? allBorrows : myBorrows;
@@ -177,10 +283,12 @@ public class StatsService {
             LocalDateTime end = start.plusMonths(1);
             months.add(start.getMonthValue() + "月");
             borrow.add(trendBorrows.stream()
-                    .filter(b -> b.getApplyTime() != null && b.getApplyTime().isAfter(start) && b.getApplyTime().isBefore(end))
+                    .filter(b -> b.getBorrowTime() != null
+                            && b.getBorrowTime().isAfter(start) && b.getBorrowTime().isBefore(end))
                     .count());
             returnList.add(trendBorrows.stream()
-                    .filter(b -> b.getReturnTime() != null && b.getReturnTime().isAfter(start) && b.getReturnTime().isBefore(end))
+                    .filter(b -> b.getReturnTime() != null
+                            && b.getReturnTime().isAfter(start) && b.getReturnTime().isBefore(end))
                     .count());
         }
         Map<String, Object> trend = new HashMap<>();
@@ -191,10 +299,13 @@ public class StatsService {
     }
 
     /**
-     * 构建热门图书（借阅次数 Top5）
+     * 构建热门图书（真实借阅次数 Top8）。
+     * 仅统计实际取过书的记录（borrowTime 不为空），排除待取书/已取消。
      */
     private List<Map<String, Object>> buildHotBooks(int type, List<Borrow> allBorrows, List<Borrow> myBorrows, List<Book> allBooks) {
-        List<Borrow> trendBorrows = type == 3 ? allBorrows : myBorrows;
+        List<Borrow> trendBorrows = (type == 3 ? allBorrows : myBorrows).stream()
+                .filter(this::isActuallyBorrowed)
+                .collect(Collectors.toList());
         Map<Long, Long> bookCount = new HashMap<>();
         Map<Long, Book> bookMap = allBooks.stream().collect(Collectors.toMap(Book::getId, b -> b));
         for (Borrow b : trendBorrows) {
@@ -202,7 +313,7 @@ public class StatsService {
         }
         List<Map.Entry<Long, Long>> sorted = bookCount.entrySet().stream()
                 .sorted(Map.Entry.<Long, Long>comparingByValue().reversed())
-                .limit(5)
+                .limit(8)
                 .collect(Collectors.toList());
         List<Map<String, Object>> result = new ArrayList<>();
         int rank = 1;
@@ -219,11 +330,13 @@ public class StatsService {
     }
 
     /**
-     * 构建分类分布（按一级分类汇总借阅次数）
+     * 构建分类分布（按一级分类汇总真实借阅次数）。
      */
     private List<Map<String, Object>> buildCategoryDist(int type, List<Borrow> allBorrows, List<Borrow> myBorrows,
                                                         List<Book> allBooks, List<Category> categories) {
-        List<Borrow> trendBorrows = type == 3 ? allBorrows : myBorrows;
+        List<Borrow> trendBorrows = (type == 3 ? allBorrows : myBorrows).stream()
+                .filter(this::isActuallyBorrowed)
+                .collect(Collectors.toList());
         Map<Long, String> cateMap = categories.stream()
                 .collect(Collectors.toMap(Category::getId, Category::getCategoryName));
         Map<Long, Book> bookMap = allBooks.stream().collect(Collectors.toMap(Book::getId, b -> b));
@@ -242,6 +355,7 @@ public class StatsService {
                     m.put("value", e.getValue());
                     return m;
                 })
+                .sorted((x, y) -> Long.compare((Long) y.get("value"), (Long) x.get("value")))
                 .collect(Collectors.toList());
     }
 
