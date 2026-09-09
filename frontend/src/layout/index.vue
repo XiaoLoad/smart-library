@@ -7,7 +7,7 @@
       @click="appStore.closeMobileSidebar()"
     ></div>
 
-    <!-- 侧边栏 -->
+    <!-- 侧边栏 · 目次式导航 -->
     <aside
       class="app-sidebar"
       :class="{ collapsed: appStore.sidebarCollapsed, 'mobile-open': appStore.mobileSidebarOpen }"
@@ -16,47 +16,45 @@
         <div class="brand">
           <span class="brand-mark">智</span>
           <transition name="fade">
-            <span v-if="!appStore.sidebarCollapsed" class="brand-name">智图</span>
+            <span v-if="!appStore.sidebarCollapsed" class="brand-text">
+              <span class="brand-name">智图</span>
+              <span class="brand-sub">LIBRARY</span>
+            </span>
           </transition>
         </div>
       </div>
 
       <nav class="sidebar-nav">
-        <template v-for="route in menuRoutes" :key="route.path">
-          <!-- 容器路由（meta.hidden）：直接平铺子项为顶层菜单，不显示组标题 -->
-          <router-link
-            v-if="route.meta?.hidden && route.children?.length"
-            v-for="child in route.children.filter(c => !c.meta?.hidden)"
-            :key="child.path"
-            :to="`${route.path === '/' ? '' : route.path}/${child.path}`"
-            class="menu-item"
-            @click="appStore.closeMobileSidebar()"
+        <!-- 目次眉题 -->
+        <div class="nav-toc" v-if="!appStore.sidebarCollapsed">目次</div>
+
+        <section
+          v-for="(section, si) in menuSections"
+          :key="si"
+          class="menu-section"
+          :style="{ animationDelay: `${si * 40}ms` }"
+        >
+          <!-- 分节眉题：折叠态仅留分隔线 -->
+          <div v-if="section.title && !appStore.sidebarCollapsed" class="section-title">
+            <span class="section-tick"></span>{{ section.title }}
+          </div>
+
+          <el-tooltip
+            v-for="item in section.items"
+            :key="item.path"
+            :content="item.title"
+            placement="right"
+            :disabled="!appStore.sidebarCollapsed"
+            :show-after="200"
           >
-            <el-icon><component :is="child.meta?.icon" /></el-icon>
-            <transition name="fade">
-              <span v-if="!appStore.sidebarCollapsed">{{ child.meta?.title }}</span>
-            </transition>
-          </router-link>
-          <!-- 普通菜单组：组标题 + 子项 -->
-          <div v-else-if="route.children && !route.meta?.hidden" class="menu-group">
-            <div class="menu-group__title" v-if="!appStore.sidebarCollapsed && route.meta?.title">
-              <el-icon v-if="route.meta?.icon"><component :is="route.meta.icon" /></el-icon>
-              <span>{{ route.meta.title }}</span>
-            </div>
-            <router-link
-              v-for="child in route.children.filter(c => !c.meta?.hidden)"
-              :key="child.path"
-              :to="`${route.path === '/' ? '' : route.path}/${child.path}`"
-              class="menu-item"
-              @click="appStore.closeMobileSidebar()"
-            >
-              <el-icon v-if="child.meta?.icon"><component :is="child.meta.icon" /></el-icon>
+            <router-link :to="item.path" class="menu-item" :class="{ active: isActive(item) }">
+              <AppIcon :name="item.icon" :size="18" class="menu-icon" />
               <transition name="fade">
-                <span v-if="!appStore.sidebarCollapsed">{{ child.meta?.title }}</span>
+                <span v-if="!appStore.sidebarCollapsed" class="menu-label">{{ item.title }}</span>
               </transition>
             </router-link>
-          </div>
-        </template>
+          </el-tooltip>
+        </section>
       </nav>
 
       <div class="sidebar-footer" v-if="!appStore.sidebarCollapsed">
@@ -72,12 +70,8 @@
       <!-- 顶栏 -->
       <header class="app-header">
         <div class="header-left">
-          <el-button
-            text
-            @click="appStore.toggleSidebar()"
-            class="collapse-btn"
-          >
-            <el-icon><Fold v-if="!appStore.sidebarCollapsed" /><Expand v-else /></el-icon>
+          <el-button text @click="appStore.toggleSidebar()" class="collapse-btn">
+            <AppIcon name="chevron-left" :size="18" class="collapse-icon" :class="{ flipped: appStore.sidebarCollapsed }" />
           </el-button>
           <el-breadcrumb separator="/">
             <el-breadcrumb-item :to="{ path: '/dashboard' }">首页</el-breadcrumb-item>
@@ -98,14 +92,14 @@
         <div class="header-right">
           <el-tooltip content="切换主题" placement="bottom">
             <el-button text @click="appStore.toggleTheme()" class="icon-btn">
-              <el-icon><Moon v-if="appStore.theme === 'light'" /><Sunny v-else /></el-icon>
+              <AppIcon :name="appStore.theme === 'light' ? 'moon' : 'sun'" :size="18" />
             </el-button>
           </el-tooltip>
 
           <el-tooltip content="通知" placement="bottom">
             <el-badge :value="unreadCount" :hidden="unreadCount === 0" class="notify-badge">
               <el-button text class="icon-btn">
-                <el-icon><Bell /></el-icon>
+                <AppIcon name="bell" :size="18" />
               </el-button>
             </el-badge>
           </el-tooltip>
@@ -119,7 +113,7 @@
                 <div class="user-name">{{ userStore.user?.realName }}</div>
                 <div class="user-role">{{ userStore.user?.roleName }}</div>
               </div>
-              <el-icon class="arrow"><ArrowDown /></el-icon>
+              <AppIcon name="chevron-down" :size="14" class="arrow" />
             </div>
             <template #dropdown>
               <el-dropdown-menu>
@@ -150,24 +144,53 @@ import { useRoute, useRouter } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import { useUserStore } from '@/stores/user'
 import { notificationApi } from '@/api'
+import AppIcon from '@/components/AppIcon.vue'
 
 const route = useRoute()
 const router = useRouter()
 const appStore = useAppStore()
 const userStore = useUserStore()
 
-const menuRoutes = computed(() => {
+/* ===== 目次式菜单配置 =====
+ * 与路由结构解耦：容器路由已拍平（"用户管理>读者列表"这类单子项层级去除），
+ * 按"藏书 / 借阅 / 服务 / 平台"四个心智分节组织，roles 控制可见性。
+ * 角色码：1=教师 2=学生 3=管理员 */
+const ALL = [1, 2, 3]
+const MENU_SECTIONS = [
+  { title: '', items: [
+    { title: '概览', path: '/dashboard', icon: 'gauge', roles: ALL },
+  ]},
+  { title: '藏书', items: [
+    { title: '馆藏图书', path: '/book/list', icon: 'book', roles: ALL },
+    { title: '图书分类', path: '/book/category', icon: 'tag', roles: [3] },
+  ]},
+  { title: '借阅', items: [
+    { title: '借阅记录', path: '/borrow/list', icon: 'receipt', roles: ALL },
+    { title: '罚款记录', path: '/borrow/fine', icon: 'coin', roles: ALL },
+    { title: '读者', path: '/user/list', icon: 'user', roles: [3] },
+  ]},
+  { title: '服务', items: [
+    { title: 'AI 助手', path: '/ai/chat', icon: 'sparkles', roles: ALL },
+    { title: '公告', path: '/announce/list', icon: 'bell', roles: ALL },
+  ]},
+  { title: '平台', items: [
+    { title: '系统设置', path: '/system/settings', icon: 'gear', roles: [3] },
+  ]},
+]
+
+const menuSections = computed(() => {
   const userType = userStore.userType
   const canAccess = (roles) => !roles || roles.includes(userType)
-  return router.options.routes
-    .filter((r) => !r.meta?.public && r.path !== '/login')
-    .filter((r) => canAccess(r.meta?.roles))
-    .map((r) => ({
-      ...r,
-      children: (r.children || []).filter((c) => canAccess(c.meta?.roles)),
-    }))
-    .filter((r) => !r.children || r.children.length > 0)
+  return MENU_SECTIONS
+    .map((s) => ({ ...s, items: s.items.filter((i) => canAccess(i.roles)) }))
+    .filter((s) => s.items.length > 0)
 })
+
+// 激活态：支持详情页经由 meta.activeMenu 回亮所属菜单（如 /book/detail/:id → 馆藏图书）
+const isActive = (item) => {
+  if (route.meta?.activeMenu) return route.meta.activeMenu === item.path
+  return route.path === item.path || route.path.startsWith(item.path + '/')
+}
 
 const unreadCount = ref(0)
 
@@ -219,8 +242,9 @@ onMounted(() => {
   height: var(--header-height);
   display: flex;
   align-items: center;
-  padding: 0 var(--space-5);
+  padding: 0 var(--space-4);
   border-bottom: 1px solid var(--color-divider);
+  flex-shrink: 0;
 }
 
 .brand {
@@ -241,57 +265,107 @@ onMounted(() => {
   font-family: var(--font-serif);
   font-size: 1.25rem;
   font-weight: 600;
+  flex-shrink: 0;
+}
+
+.brand-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
 }
 
 .brand-name {
   font-family: var(--font-serif);
-  font-size: var(--fs-h3);
+  font-size: 1.125rem;
   font-weight: 600;
   color: var(--color-text);
   letter-spacing: var(--ls-tight);
 }
 
+.brand-sub {
+  font-size: 0.5625rem;
+  letter-spacing: 0.32em;
+  color: var(--color-text-tertiary);
+  text-transform: uppercase;
+}
+
+/* —— 目次导航 —— */
 .sidebar-nav {
   flex: 1;
-  padding: var(--space-3) 0;
+  padding: var(--space-4) 0 var(--space-2);
   overflow-y: auto;
+  overflow-x: hidden;
 }
 
-.menu-group {
+/* "目次" 眉题 · editorial 印刷语汇 */
+.nav-toc {
+  padding: 0 calc(var(--space-5) + 2px) var(--space-2);
+  font-size: var(--fs-caption);
+  letter-spacing: 0.42em;
+  color: var(--color-text-tertiary);
+}
+
+.menu-section {
+  display: flex;
+  flex-direction: column;
+  padding-bottom: var(--space-2);
   margin-bottom: var(--space-2);
+  border-bottom: 1px solid var(--color-divider);
+  animation: section-in var(--duration) var(--ease-out) both;
 }
 
-.menu-group__title {
+.menu-section:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+
+@keyframes section-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* 分节眉题：短刻线 + 小字 */
+.section-title {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-3) var(--space-5) var(--space-1);
+  padding: var(--space-1) var(--space-5) var(--space-2);
   font-size: var(--fs-caption);
-  text-transform: uppercase;
   letter-spacing: var(--ls-wide);
   color: var(--color-text-tertiary);
-  font-weight: 500;
+  user-select: none;
 }
 
-/* 无标题的平铺菜单组（meta.hidden 的容器路由）增加顶部分隔 */
-.menu-group + .menu-item,
-.sidebar-nav > .menu-item:first-child {
-  margin-top: var(--space-1);
+.section-tick {
+  width: 10px;
+  height: 1px;
+  background: var(--color-border-strong);
+  flex-shrink: 0;
 }
 
 .menu-item {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  padding: var(--space-2) var(--space-5);
-  margin: 2px var(--space-2);
+  height: 38px;
+  padding: 0 calc(var(--space-5) - 6px) 0 var(--space-5);
+  margin: 1px var(--space-2);
   border-radius: var(--radius-md);
   color: var(--color-text-secondary);
   font-size: var(--fs-body);
   line-height: 1.4;
-  transition: all var(--duration-fast) var(--ease-soft);
+  transition: color var(--duration-fast) var(--ease-soft),
+    background-color var(--duration-fast) var(--ease-soft);
   position: relative;
   text-decoration: none;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.menu-icon {
+  flex-shrink: 0;
+  transition: transform var(--duration-fast) var(--ease-soft);
 }
 
 .menu-item:hover {
@@ -299,31 +373,57 @@ onMounted(() => {
   background: var(--color-bg-subtle);
 }
 
-.menu-item.router-link-active {
-  color: var(--color-primary);
-  background: var(--color-primary-light);
+.menu-item:hover .menu-icon {
+  transform: translateX(1px);
 }
 
-.menu-item.router-link-active::before {
+/* 激活态：书签式刻条（垂直居中短条，非通高） */
+.menu-item.active {
+  color: var(--color-primary);
+  background: var(--color-primary-light);
+  font-weight: 500;
+}
+
+.menu-item.active::before {
   content: '';
   position: absolute;
   left: 0;
-  top: 6px;
-  bottom: 6px;
-  width: 3px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 2.5px;
+  height: 16px;
   border-radius: 0 2px 2px 0;
   background: var(--color-primary);
 }
 
+.menu-item.active .menu-icon {
+  color: var(--color-primary);
+}
+
+/* 折叠态：图标居中，仅 tooltip 提示 */
+.app-sidebar.collapsed .sidebar-nav {
+  padding: var(--space-4) 0 var(--space-2);
+}
+
+.app-sidebar.collapsed .menu-section {
+  margin: 0 var(--space-3) var(--space-2);
+  padding-bottom: var(--space-2);
+}
+
+.app-sidebar.collapsed .menu-section:last-child {
+  margin-bottom: 0;
+}
+
 .app-sidebar.collapsed .menu-item {
   justify-content: center;
-  padding: var(--space-3);
-  margin: 2px var(--space-1);
+  padding: 0;
+  margin: 1px 0;
 }
 
 .sidebar-footer {
-  padding: var(--space-5);
+  padding: var(--space-4) var(--space-5);
   border-top: 1px solid var(--color-divider);
+  flex-shrink: 0;
 }
 
 .quote {
@@ -374,6 +474,16 @@ onMounted(() => {
 
 .collapse-btn {
   padding: var(--space-2);
+  height: auto;
+}
+
+.collapse-icon {
+  color: var(--color-text-secondary);
+  transition: transform var(--duration) var(--ease-soft);
+}
+
+.collapse-icon.flipped {
+  transform: rotate(180deg);
 }
 
 .header-right {
@@ -384,6 +494,7 @@ onMounted(() => {
 
 .icon-btn {
   padding: var(--space-2);
+  height: auto;
   color: var(--color-text-secondary);
 }
 
@@ -431,12 +542,19 @@ onMounted(() => {
 
 .arrow {
   color: var(--color-text-tertiary);
-  font-size: var(--fs-small);
 }
 
 .app-content {
   flex: 1;
   overflow-x: hidden;
+}
+
+/* 过渡动画 */
+.fade-enter-active, .fade-leave-active {
+  transition: opacity var(--duration-fast) var(--ease-soft);
+}
+.fade-enter-from, .fade-leave-to {
+  opacity: 0;
 }
 
 @media (max-width: 768px) {
@@ -462,7 +580,7 @@ onMounted(() => {
   }
   .app-sidebar.collapsed .menu-item {
     justify-content: flex-start;
-    padding: var(--space-3) var(--space-5);
+    padding: 0 calc(var(--space-5) - 6px) 0 var(--space-5);
   }
 }
 
