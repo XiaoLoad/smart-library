@@ -63,7 +63,7 @@
         </div>
       </div>
 
-      <el-table :data="filteredList" style="width: 100%">
+      <el-table :data="pagedList" style="width: 100%" max-height="calc(100vh - 290px)">
         <el-table-column prop="userName" label="读者" width="120" />
         <el-table-column prop="bookTitle" label="图书" min-width="180" />
         <el-table-column prop="borrowNo" label="借阅单号" width="180">
@@ -97,12 +97,23 @@
           </template>
         </el-table-column>
       </el-table>
+
+      <div class="table-pagination">
+        <el-pagination
+          v-model:current-page="page"
+          v-model:page-size="size"
+          :total="total"
+          :page-sizes="[10, 20, 50]"
+          layout="total, sizes, prev, pager, next, jumper"
+          background
+        />
+      </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { borrowApi } from '@/api'
 import { showPageLoading, hidePageLoading } from '@/utils/pageLoading.js'
@@ -110,9 +121,23 @@ import { showPageLoading, hidePageLoading } from '@/utils/pageLoading.js'
 const list = ref([])
 const statusFilter = ref('')
 
+// 前端分页（后端 /fine/list 一次返回全量，汇总卡也需全量计算）
+const page = ref(1)
+const size = ref(20)
+
 const filteredList = computed(() => {
   if (statusFilter.value === '') return list.value
   return list.value.filter((f) => f.status === statusFilter.value)
+})
+
+const total = computed(() => filteredList.value.length)
+const pagedList = computed(() =>
+  filteredList.value.slice((page.value - 1) * size.value, page.value * size.value)
+)
+
+// 切换状态过滤后回到第一页，避免停在超出范围的页码
+watch(statusFilter, () => {
+  page.value = 1
 })
 
 const unpaidTotal = computed(() =>
@@ -227,6 +252,21 @@ onMounted(load)
   font-family: var(--font-mono);
   font-size: var(--fs-small);
   color: var(--color-text-secondary);
+}
+
+/* 表格内部滚动：细化滚动条（与馆藏图书页一致） */
+:deep(.el-table .el-scrollbar__bar.is-vertical) {
+  width: 6px;
+  right: 2px;
+}
+
+:deep(.el-table .el-scrollbar__bar.is-horizontal) {
+  height: 6px;
+  bottom: 2px;
+}
+
+:deep(.el-table .el-scrollbar__bar .el-scrollbar__thumb) {
+  border-radius: 999px;
 }
 
 .amount {
