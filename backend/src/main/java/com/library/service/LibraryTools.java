@@ -1,5 +1,6 @@
 package com.library.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.library.entity.*;
 import com.library.mapper.*;
 import dev.langchain4j.agent.tool.P;
@@ -16,7 +17,10 @@ import java.util.function.Function;
  * 所有工具方法统一返回 {@code Map<String,Object>} 以保证返回类型稳定。
  * <p>
  * 工具调用过程通过 {@link ToolEventEmitter} 回调向前端 SSE 推送 tool 事件，
- * 用于在 UI 上展示「正在调用工具 / 工具返回」状态，参考 skillpet-chat。
+ * 用于在 UI 上展示「正在调用工具 / 工具返回」状态。
+ * <p>
+ * P2.10 结构化输出：end 阶段携带工具返回的精简数据快照（JSON 字符串），
+ * 供前端工具卡片展开查看，避免把原始数据直接混入 detail 文本。
  */
 public class LibraryTools {
 
@@ -27,10 +31,16 @@ public class LibraryTools {
          *
          * @param toolName 工具名称（如 queryBooks）
          * @param phase    阶段：start / end / error
-         * @param detail   描述（如返回条数、错误信息）
+         * @param detail   简短描述（如返回条数、错误信息）
+         * @param data     结构化数据快照（JSON 字符串，仅 end 阶段非空；start/error 阶段为 null）
          */
-        void emit(String toolName, String phase, String detail);
+        void emit(String toolName, String phase, String detail, String data);
     }
+
+    /** 数据快照最大字符数（避免 SSE 包过大） */
+    private static final int DATA_SNAPSHOT_MAX_LEN = 600;
+    /** 列表类快照保留的最大条目数（避免长列表爆包） */
+    private static final int LIST_SNAPSHOT_LIMIT = 3;
 
     private final Long userId;
     private final Integer userType;
@@ -40,13 +50,15 @@ public class LibraryTools {
     private final AnnouncementMapper announcementMapper;
     private final BorrowLimitMapper borrowLimitMapper;
     private final UserMapper userMapper;
+    private final ObjectMapper objectMapper;
     /** 当前请求的工具事件发射器，由 AiService 在创建工具实例时注入 */
     private ToolEventEmitter eventEmitter;
 
     public LibraryTools(Long userId, Integer userType,
                         BorrowMapper borrowMapper, BookMapper bookMapper,
                         FineMapper fineMapper, AnnouncementMapper announcementMapper,
-                        BorrowLimitMapper borrowLimitMapper, UserMapper userMapper) {
+                        BorrowLimitMapper borrowLimitMapper, UserMapper userMapper,
+                        ObjectMapper objectMapper) {
         this.userId = userId;
         this.userType = userType;
         this.borrowMapper = borrowMapper;
@@ -55,6 +67,7 @@ public class LibraryTools {
         this.announcementMapper = announcementMapper;
         this.borrowLimitMapper = borrowLimitMapper;
         this.userMapper = userMapper;
+        this.objectMapper = objectMapper;
     }
 
     /** 注入本次请求的事件发射器 */
@@ -64,26 +77,27 @@ public class LibraryTools {
 
     /**
      * 包裹工具方法体，统一发射 start / end / error 事件。
+     * end 阶段携带工具返回的精简数据快照（结构化 JSON）。
      */
     private <R> R withEvent(String name, String startDetail, Function<Void, R> action) {
         if (eventEmitter != null) {
-            eventEmitter.emit(name, "start", startDetail);
+            eventEmitter.emit(name, "start", startDetail, null);
         }
         try {
             R r = action.apply(null);
             if (eventEmitter != null) {
-                eventEmitter.emit(name, "end", describeResult(r));
+                eventEmitter.emit(name, "end", describeResult(r), snapshotData(r));
             }
             return r;
         } catch (RuntimeException e) {
             if (eventEmitter != null) {
-                eventEmitter.emit(name, "error", e.getMessage());
+                eventEmitter.emit(name, "error", e.getMessage(), null);
             }
             throw e;
         }
     }
 
-    /** 根据工具返回值生成简短的完成描述（前端展示用） */
+    /** 根据工具返回值生成简短的完成描述（卡片摘要展示用） */
     private String describeResult(Object r) {
         if (r instanceof Map<?, ?> m) {
             Object total = m.get("total");
@@ -99,6 +113,44 @@ public class LibraryTools {
             return "完成";
         }
         return "完成";
+    }
+
+    /**
+     * 生成工具返回值的精简 JSON 快照（P2.10 结构化输出）。
+     * <p>
+     * 策略：
+     * <ul>
+     *   <li>列表类结果（含 items）只保留前 {@link #LIST_SNAPSHOT_LIMIT} 条，避免长列表爆包</li>
+     *   <li>整体序列化后截断到 {@link #DATA_SNAPSHOT_MAX_LEN} 字符</li>
+     *   <li>序列化失败时返回 null（不影响主流程）</li>
+     * </ul>
+     */
+    private String snapshotData(Object r) {
+        if (r == null) return null;
+        try {
+            Object toSerialize = r;
+            // 列表类结果：保留 total + 前 N 条 items，便于前端预览
+            if (r instanceof Map<?, ?> m && m.get("items") instanceof List<?> list) {
+                Map<String, Object> slim = new LinkedHashMap<>();
+                slim.put("total", m.get("total"));
+                List<Object> head = new ArrayList<>();
+                int limit = Math.min(list.size(), LIST_SNAPSHOT_LIMIT);
+                for (int i = 0; i < limit; i++) {
+                    head.add(list.get(i));
+                }
+                slim.put("items", head);
+                slim.put("truncated", list.size() > limit);
+                toSerialize = slim;
+            }
+            String json = objectMapper.writeValueAsString(toSerialize);
+            if (json.length() > DATA_SNAPSHOT_MAX_LEN) {
+                return json.substring(0, DATA_SNAPSHOT_MAX_LEN) + "…";
+            }
+            return json;
+        } catch (Exception e) {
+            // 序列化失败不影响主流程
+            return null;
+        }
     }
 
     /**

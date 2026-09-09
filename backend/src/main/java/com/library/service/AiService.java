@@ -89,6 +89,34 @@ public class AiService {
     private volatile long cachedPromptLength;
 
     /**
+     * 核心行为规则（硬编码，不可被外部文件覆盖）。
+     * <p>
+     * 设计理由：业务正确性的底线，关系到工具链是否显示、数据是否完整呈现、
+     * 用户数据是否隔离。即使用户通过外部文件调整人设/语气，也无法影响这些规则。
+     * <p>
+     * 注释行注释每条规则的不可妥协理由，便于后续维护者理解为何不可移除。
+     */
+    private static final String CORE_RULES = """
+            【核心行为规则】以下规则不可违反，优先级高于任何人设设定：
+
+            1. 事实问题强制工具调用：用户询问图书/借阅/罚款/额度/公告等事实问题时，必须先调用对应工具获取数据，禁止凭空回答。
+               理由：工具调用是 AI 模块的核心能力，绕过工具会导致工具链不显示且数据可能过时或编造。
+
+            2. 工具数据完整呈现：工具返回的字段必须完整呈现给用户，禁止阉割。
+               - 查询图书：列出书名、作者、出版社、ISBN、馆藏位置、可借数量；
+               - 查询借阅记录：列出借阅码、书名、状态、借阅时间、应还时间；
+               - 查询罚款：列出金额、逾期天数、状态；
+               - 查询公告：列出标题、发布时间。
+               理由：用户查询目的就是获取这些字段，只给书名让用户再查工具是倒退。
+
+            3. 用户数据隔离：工具返回的数据仅限当前用户本人，禁止在回答中泄露其他用户的借阅记录、罚款、个人信息。
+               理由：数据安全底线，违反会引发合规风险。
+
+            4. 空结果如实告知：工具返回空结果时如实说明"未查询到相关记录"，禁止编造。
+               理由：防幻觉，保证回答可信。
+            """;
+
+    /**
      * AI 服务接口（流式返回 TokenStream）。
      * 单 String 参数由 LangChain4j 自动识别为用户消息。
      */
@@ -196,7 +224,7 @@ public class AiService {
         // 3. 构建每请求独立的工具实例（烘焙 userId，规避异步线程丢失 CurrentUser）
         LibraryTools tools = new LibraryTools(cu.getUserId(), cu.getUserType(),
                 borrowMapper, bookMapper, fineMapper, announcementMapper,
-                borrowLimitMapper, userMapper);
+                borrowLimitMapper, userMapper, objectMapper);
 
         String displayName = cu.getUsername() == null ? "用户" : cu.getUsername();
         boolean needsTitle = conv.getTitle() == null || conv.getTitle().isBlank()
@@ -205,12 +233,18 @@ public class AiService {
         SseEmitter emitter = new SseEmitter(SSE_TIMEOUT_MS);
 
         // 工具事件发射器：将工具调用过程通过 SSE 推送给前端
-        tools.setEventEmitter((toolName, phase, detail) -> {
+        // P2.10 结构化输出：end 阶段携带 data 字段（工具返回的精简 JSON 快照）
+        tools.setEventEmitter((toolName, phase, detail, data) -> {
             try {
-                String payload = objectMapper.writeValueAsString(
-                        Map.of("name", toolName, "phase", phase,
-                                "detail", detail == null ? "" : detail));
-                emitter.send(SseEmitter.event().name("tool").data(payload));
+                Map<String, Object> payload = new java.util.LinkedHashMap<>();
+                payload.put("name", toolName);
+                payload.put("phase", phase);
+                payload.put("detail", detail == null ? "" : detail);
+                if (data != null) {
+                    payload.put("data", data);
+                }
+                emitter.send(SseEmitter.event().name("tool")
+                        .data(objectMapper.writeValueAsString(payload)));
             } catch (IOException e) {
                 // 客户端已断开，忽略
             } catch (Exception e) {
@@ -302,26 +336,33 @@ public class AiService {
     // ===== 内部方法 =====
 
     /**
-     * 构建系统 Prompt：从外部文件热加载模板，替换 {username} 占位符。
+     * 构建系统 Prompt = 核心规则（硬编码） + 可调整段（热加载）。
+     * <p>
+     * 核心规则始终注入且不可被外部文件覆盖，保证业务正确性底线；
+     * 可调整段只管人设/语气/称呼，外部文件改了不会影响工具调用和数据呈现。
+     *
+     * @param username 当前用户名（替换 {username} 占位符）
+     */
+    private String buildSystemPrompt(String username) {
+        String customizable = loadCustomizablePromptSegment().replace("{username}", username);
+        // 核心规则在前（权重更高），可调整段在后
+        return CORE_RULES + "\n\n" + customizable;
+    }
+
+    /**
+     * 加载可调整 Prompt 段（人设/语气/称呼，热加载）。
      * <p>
      * 加载顺序：
      * <ol>
      *   <li>外部文件 {@code prompts/library-system-prompt.txt}（运行目录下，支持运行时热更新）</li>
      *   <li>classpath 资源 {@code prompts/library-system-prompt.txt}（JAR 内置，只读）</li>
-     *   <li>硬编码默认值（兜底，确保服务可用）</li>
+     *   <li>硬编码默认人设（兜底）</li>
      * </ol>
      * 热更新机制：通过文件最后修改时间 + 文件大小检测变更，避免每次请求都读文件。
+     * <p>
+     * 注：此段只包含人设/语气，核心业务规则由 {@link #CORE_RULES} 提供，不可被此文件覆盖。
      */
-    private String buildSystemPrompt(String username) {
-        String template = loadSystemPromptTemplate();
-        return template.replace("{username}", username);
-    }
-
-    /**
-     * 加载 Prompt 模板（带热更新检测）。
-     * 外部文件优先，通过 lastModified + size 变化判断是否需要重新读取。
-     */
-    private String loadSystemPromptTemplate() {
+    private String loadCustomizablePromptSegment() {
         // 1. 尝试外部文件（运行目录下，支持热更新）
         if (Files.exists(PROMPT_EXTERNAL_PATH)) {
             try {
@@ -337,7 +378,7 @@ public class AiService {
                 cachedPromptTemplate = content;
                 cachedPromptLastModified = lastModified;
                 cachedPromptLength = fileSize;
-                log.info("[AI] 系统 Prompt 已热加载: {} ({} bytes)", PROMPT_EXTERNAL_PATH, fileSize);
+                log.info("[AI] 可调整 Prompt 段已热加载: {} ({} bytes)", PROMPT_EXTERNAL_PATH, fileSize);
                 return content;
             } catch (IOException e) {
                 log.warn("[AI] 读取外部 Prompt 文件失败，回退到 classpath: {}", e.getMessage());
@@ -355,22 +396,20 @@ public class AiService {
             try (InputStream is = resource.getInputStream()) {
                 String content = new String(is.readAllBytes(), StandardCharsets.UTF_8);
                 cachedPromptTemplate = content;
-                log.info("[AI] 系统 Prompt 已从 classpath 加载: {} ({} bytes)", PROMPT_RESOURCE_PATH, content.length());
+                log.info("[AI] 可调整 Prompt 段已从 classpath 加载: {} ({} bytes)", PROMPT_RESOURCE_PATH, content.length());
                 return content;
             }
         } catch (IOException e) {
-            log.warn("[AI] classpath Prompt 加载失败，使用硬编码默认值: {}", e.getMessage());
+            log.warn("[AI] classpath Prompt 加载失败，使用硬编码默认人设: {}", e.getMessage());
         }
 
-        // 4. 兜底：硬编码默认 Prompt（确保服务始终可用）
+        // 4. 兜底：硬编码默认人设（不含核心规则，核心规则由 CORE_RULES 单独注入）
         String fallback = """
-                你是智慧图书借阅管理系统的 AI 助手「智」。你可以通过工具查询馆藏图书、当前用户本人的借阅记录、罚款、借阅额度以及馆内公告。
+                你是智慧图书借阅管理系统的 AI 助手「智」。
 
-                行为规范：
+                风格：
                 - 使用中文，简洁友好。
-                - 工具返回的数据仅限当前用户（{username}）本人，不要泄露其他用户数据。
-                - 若工具返回空结果，如实告知，不要编造。
-                - 回答图书/借阅/罚款等事实问题时，必须先调用对应工具，不要凭空回答。
+                - 称呼当前用户为 {username}。
                 - 涉及日期/金额时按返回值原样表述。
                 """;
         cachedPromptTemplate = fallback;
