@@ -27,10 +27,13 @@
         <el-button text size="small" :icon="CopyDocument" @click="copyCode">复制</el-button>
       </div>
 
-      <!-- 取书截止时间 -->
+      <!-- 取书截止时间 + 失效提醒 -->
       <div v-if="pickupDeadline" class="deadline-tip">
-        <el-icon><Warning /></el-icon>
-        <span>请在 {{ pickupDeadline }} 前到馆取书</span>
+        <el-icon class="deadline-icon"><Warning /></el-icon>
+        <div class="deadline-text">
+          <span class="deadline-main">请在 {{ formatDateTime(pickupDeadline) }} 前到馆取书</span>
+          <span class="deadline-sub">逾期未取，借阅码将自动失效，需重新申请借阅</span>
+        </div>
       </div>
 
       <!-- 提示 -->
@@ -51,6 +54,7 @@ import { ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { CopyDocument, Warning, Loading } from '@element-plus/icons-vue'
 import QRCode from 'qrcode'
+import { formatDateTime } from '@/utils/datetime.js'
 
 const props = defineProps({
   modelValue: Boolean,
@@ -170,14 +174,42 @@ const close = () => emit('update:modelValue', false)
   letter-spacing: 0.05em;
 }
 
+/* 截止时间提示块：浅警告底色圆角条，主行 + 失效说明副行 */
 .deadline-tip {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
-  gap: 6px;
+  gap: 8px;
+  padding: 10px 14px;
+  margin: 0 var(--space-2) var(--space-4);
+  border-radius: var(--radius-md);
+  background: rgba(196, 144, 74, 0.1);
+  text-align: left;
+}
+
+.deadline-icon {
+  margin-top: 2px;
   color: var(--color-warning);
+  flex-shrink: 0;
+}
+
+.deadline-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.deadline-main {
+  color: var(--color-warning);
+  font-size: var(--fs-small);
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.deadline-sub {
+  color: var(--color-text-tertiary);
   font-size: var(--fs-caption);
-  margin-bottom: var(--space-3);
+  line-height: 1.5;
 }
 
 .hint {
