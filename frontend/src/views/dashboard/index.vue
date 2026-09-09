@@ -336,7 +336,7 @@ const sidePieOption = computed(() => {
           position: 'center',
           formatter: `{c|${total}}\n{a|${centerText}·${centerUnit}}`,
           rich: {
-            c: { fontSize: 26, fontWeight: 600, color: '#2c2825', fontFamily: 'Noto Serif SC', lineHeight: 32 },
+            c: { fontSize: 26, fontWeight: 600, color: '#2c2825', fontFamily: 'Songti SC, STSong, SimSun, serif', lineHeight: 32 },
             a: { fontSize: 11, color: '#9c958d' },
           },
         },
