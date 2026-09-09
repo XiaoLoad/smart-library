@@ -45,3 +45,13 @@ application-local.properties
 # ===== Trae / 工具临时文件 =====
 .trae/
 fix_system_path.ps1
+
+# ===== Python =====
+__pycache__/
+*.pyc
+
+# ===== 爬虫调试 / 临时数据 =====
+spider/data/probe_*.html
+spider/data/Books_2.csv
+spider/data/tag_sample.csv
+spider/data/books_raw.json
