@@ -89,6 +89,12 @@
       <optional>true</optional>
     </dependency>
 
+    <!-- Spring Cache：对话记忆等缓存（默认 ConcurrentMapCacheManager，无需额外依赖） -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-cache</artifactId>
+    </dependency>
+
     <!-- LangChain4j -->
     <dependency>
       <groupId>dev.langchain4j</groupId>
@@ -132,6 +138,7 @@
           <include>**/*.xml</include>
           <include>**/*.sql</include>
           <include>**/*.properties</include>
+          <include>**/*.txt</include>
         </includes>
       </resource>
     </resources>
