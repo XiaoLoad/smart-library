@@ -70,9 +70,9 @@ public class BorrowController {
         return Result.success("已驳回归还申请", record);
     }
 
-    @PostMapping("/batch-return")
-    public Result<PickupResultVo> batchReturn(@Valid @RequestBody BatchReturnRequest req) {
-        return Result.success("批量归还完成", borrowService.batchReturn(req.getIds()));
+    @PostMapping("/batch-process")
+    public Result<PickupResultVo> batchProcess(@Valid @RequestBody BatchProcessRequest req) {
+        return Result.success("办理完成", borrowService.batchProcess(req.getIds(), req.getBorrowNos()));
     }
 
     @PostMapping("/renew")

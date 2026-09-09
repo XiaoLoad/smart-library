@@ -7,7 +7,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 批量取书结果
+ * 批量办理结果（逐条含 action：pickup 取书 / return 归还 / confirm 归还确认）
  */
 @Data
 @AllArgsConstructor
