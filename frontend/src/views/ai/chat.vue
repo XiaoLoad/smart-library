@@ -505,6 +505,16 @@ const send = async () => {
         const msg = ensureAssistantMsg()
         msg.content += data
         scrollToBottom()
+      } else if (event === 'reset') {
+        // 进入工具调用轮：清空工具调用前的过渡文本（正文只保留最终回答，
+        // 工具调用过程由工具卡片承载）
+        const msg = ensureAssistantMsg()
+        msg.content = ''
+      } else if (event === 'final') {
+        // 后端完成回答后的最终文本（已剔除误输出的工具调用代码），整体替换流式拼接内容
+        const msg = ensureAssistantMsg()
+        msg.content = data
+        scrollToBottom()
       } else if (event === 'tool') {
         const msg = ensureAssistantMsg()
         try {
