@@ -141,7 +141,7 @@ public class BorrowService {
     }
 
     /**
-     * 取书确认（管理员，批量）
+     * 取书确认（管理员，支持批量，供借阅码弹窗等场景）
      */
     @Transactional
     public PickupResultVo pickup(List<String> borrowNos) {
@@ -159,20 +159,7 @@ public class BorrowService {
                 if (record == null) {
                     throw new BusinessException("借阅码不存在");
                 }
-                if (record.getStatus() != 0) {
-                    throw new BusinessException("该记录非待取书状态");
-                }
-                User borrower = userMapper.selectById(record.getUserId());
-                BorrowLimit limit = borrowLimitMapper.selectByType(borrower.getUserType());
-                if (limit == null) {
-                    throw new BusinessException("无法获取借阅额度");
-                }
-                LocalDateTime now = LocalDateTime.now();
-                borrowMapper.updatePickup(
-                        record.getId(), 1, now,
-                        now.plusDays(limit.getLoanDays()), "",
-                        cu.getUserId()
-                );
+                doPickup(record, cu);
                 r.put("success", true);
                 r.put("record", record);
                 success++;
@@ -183,6 +170,26 @@ public class BorrowService {
         }
         int fail = borrowNos.size() - success;
         return new PickupResultVo(results, success, fail);
+    }
+
+    /**
+     * 执行取书：0 → 1，按借阅人类型计算应还时间
+     */
+    private void doPickup(Borrow record, CurrentUser cu) {
+        if (record.getStatus() != 0) {
+            throw new BusinessException("该记录非待取书状态");
+        }
+        User borrower = userMapper.selectById(record.getUserId());
+        BorrowLimit limit = borrower == null ? null : borrowLimitMapper.selectByType(borrower.getUserType());
+        if (limit == null) {
+            throw new BusinessException("无法获取借阅额度");
+        }
+        LocalDateTime now = LocalDateTime.now();
+        borrowMapper.updatePickup(
+                record.getId(), 1, now,
+                now.plusDays(limit.getLoanDays()), "",
+                cu.getUserId()
+        );
     }
 
     /**
@@ -293,38 +300,72 @@ public class BorrowService {
     }
 
     /**
-     * 批量归还（管理员专用：柜台批量核对直接归还）
+     * 批量办理（管理员，柜台统一事务入口）
+     * 取书 / 归还 / 归还确认本质是同一笔柜台事务，仅目的不同，
+     * 按记录状态自动分流：0 待取书 → 取书；1/3 → 直接归还；5 → 归还确认
      */
     @Transactional
-    public PickupResultVo batchReturn(List<Long> ids) {
+    public PickupResultVo batchProcess(List<Long> ids, List<String> borrowNos) {
         CurrentUser cu = CurrentUser.get();
         if (cu.getUserType() != 3) {
-            throw new BusinessException(403, "仅管理员可批量归还，请通过归还申请流程操作");
+            throw new BusinessException(403, "仅管理员可批量办理");
         }
-        List<Map<String, Object>> results = new ArrayList<>();
+        List<Long> idList = ids == null ? Collections.emptyList() : ids;
+        List<String> noList = borrowNos == null ? Collections.emptyList() : borrowNos;
+        List<Map<String, Object>> results = new ArrayList<>(idList.size() + noList.size());
         int success = 0;
-        for (Long id : ids) {
+        for (Long id : idList) {
             Map<String, Object> r = new HashMap<>();
-            r.put("id", id);
-            try {
-                Borrow record = borrowMapper.selectById(id);
-                if (record == null) {
-                    throw new BusinessException("借阅记录不存在");
-                }
-                if (record.getStatus() != 1 && record.getStatus() != 3) {
-                    throw new BusinessException("该记录状态不可归还");
-                }
-                completeReturn(record, LocalDateTime.now(), cu.getUserId(), "已归还");
-                r.put("success", true);
-                r.put("record", record);
-                success++;
-            } catch (BusinessException e) {
-                r.put("success", false);
-                r.put("message", e.getMessage());
-            }
+            r.put("requestId", id);
+            success += processOne(r, id, null, cu);
+            results.add(r);
         }
-        int fail = ids.size() - success;
-        return new PickupResultVo(results, success, fail);
+        for (String no : noList) {
+            Map<String, Object> r = new HashMap<>();
+            r.put("requestBorrowNo", no);
+            success += processOne(r, null, no, cu);
+            results.add(r);
+        }
+        return new PickupResultVo(results, success, idList.size() + noList.size() - success);
+    }
+
+    /**
+     * 按状态分流办理单条记录
+     * @return 1 成功 / 0 失败（失败原因写入 result.message）
+     */
+    private int processOne(Map<String, Object> result, Long id, String borrowNo, CurrentUser cu) {
+        try {
+            Borrow record = findRecord(id, borrowNo);
+            result.put("id", record.getId());
+            result.put("borrowNo", record.getBorrowNo());
+            result.put("bookTitle", record.getBookTitle());
+            result.put("userName", record.getUserName());
+            String action;
+            switch (record.getStatus()) {
+                case 0 -> {
+                    doPickup(record, cu);
+                    action = "pickup";
+                }
+                case 1, 3 -> {
+                    completeReturn(record, LocalDateTime.now(), cu.getUserId(), "已归还（柜台办理）");
+                    action = "return";
+                }
+                case 5 -> {
+                    LocalDateTime effective = record.getReturnRequestTime() != null
+                            ? record.getReturnRequestTime() : LocalDateTime.now();
+                    completeReturn(record, effective, cu.getUserId(), "已归还");
+                    action = "confirm";
+                }
+                default -> throw new BusinessException("该状态无需柜台办理");
+            }
+            result.put("success", true);
+            result.put("action", action);
+            return 1;
+        } catch (BusinessException e) {
+            result.put("success", false);
+            result.put("message", e.getMessage());
+            return 0;
+        }
     }
 
     /**

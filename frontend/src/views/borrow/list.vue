@@ -21,14 +21,19 @@
           <el-button @click="load">搜索</el-button>
         </div>
         <div class="right">
-          <el-button v-if="userStore.isAdmin" type="primary" :icon="Check" :disabled="selectedRows.length === 0" @click="onBatchPickup">批量取书({{ selectedRows.length }})</el-button>
-          <el-button v-if="userStore.isAdmin" :icon="Check" @click="onPickupByCode">手动取书</el-button>
-          <el-button v-if="userStore.isAdmin" type="success" :icon="Check" :disabled="returnRows.length === 0" @click="onBatchReturn">批量归还({{ returnRows.length }})</el-button>
+          <el-button v-if="userStore.isAdmin" :icon="Tickets" @click="onProcessByCode">扫码办理</el-button>
+          <el-button
+            v-if="userStore.isAdmin"
+            type="primary"
+            :icon="Checked"
+            :disabled="selectedRows.length === 0"
+            @click="processVisible = true"
+          >批量办理({{ selectedRows.length }})</el-button>
         </div>
       </div>
 
       <el-table :data="list" style="width: 100%" @selection-change="onSelectionChange">
-        <el-table-column type="selection" width="48" :selectable="(row) => row.status === 0 || row.status === 1 || row.status === 3" />
+        <el-table-column type="selection" width="48" :selectable="(row) => [0, 1, 3, 5].includes(row.status)" />
         <el-table-column prop="borrowNo" label="借阅单号" width="180">
           <template #default="{ row }">
             <span class="mono-text">{{ row.borrowNo }}</span>
@@ -116,16 +121,20 @@
       mode="view"
       @pickup="onPickupFromCode"
     />
+
+    <!-- 柜台批量办理弹窗（取书 / 归还 / 归还确认统一事务） -->
+    <BorrowProcessDialog v-model="processVisible" :records="selectedRows" @completed="load" />
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
-import { Search, Check } from '@element-plus/icons-vue'
+import { ref, onMounted } from 'vue'
+import { Search, Tickets, Checked } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { borrowApi } from '@/api'
 import { useUserStore } from '@/stores/user'
 import BorrowCodeDialog from '@/components/BorrowCodeDialog.vue'
+import BorrowProcessDialog from '@/components/BorrowProcessDialog.vue'
 
 const userStore = useUserStore()
 const list = ref([])
@@ -139,9 +148,7 @@ const codeVisible = ref(false)
 const codeData = ref({ borrowNo: '', pickupDeadline: '', bookTitle: '', qrPayload: '', status: null })
 const selectedRows = ref([])
 const pickupLoading = ref(false)
-
-// 可归还的选中行（借阅中/已逾期）
-const returnRows = computed(() => selectedRows.value.filter((r) => r.status === 1 || r.status === 3))
+const processVisible = ref(false)
 
 const load = async () => {
   const data = await borrowApi.list({ page: page.value, size: size.value, status: statusFilter.value, search: search.value })
@@ -207,33 +214,29 @@ const onPickup = async (row) => {
   }
 }
 
-const onBatchPickup = async () => {
-  const rows = selectedRows.value
-  if (rows.length === 0) return
+// 扫码办理：按记录状态自动分流（待取书→取书；借阅中/逾期→归还；待确认→归还确认）
+const onProcessByCode = async () => {
   try {
-    await ElMessageBox.confirm(`确认批量取书 ${rows.length} 条记录？`, '批量取书确认', {
-      type: 'info',
-    })
-    const res = await borrowApi.pickup({ borrowNos: rows.map((r) => r.borrowNo) })
-    ElMessage.success(res.message || `成功 ${res.successCount} 条`)
-    load()
-  } catch (e) {
-    if (e !== 'cancel') {
-      // 错误已由拦截器提示
+    const { value } = await ElMessageBox.prompt(
+      '扫描或输入借阅码，系统将按记录状态自动办理（取书 / 归还 / 归还确认）',
+      '扫码办理',
+      {
+        confirmButtonText: '办理',
+        cancelButtonText: '取消',
+        inputPlaceholder: 'BR...',
+        inputPattern: /\S+/,
+        inputErrorMessage: '请输入借阅码',
+      }
+    )
+    const no = value.trim()
+    const res = await borrowApi.batchProcess({ borrowNos: [no] })
+    const item = res.results?.[0]
+    if (!item?.success) {
+      ElMessage.error(item?.message || '办理失败')
+      return
     }
-  }
-}
-
-const onPickupByCode = async () => {
-  try {
-    const { value } = await ElMessageBox.prompt('请输入借阅码', '扫码取书', {
-      confirmButtonText: '确认',
-      cancelButtonText: '取消',
-      inputPlaceholder: 'BR...',
-    })
-    if (!value) return
-    const res = await borrowApi.pickup({ borrowNo: value.trim() })
-    ElMessage.success(res.message || '取书成功')
+    const text = { pickup: '取书成功', return: '归还成功', confirm: '归还确认成功' }[item.action] || '办理成功'
+    ElMessage.success(`${text}：《${item.bookTitle || no}》· ${item.userName || ''}`)
     load()
   } catch (e) {
     if (e !== 'cancel') {
@@ -298,21 +301,6 @@ const onRejectReturn = async (row) => {
     )
     await borrowApi.rejectReturn({ id: row.id, reason: value?.trim() || '' })
     ElMessage.success('已驳回归还申请')
-    load()
-  } catch (e) {
-    if (e !== 'cancel') {
-      // 错误已由拦截器提示
-    }
-  }
-}
-
-const onBatchReturn = async () => {
-  const rows = returnRows.value
-  if (rows.length === 0) return
-  try {
-    await ElMessageBox.confirm(`确认批量归还 ${rows.length} 条借阅记录？`, '批量归还确认', { type: 'info' })
-    const res = await borrowApi.batchReturn({ ids: rows.map((r) => r.id) })
-    ElMessage.success(`成功归还 ${res.successCount} 条`)
     load()
   } catch (e) {
     if (e !== 'cancel') {
