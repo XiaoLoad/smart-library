@@ -17,14 +17,21 @@ import dev.langchain4j.service.TokenStream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.cache.Cache;
+import org.springframework.cache.CacheManager;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -65,10 +72,21 @@ public class AiService {
     @Autowired private AnnouncementMapper announcementMapper;
     @Autowired private BorrowLimitMapper borrowLimitMapper;
     @Autowired private UserMapper userMapper;
+    @Autowired private CacheManager cacheManager;
 
     /** 缓存最近构建的流式模型，配置未变时复用，避免重复创建 OkHttpClient */
     private volatile OpenAiStreamingChatModel cachedModel;
     private volatile String cachedConfigHash;
+
+    // ===== Prompt 热加载 =====
+    /** Prompt 模板文件名（classpath 内置 + 外部覆盖） */
+    private static final String PROMPT_RESOURCE_PATH = "prompts/library-system-prompt.txt";
+    /** 外部 Prompt 文件路径（运行目录下 prompts/，优先于 classpath，支持热更新） */
+    private static final Path PROMPT_EXTERNAL_PATH = Path.of("prompts", "library-system-prompt.txt");
+    /** 缓存的 Prompt 模板，通过文件最后修改时间检测热更新 */
+    private volatile String cachedPromptTemplate;
+    private volatile long cachedPromptLastModified;
+    private volatile long cachedPromptLength;
 
     /**
      * AI 服务接口（流式返回 TokenStream）。
@@ -110,6 +128,7 @@ public class AiService {
         }
         messageMapper.deleteByConversationId(id);
         conversationMapper.deleteById(id);
+        evictMemory(id);
     }
 
     // ===== 流式对话 =====
@@ -151,9 +170,9 @@ public class AiService {
         }
         OpenAiStreamingChatModel model = getOrBuildModel(cfg);
 
-        // 1. 从 DB 加载历史纯文本消息，构建本次请求的窗口记忆（工具中间态不入 DB）
+        // 1. 加载历史纯文本消息（优先读缓存，构建窗口记忆；工具中间态不入 DB）
         ChatMemory memory = MessageWindowChatMemory.withMaxMessages(MAX_MEMORY_MESSAGES);
-        List<com.library.entity.AiMessage> history = messageMapper.selectByConversationId(conversationId);
+        List<com.library.entity.AiMessage> history = loadHistory(conversationId);
         for (com.library.entity.AiMessage m : history) {
             if (m.getContent() == null || m.getContent().isBlank()) {
                 continue;
@@ -165,13 +184,14 @@ public class AiService {
             }
         }
 
-        // 2. 落库用户消息
+        // 2. 落库用户消息并使缓存失效（下次请求重新加载完整历史）
         com.library.entity.AiMessage userMsg = new com.library.entity.AiMessage();
         userMsg.setConversationId(conversationId);
         userMsg.setRole("user");
         userMsg.setContent(content);
         userMsg.setCreateTime(LocalDateTime.now());
         messageMapper.insert(userMsg);
+        evictMemory(conversationId);
 
         // 3. 构建每请求独立的工具实例（烘焙 userId，规避异步线程丢失 CurrentUser）
         LibraryTools tools = new LibraryTools(cu.getUserId(), cu.getUserType(),
@@ -226,6 +246,7 @@ public class AiService {
                             aiMsg.setContent(answer);
                             aiMsg.setCreateTime(LocalDateTime.now());
                             messageMapper.insert(aiMsg);
+                            evictMemory(conversationId);
                         }
                         // 首条消息自动生成标题
                         if (needsTitle) {
@@ -280,17 +301,114 @@ public class AiService {
 
     // ===== 内部方法 =====
 
+    /**
+     * 构建系统 Prompt：从外部文件热加载模板，替换 {username} 占位符。
+     * <p>
+     * 加载顺序：
+     * <ol>
+     *   <li>外部文件 {@code prompts/library-system-prompt.txt}（运行目录下，支持运行时热更新）</li>
+     *   <li>classpath 资源 {@code prompts/library-system-prompt.txt}（JAR 内置，只读）</li>
+     *   <li>硬编码默认值（兜底，确保服务可用）</li>
+     * </ol>
+     * 热更新机制：通过文件最后修改时间 + 文件大小检测变更，避免每次请求都读文件。
+     */
     private String buildSystemPrompt(String username) {
-        return """
+        String template = loadSystemPromptTemplate();
+        return template.replace("{username}", username);
+    }
+
+    /**
+     * 加载 Prompt 模板（带热更新检测）。
+     * 外部文件优先，通过 lastModified + size 变化判断是否需要重新读取。
+     */
+    private String loadSystemPromptTemplate() {
+        // 1. 尝试外部文件（运行目录下，支持热更新）
+        if (Files.exists(PROMPT_EXTERNAL_PATH)) {
+            try {
+                long lastModified = Files.getLastModifiedTime(PROMPT_EXTERNAL_PATH).toMillis();
+                long fileSize = Files.size(PROMPT_EXTERNAL_PATH);
+                // 文件未变化时直接返回缓存
+                if (cachedPromptTemplate != null
+                        && lastModified == cachedPromptLastModified
+                        && fileSize == cachedPromptLength) {
+                    return cachedPromptTemplate;
+                }
+                String content = Files.readString(PROMPT_EXTERNAL_PATH, StandardCharsets.UTF_8);
+                cachedPromptTemplate = content;
+                cachedPromptLastModified = lastModified;
+                cachedPromptLength = fileSize;
+                log.info("[AI] 系统 Prompt 已热加载: {} ({} bytes)", PROMPT_EXTERNAL_PATH, fileSize);
+                return content;
+            } catch (IOException e) {
+                log.warn("[AI] 读取外部 Prompt 文件失败，回退到 classpath: {}", e.getMessage());
+            }
+        }
+
+        // 2. 外部文件不存在或读取失败 → 使用已缓存的模板（可能来自之前的 classpath 加载）
+        if (cachedPromptTemplate != null) {
+            return cachedPromptTemplate;
+        }
+
+        // 3. 首次加载 classpath 资源
+        try {
+            ClassPathResource resource = new ClassPathResource(PROMPT_RESOURCE_PATH);
+            try (InputStream is = resource.getInputStream()) {
+                String content = new String(is.readAllBytes(), StandardCharsets.UTF_8);
+                cachedPromptTemplate = content;
+                log.info("[AI] 系统 Prompt 已从 classpath 加载: {} ({} bytes)", PROMPT_RESOURCE_PATH, content.length());
+                return content;
+            }
+        } catch (IOException e) {
+            log.warn("[AI] classpath Prompt 加载失败，使用硬编码默认值: {}", e.getMessage());
+        }
+
+        // 4. 兜底：硬编码默认 Prompt（确保服务始终可用）
+        String fallback = """
                 你是智慧图书借阅管理系统的 AI 助手「智」。你可以通过工具查询馆藏图书、当前用户本人的借阅记录、罚款、借阅额度以及馆内公告。
 
                 行为规范：
                 - 使用中文，简洁友好。
-                - 工具返回的数据仅限当前用户（%s）本人，不要泄露其他用户数据。
+                - 工具返回的数据仅限当前用户（{username}）本人，不要泄露其他用户数据。
                 - 若工具返回空结果，如实告知，不要编造。
                 - 回答图书/借阅/罚款等事实问题时，必须先调用对应工具，不要凭空回答。
                 - 涉及日期/金额时按返回值原样表述。
-                """.formatted(username);
+                """;
+        cachedPromptTemplate = fallback;
+        return fallback;
+    }
+
+    // ===== 对话记忆缓存 =====
+
+    private static final String MEMORY_CACHE_NAME = "chatMemory";
+
+    /**
+     * 加载会话历史消息（优先读缓存，避免每次请求都查 DB）。
+     * 缓存在用户消息/AI 消息落库后通过 {@link #evictMemory} 失效。
+     */
+    @SuppressWarnings("unchecked")
+    private List<com.library.entity.AiMessage> loadHistory(Long conversationId) {
+        Cache cache = cacheManager.getCache(MEMORY_CACHE_NAME);
+        if (cache != null) {
+            Cache.ValueWrapper wrapper = cache.get(conversationId);
+            if (wrapper != null && wrapper.get() != null) {
+                return (List<com.library.entity.AiMessage>) wrapper.get();
+            }
+        }
+        List<com.library.entity.AiMessage> history = messageMapper.selectByConversationId(conversationId);
+        if (cache != null) {
+            cache.put(conversationId, history);
+        }
+        return history;
+    }
+
+    /**
+     * 使指定会话的记忆缓存失效（消息落库/会话删除后调用）。
+     */
+    private void evictMemory(Long conversationId) {
+        Cache cache = cacheManager.getCache(MEMORY_CACHE_NAME);
+        if (cache != null) {
+            cache.evict(conversationId);
+        }
     }
 
     /** AI 配置（来自 system_settings.ai_config） */
