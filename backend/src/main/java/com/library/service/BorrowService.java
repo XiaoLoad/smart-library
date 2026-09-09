@@ -23,9 +23,6 @@ import java.util.*;
 @Service
 public class BorrowService {
 
-    /** 逾期罚款费率（元/天，按自然日计算） */
-    private static final java.math.BigDecimal FINE_RATE_PER_DAY = new java.math.BigDecimal("0.50");
-
     @Autowired
     private BorrowMapper borrowMapper;
     @Autowired
@@ -36,6 +33,9 @@ public class BorrowService {
     private BookMapper bookMapper;
     @Autowired
     private FineMapper fineMapper;
+    /** 馆内规则（逾期罚款费率等），管理员可在系统设置中调整 */
+    @Autowired
+    private LibraryConfigService libraryConfigService;
 
     /**
      * 同步借阅状态
@@ -304,7 +304,9 @@ public class BorrowService {
                 fine.setBorrowNo(record.getBorrowNo());
                 fine.setBookTitle(record.getBookTitle());
                 fine.setDaysOverdue((int) days);
-                fine.setAmount(FINE_RATE_PER_DAY.multiply(java.math.BigDecimal.valueOf(days)));
+                // 罚款费率取馆内规则配置（系统设置 · 借阅规则，默认 0.50 元/天）
+                fine.setAmount(libraryConfigService.getFineRatePerDay()
+                        .multiply(java.math.BigDecimal.valueOf(days)));
                 fine.setReason("逾期归还");
                 fine.setStatus(0);
                 fineMapper.insert(fine);

@@ -19,4 +19,8 @@
         ON DUPLICATE KEY UPDATE setting_value = #{value}
     </insert>
 
+    <delete id="deleteByKey">
+        DELETE FROM system_settings WHERE setting_key = #{key}
+    </delete>
+
 </mapper>

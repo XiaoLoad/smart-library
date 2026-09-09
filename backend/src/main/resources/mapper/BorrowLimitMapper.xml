@@ -6,4 +6,19 @@
         SELECT * FROM borrow_limits WHERE user_type = #{userType}
     </select>
 
+    <select id="selectAll" resultType="com.library.entity.BorrowLimit">
+        SELECT * FROM borrow_limits ORDER BY user_type
+    </select>
+
+    <insert id="upsert" parameterType="com.library.entity.BorrowLimit">
+        INSERT INTO borrow_limits (user_type, max_books, loan_days, renew_max_count, renew_days, pickup_days)
+        VALUES (#{userType}, #{maxBooks}, #{loanDays}, #{renewMaxCount}, #{renewDays}, #{pickupDays})
+        ON DUPLICATE KEY UPDATE
+            max_books       = VALUES(max_books),
+            loan_days       = VALUES(loan_days),
+            renew_max_count = VALUES(renew_max_count),
+            renew_days      = VALUES(renew_days),
+            pickup_days     = VALUES(pickup_days)
+    </insert>
+
 </mapper>

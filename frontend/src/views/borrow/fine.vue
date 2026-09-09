@@ -33,7 +33,7 @@
           <span class="rule-no">壹</span>
           <div class="rule-body">
             <div class="rule-title">逾期罚款</div>
-            <p class="rule-desc">图书逾期归还，自应还日期起按 <b>0.5 元 / 天</b> 计收滞纳金，归还确认时一并结算。</p>
+            <p class="rule-desc">图书逾期归还，自应还日期起按 <b>{{ fineRateText }} 元 / 天</b> 计收滞纳金，归还确认时一并结算。</p>
           </div>
         </div>
         <div class="rule-item">
@@ -115,11 +115,14 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { borrowApi } from '@/api'
+import { borrowApi, systemApi } from '@/api'
 import { showPageLoading, hidePageLoading } from '@/utils/pageLoading.js'
 
 const list = ref([])
 const statusFilter = ref('')
+// 逾期罚款费率（元/天），由管理员在系统设置中配置；拉取失败回退默认 0.5
+const fineRate = ref(0.5)
+const fineRateText = computed(() => String(parseFloat(Number(fineRate.value).toFixed(2))))
 
 // 前端分页（后端 /fine/list 一次返回全量，汇总卡也需全量计算）
 const page = ref(1)
@@ -151,8 +154,12 @@ const unpaidCount = computed(() => list.value.filter((f) => f.status === 0).leng
 const load = async () => {
   showPageLoading()
   try {
-    const data = await borrowApi.fineList()
+    const [data, rules] = await Promise.all([
+      borrowApi.fineList(),
+      systemApi.getLibraryRules().catch(() => null),
+    ])
     list.value = data.list
+    if (rules && rules.fineRatePerDay != null) fineRate.value = Number(rules.fineRatePerDay)
   } finally {
     hidePageLoading()
   }
