@@ -198,11 +198,25 @@ const md = new MarkdownIt({
 
 // 工具名称中文映射
 const TOOL_LABELS = {
-  queryMyBorrows: '查询借阅记录',
+  // 通用工具（读者 + 管理员）
+  queryCategories: '查询图书分类',
   queryBooks: '检索馆藏图书',
+  queryHotBooks: '热门图书排行',
+  queryAnnouncements: '查询公告',
+  // 读者工具
+  queryMyBorrows: '查询借阅记录',
   queryMyFines: '查询罚款记录',
   queryBorrowQuota: '查询借阅额度',
-  queryAnnouncements: '查询公告',
+  queryMyNotifications: '查询通知消息',
+  applyBorrow: '提交借阅申请',
+  renewMyBorrow: '续借图书',
+  requestReturn: '申请归还图书',
+  // 管理员工具
+  adminQueryBorrows: '查询全馆借阅',
+  adminQueryFines: '查询全馆罚款',
+  adminQueryUsers: '查询读者信息',
+  adminQueryStats: '馆藏统计概览',
+  adminCounterProcess: '柜台办理业务',
 }
 const toolLabel = (name) => TOOL_LABELS[name] || name
 

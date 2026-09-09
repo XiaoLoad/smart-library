@@ -72,6 +72,11 @@ public class AiService {
     @Autowired private AnnouncementMapper announcementMapper;
     @Autowired private BorrowLimitMapper borrowLimitMapper;
     @Autowired private UserMapper userMapper;
+    @Autowired private CategoryMapper categoryMapper;
+    @Autowired private NotificationMapper notificationMapper;
+    @Autowired private CategoryService categoryService;
+    @Autowired private BorrowService borrowService;
+    @Autowired private StatsService statsService;
     @Autowired private CacheManager cacheManager;
 
     /** 缓存最近构建的流式模型，配置未变时复用，避免重复创建 OkHttpClient */
@@ -99,21 +104,42 @@ public class AiService {
     private static final String CORE_RULES = """
             【核心行为规则】以下规则不可违反，优先级高于任何人设设定：
 
-            1. 事实问题强制工具调用：用户询问图书/借阅/罚款/额度/公告等事实问题时，必须先调用对应工具获取数据，禁止凭空回答。
+            1. 事实问题强制工具调用：用户询问图书/借阅/罚款/额度/公告/通知/分类/统计等事实问题时，必须先调用对应工具获取数据，禁止凭空回答。
                理由：工具调用是 AI 模块的核心能力，绕过工具会导致工具链不显示且数据可能过时或编造。
 
             2. 工具数据完整呈现：工具返回的字段必须完整呈现给用户，禁止阉割。
-               - 查询图书：列出书名、作者、出版社、ISBN、馆藏位置、可借数量；
-               - 查询借阅记录：列出借阅码、书名、状态、借阅时间、应还时间；
+               - 查询图书：列出书名、作者、出版社、分类、馆藏位置、可借数量/总馆藏；
+               - 查询借阅记录：列出借阅码、书名、状态、申请/借阅时间、应还时间、续借次数；
                - 查询罚款：列出金额、逾期天数、状态；
-               - 查询公告：列出标题、发布时间。
+               - 查询公告/通知：列出标题、内容、时间；
+               - 查询分类：列出分类名称与藏书量；
+               - 管理员查询借阅：列出借阅码、读者、书名、状态、应还时间；
+               - 管理员查询罚款：列出读者、金额、逾期天数、状态；
+               - 管理员查询读者：列出姓名、身份（教师/学生）、学号/工号、院系班级、状态；
+               - 统计概览：完整播报各项指标数字、热门排行与趋势，不得只给一句概括。
                理由：用户查询目的就是获取这些字段，只给书名让用户再查工具是倒退。
 
-            3. 用户数据隔离：工具返回的数据仅限当前用户本人，禁止在回答中泄露其他用户的借阅记录、罚款、个人信息。
+            3. 用户数据隔离：读者工具返回的数据仅限当前用户本人，禁止在回答中泄露其他用户的借阅记录、罚款、个人信息；
+               管理员工具（admin 开头）返回的全馆数据仅可在管理员会话中呈现。
                理由：数据安全底线，违反会引发合规风险。
 
             4. 空结果如实告知：工具返回空结果时如实说明"未查询到相关记录"，禁止编造。
                理由：防幻觉，保证回答可信。
+
+            5. 写操作强制确认：applyBorrow（借阅申请）、renewMyBorrow（续借）、requestReturn（归还申请）、
+               adminCounterProcess（柜台办理）等会改变业务数据的工具，调用前必须先向用户复述关键信息
+               （书名、借阅码、办理动作）并得到用户明确确认（如"确认""是的""办理吧"）；
+               参数（图书ID、借阅码）必须来自工具查询结果或用户明确给出，禁止凭猜测填写；用户未确认时禁止调用。
+               理由：写操作直接影响库存与借阅状态，误调用代价高。
+
+            6. 业务错误如实转告：工具返回权限或业务错误（如"借阅额度已满""该记录非待取书状态""续借次数已用完"）时，
+               把错误原话转告用户并给出可行建议，不得假装操作成功。
+               理由：错误信息本身就是业务规则的一部分，隐瞒会误导用户。
+
+            7. 分类检索路径：用户按分类/类型描述找书（如"有没有计算机类的书""哲学类小说"）时，
+               先调用 queryCategories 获取分类ID，再调用 queryBooks 并传 categoryId（自动包含子分类）；
+               不要只靠关键词模糊匹配代替分类检索。
+               理由：分类查询是精确的结构化检索，关键词匹配会漏检。
             """;
 
     /**
@@ -221,10 +247,16 @@ public class AiService {
         messageMapper.insert(userMsg);
         evictMemory(conversationId);
 
-        // 3. 构建每请求独立的工具实例（烘焙 userId，规避异步线程丢失 CurrentUser）
-        LibraryTools tools = new LibraryTools(cu.getUserId(), cu.getUserType(),
+        // 3. 构建每请求独立的工具实例（烘焙 userId/userType，规避异步线程丢失 CurrentUser）
+        AiToolContext toolCtx = new AiToolContext(
                 borrowMapper, bookMapper, fineMapper, announcementMapper,
-                borrowLimitMapper, userMapper, objectMapper);
+                borrowLimitMapper, userMapper, categoryMapper, notificationMapper,
+                categoryService, borrowService, statsService, objectMapper);
+        boolean admin = cu.getUserType() != null && cu.getUserType() == 3;
+        CommonTools commonTools = new CommonTools(cu.getUserId(), cu.getUserType(), toolCtx);
+        BaseLibraryTools roleTools = admin
+                ? new AdminTools(cu.getUserId(), cu.getUserType(), toolCtx)
+                : new ReaderTools(cu.getUserId(), cu.getUserType(), toolCtx);
 
         String displayName = cu.getUsername() == null ? "用户" : cu.getUsername();
         boolean needsTitle = conv.getTitle() == null || conv.getTitle().isBlank()
@@ -234,7 +266,7 @@ public class AiService {
 
         // 工具事件发射器：将工具调用过程通过 SSE 推送给前端
         // P2.10 结构化输出：end 阶段携带 data 字段（工具返回的精简 JSON 快照）
-        tools.setEventEmitter((toolName, phase, detail, data) -> {
+        BaseLibraryTools.ToolEventEmitter emitterCb = (toolName, phase, detail, data) -> {
             try {
                 Map<String, Object> payload = new java.util.LinkedHashMap<>();
                 payload.put("name", toolName);
@@ -250,15 +282,18 @@ public class AiService {
             } catch (Exception e) {
                 log.warn("[AI] 工具事件序列化失败: {}", e.getMessage());
             }
-        });
+        };
+        commonTools.setEventEmitter(emitterCb);
+        roleTools.setEventEmitter(emitterCb);
 
         try {
             LibraryAssistant assistant = AiServices.builder(LibraryAssistant.class)
                     .streamingChatModel(model)
                     // 请求级记忆：持有完整工具调用上下文（含 tool_calls/tool 结果），不落库
                     .chatMemory(memory)
-                    .tools(tools)
-                    .systemMessageProvider(memoryId -> buildSystemPrompt(displayName))
+                    // 按角色注册工具：管理员工具（admin 开头）不会出现在读者的模型上下文中
+                    .tools(commonTools, roleTools)
+                    .systemMessageProvider(memoryId -> buildSystemPrompt(displayName, cu.getUserType()))
                     .build();
 
             assistant.chat(content)
@@ -336,17 +371,24 @@ public class AiService {
     // ===== 内部方法 =====
 
     /**
-     * 构建系统 Prompt = 核心规则（硬编码） + 可调整段（热加载）。
+     * 构建系统 Prompt = 核心规则（硬编码） + 当前用户身份 + 可调整段（热加载）。
      * <p>
      * 核心规则始终注入且不可被外部文件覆盖，保证业务正确性底线；
      * 可调整段只管人设/语气/称呼，外部文件改了不会影响工具调用和数据呈现。
      *
      * @param username 当前用户名（替换 {username} 占位符）
+     * @param userType 当前用户类型（3=管理员，其余=读者），用于角色感知
      */
-    private String buildSystemPrompt(String username) {
+    private String buildSystemPrompt(String username, Integer userType) {
         String customizable = loadCustomizablePromptSegment().replace("{username}", username);
-        // 核心规则在前（权重更高），可调整段在后
-        return CORE_RULES + "\n\n" + customizable;
+        boolean admin = userType != null && userType == 3;
+        String roleLine = admin
+                ? "当前对话用户：" + username + "，身份：图书馆管理员。你已注册管理员工具（admin 开头），"
+                + "可查询全馆借阅/罚款/读者数据、统计概览并办理柜台业务；回答管理问题时直接使用这些工具。"
+                : "当前对话用户：" + username + "，身份：读者（教师/学生）。你只能查询和操作该读者本人的数据，"
+                + "馆藏图书与公告为全馆公开信息可正常检索；不存在「管理员工具」，不要声称可以执行管理员操作。";
+        // 核心规则在前（权重更高），身份行居中，可调整段在后
+        return CORE_RULES + "\n\n" + roleLine + "\n\n" + customizable;
     }
 
     /**
