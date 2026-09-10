@@ -115,9 +115,12 @@
 
       <!-- 内容区 -->
       <main class="app-content">
-        <router-view v-slot="{ Component }">
+        <router-view v-slot="{ Component, route: current }">
           <transition name="route" mode="out-in">
-            <component :is="Component" />
+            <!-- 列表页常驻缓存（meta.keepAlive），返回时保留查询条件、页码与滚动位置 -->
+            <keep-alive :include="cachedViews">
+              <component :is="Component" :key="current.name || current.path" />
+            </keep-alive>
           </transition>
         </router-view>
       </main>
@@ -179,6 +182,11 @@ const isActive = (item) => {
   if (route.meta?.activeMenu) return route.meta.activeMenu === item.path
   return route.path === item.path || route.path.startsWith(item.path + '/')
 }
+
+// keep-alive 缓存名单：与组件 defineOptions({ name }) 一一对应，故取路由 name
+const cachedViews = computed(() =>
+  router.getRoutes().filter((r) => r.meta?.keepAlive && r.name).map((r) => r.name)
+)
 
 const unreadCount = ref(0)
 

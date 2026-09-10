@@ -1,5 +1,5 @@
 <template>
-  <div class="page category-page">
+  <div class="page category-page" ref="pageRef">
     <header class="page-header">
       <span class="eyebrow">分类 · TAXONOMY</span>
       <h1>图书分类</h1>
@@ -170,6 +170,13 @@ import { ref, reactive, computed, watch, nextTick, onMounted } from 'vue'
 import { Search, Plus, Expand, Fold, InfoFilled } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { bookApi } from '@/api'
+import { useScrollRestore } from '@/composables/useScrollRestore'
+
+// 缓存名与路由 name 一致，keep-alive 与滚动恢复都依赖它
+defineOptions({ name: 'BookCategory' })
+
+const pageRef = ref(null)
+useScrollRestore(pageRef)
 
 const categories = ref([])
 const filter = ref('')

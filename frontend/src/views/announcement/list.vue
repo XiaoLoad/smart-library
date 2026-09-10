@@ -1,5 +1,5 @@
 <template>
-  <div class="page announce-page">
+  <div class="page announce-page" ref="pageRef">
     <header class="page-header">
       <span class="eyebrow">公告 · BULLETIN</span>
       <h1>公告通知</h1>
@@ -105,6 +105,13 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { announcementApi } from '@/api'
 import { useUserStore } from '@/stores/user'
 import { showPageLoading, hidePageLoading } from '@/utils/pageLoading.js'
+import { useScrollRestore } from '@/composables/useScrollRestore'
+
+// 缓存名与路由 name 一致，keep-alive 与滚动恢复都依赖它
+defineOptions({ name: 'AnnouncementList' })
+
+const pageRef = ref(null)
+useScrollRestore(pageRef)
 
 const userStore = useUserStore()
 const list = ref([])

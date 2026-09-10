@@ -41,7 +41,7 @@ const routes = [
         path: 'list',
         name: 'BookList',
         component: () => import('@/views/book/list.vue'),
-        meta: { title: '馆藏图书', roles: ALL_ROLES },
+        meta: { title: '馆藏图书', roles: ALL_ROLES, keepAlive: true },
       },
       {
         path: "detail/:id",
@@ -63,7 +63,7 @@ const routes = [
         path: 'category',
         name: 'BookCategory',
         component: () => import('@/views/book/category.vue'),
-        meta: { title: '图书分类', roles: [3] },
+        meta: { title: '图书分类', roles: [3], keepAlive: true },
       },
     ],
   },
@@ -77,13 +77,13 @@ const routes = [
         path: 'list',
         name: 'BorrowList',
         component: () => import('@/views/borrow/list.vue'),
-        meta: { title: '借阅记录', roles: ALL_ROLES },
+        meta: { title: '借阅记录', roles: ALL_ROLES, keepAlive: true },
       },
       {
         path: 'fine',
         name: 'BorrowFine',
         component: () => import('@/views/borrow/fine.vue'),
-        meta: { title: '罚款记录', roles: ALL_ROLES },
+        meta: { title: '罚款记录', roles: ALL_ROLES, keepAlive: true },
       },
     ],
   },
@@ -97,7 +97,7 @@ const routes = [
         path: 'list',
         name: 'UserList',
         component: () => import('@/views/user/list.vue'),
-        meta: { title: '读者', roles: [3] },
+        meta: { title: '读者', roles: [3], keepAlive: true },
       },
     ],
   },
@@ -125,7 +125,7 @@ const routes = [
         path: 'list',
         name: 'AnnouncementList',
         component: () => import('@/views/announcement/list.vue'),
-        meta: { title: '公告', roles: ALL_ROLES },
+        meta: { title: '公告', roles: ALL_ROLES, keepAlive: true },
       },
     ],
   },
@@ -148,6 +148,12 @@ const routes = [
 const router = createRouter({
   history: createWebHistory(),
   routes,
+  scrollBehavior(to, from, savedPosition) {
+    // 缓存页由组件自身在 activated 时恢复（含表体内部滚动），此处让位避免两次抢滚动
+    if (to.meta?.keepAlive) return false
+    // 前进到新页面回到顶部；后退则回到离开时的位置
+    return savedPosition || { top: 0 }
+  },
 })
 
 // 路由守卫

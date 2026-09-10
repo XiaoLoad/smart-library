@@ -1,5 +1,5 @@
 <template>
-  <div class="page fine-page">
+  <div class="page fine-page" ref="pageRef">
     <header class="page-header">
       <span class="eyebrow">罚款 · PENALTY</span>
       <h1>罚款记录</h1>
@@ -117,6 +117,13 @@ import { ref, computed, watch, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { borrowApi, systemApi } from '@/api'
 import { showPageLoading, hidePageLoading } from '@/utils/pageLoading.js'
+import { useScrollRestore } from '@/composables/useScrollRestore'
+
+// 缓存名与路由 name 一致，keep-alive 与滚动恢复都依赖它
+defineOptions({ name: 'BorrowFine' })
+
+const pageRef = ref(null)
+useScrollRestore(pageRef)
 
 const list = ref([])
 const statusFilter = ref('')

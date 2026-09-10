@@ -1,5 +1,5 @@
 <template>
-  <div class="page book-list-page">
+  <div class="page book-list-page" ref="pageRef">
     <header class="page-header">
       <span class="eyebrow">馆藏 · COLLECTION</span>
       <h1>图书检索</h1>
@@ -273,6 +273,13 @@ import { bookApi, borrowApi } from "@/api";
 import { useUserStore } from "@/stores/user";
 import BorrowCodeDialog from "@/components/BorrowCodeDialog.vue";
 import BookFormDialog from "@/components/BookFormDialog.vue";
+import { useScrollRestore } from "@/composables/useScrollRestore";
+
+// 缓存名与路由 name 一致，keep-alive 与滚动恢复都依赖它
+defineOptions({ name: "BookList" });
+
+const pageRef = ref(null);
+useScrollRestore(pageRef);
 
 const userStore = useUserStore();
 const books = ref([]);
