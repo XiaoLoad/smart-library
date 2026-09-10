@@ -5,12 +5,14 @@ import dev.langchain4j.http.client.HttpClientBuilder;
 import dev.langchain4j.http.client.HttpRequest;
 import dev.langchain4j.http.client.SuccessfulHttpResponse;
 import dev.langchain4j.http.client.jdk.JdkHttpClientBuilder;
+import dev.langchain4j.http.client.sse.HttpStreamingEvent;
 import dev.langchain4j.http.client.sse.ServerSentEventParser;
 import dev.langchain4j.http.client.sse.ServerSentEventListener;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
+import java.util.concurrent.Flow;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -52,6 +54,23 @@ public class DeepSeekThinkingDisableHttpClient implements HttpClient {
                         ServerSentEventParser parser,
                         ServerSentEventListener listener) {
         delegate.execute(patch(request), parser, listener);
+    }
+
+    /**
+     * 流式请求（LangChain4j 1.20 的流式对话走此路径，非 execute 方法）。
+     * <p>
+     * 必须重写并委托给 delegate，否则会落入 HttpClient 接口的 default 实现
+     * （返回 failing publisher，导致流式对话报错）。
+     */
+    @Override
+    public Flow.Publisher<HttpStreamingEvent> stream(HttpRequest request) {
+        return delegate.stream(patch(request));
+    }
+
+    @Override
+    public Flow.Publisher<HttpStreamingEvent> stream(HttpRequest request,
+                                                      ServerSentEventParser parser) {
+        return delegate.stream(patch(request), parser);
     }
 
     /** 按需改写请求 */
