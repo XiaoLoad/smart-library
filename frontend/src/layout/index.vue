@@ -73,20 +73,7 @@
           <el-button text @click="appStore.toggleSidebar()" class="collapse-btn">
             <AppIcon name="chevron-left" :size="18" class="collapse-icon" :class="{ flipped: appStore.sidebarCollapsed }" />
           </el-button>
-          <el-breadcrumb separator="›">
-            <el-breadcrumb-item :to="{ path: '/dashboard' }">首页</el-breadcrumb-item>
-            <!-- 三级面包屑：路由 meta.crumbs（如图书详情页）优先 -->
-            <template v-if="route.meta.crumbs">
-              <el-breadcrumb-item
-                v-for="(c, i) in route.meta.crumbs"
-                :key="i"
-                :to="c.path ? { path: c.path } : undefined"
-              >{{ c.title }}</el-breadcrumb-item>
-            </template>
-            <el-breadcrumb-item v-else-if="route.meta.title && route.path !== '/dashboard'">
-              {{ route.meta.title }}
-            </el-breadcrumb-item>
-          </el-breadcrumb>
+          <AppBreadcrumb />
         </div>
 
         <div class="header-right">
@@ -145,6 +132,7 @@ import { useAppStore } from '@/stores/app'
 import { useUserStore } from '@/stores/user'
 import { notificationApi } from '@/api'
 import AppIcon from '@/components/AppIcon.vue'
+import AppBreadcrumb from '@/components/AppBreadcrumb.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -560,7 +548,7 @@ onMounted(() => {
 @media (max-width: 768px) {
   .user-text { display: none; }
   .app-header { padding: 0 var(--space-4); }
-  .header-left .el-breadcrumb { display: none; }
+  .header-left .app-breadcrumb { display: none; }
   /* 侧边栏抽屉化 */
   .app-sidebar {
     position: fixed;
