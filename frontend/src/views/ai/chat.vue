@@ -61,8 +61,8 @@
               <span class="day-line"></span>
             </div>
 
-            <!-- 用户消息：右侧气泡 -->
-            <div v-if="m.role === 'user'" class="msg-row user">
+            <!-- 用户消息：右侧气泡（data-anchor 供对话锚点导航定位与判定） -->
+            <div v-if="m.role === 'user'" class="msg-row user" :data-anchor="String(m.id)">
               <div class="user-bubble">{{ m.content }}</div>
             </div>
 
@@ -157,6 +157,14 @@
         </div>
       </div>
 
+      <!-- 对话锚点导航：按提问轮次生成刻度，悬停看完整问题，点击定位 -->
+      <ConversationNav
+        :items="anchors"
+        :scroll-el="msgListRef"
+        :at-bottom="isAutoFollow"
+        @jump="onJumpAnchor"
+      />
+
       <!-- 「回到最新」浮动按钮：锚定在输入框上方，不随内容滚动 -->
       <transition name="jump">
         <button v-if="showJumpBtn" class="jump-latest" @click="scrollToBottomForce">
@@ -193,7 +201,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import {
   Plus, ChatDotRound, MagicStick, Promotion, Delete,
   VideoPause, Loading, Check, Close, ArrowDownBold, ArrowUpBold, Connection, Document,
@@ -203,6 +211,7 @@ import MarkdownIt from 'markdown-it'
 import hljs from 'highlight.js'
 import 'highlight.js/styles/github.css'
 import { aiApi } from '@/api'
+import ConversationNav from '@/components/ConversationNav.vue'
 
 // 初始化 Markdown 渲染器：启用代码高亮、链接安全属性
 const md = new MarkdownIt({
@@ -355,6 +364,27 @@ const quickPrompts = [
   '本月借阅最多的书是什么？',
   '我有未缴罚款吗？',
 ]
+
+// ===== 对话锚点导航 =====
+// 一轮提问 = 一个锚点：序号 + 完整问题（卡片内按行截断展示）+ 时间
+const anchorTime = (t) => (t ? String(t).slice(5, 16).replace('T', ' ') : '')
+const anchors = computed(() => {
+  let seq = 0
+  return messages.value
+    .filter((m) => m.role === 'user')
+    .map((m) => ({
+      key: String(m.id),
+      seq: ++seq,
+      text: String(m.content || '').replace(/\s+/g, ' ').trim(),
+      time: anchorTime(m.createTime),
+    }))
+})
+
+// 跳转到历史轮次后主动脱离自动跟随，否则流式增量会把用户拽回底部
+const onJumpAnchor = () => {
+  isAutoFollow.value = false
+  showJumpBtn.value = true
+}
 
 const loadConversations = async () => {
   try {
@@ -835,6 +865,8 @@ onMounted(loadConversations)
   min-height: 0;                    /* flex 滚动关键：允许收缩触发 overflow */
   overflow-y: auto;
   overflow-x: hidden;
+  /* 锚点定位时在顶部留出呼吸位，问题不会紧贴容器边缘 */
+  scroll-padding-top: var(--space-4);
 }
 
 .msg-inner {
