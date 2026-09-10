@@ -106,6 +106,7 @@ import { announcementApi } from '@/api'
 import { useUserStore } from '@/stores/user'
 import { showPageLoading, hidePageLoading } from '@/utils/pageLoading.js'
 import { useScrollRestore } from '@/composables/useScrollRestore'
+import { useSnapshotRefresh } from '@/composables/useSnapshotRefresh'
 
 // 缓存名与路由 name 一致，keep-alive 与滚动恢复都依赖它
 defineOptions({ name: 'AnnouncementList' })
@@ -133,12 +134,26 @@ const addRules = {
 const detailVisible = ref(false)
 const detailData = ref(null)
 
+const fetchSnapshot = async () => {
+  const data = await announcementApi.list({ page: page.value, size: size.value })
+  return { list: data.list, total: data.total }
+}
+
+const applySnapshot = (s) => {
+  list.value = s.list
+  total.value = s.total
+}
+
+const { reload } = useSnapshotRefresh({
+  fetch: fetchSnapshot,
+  apply: applySnapshot,
+})
+
+// 页面自身的加载（首屏、翻页、发布后）带遮罩；激活比对走静默路径，不闪遮罩
 const load = async () => {
   showPageLoading()
   try {
-    const data = await announcementApi.list({ page: page.value, size: size.value })
-    list.value = data.list
-    total.value = data.total
+    await reload()
   } finally {
     hidePageLoading()
   }
