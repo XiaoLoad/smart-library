@@ -171,6 +171,7 @@ import { Search, Plus, Expand, Fold, InfoFilled } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { bookApi } from '@/api'
 import { useScrollRestore } from '@/composables/useScrollRestore'
+import { useSnapshotRefresh } from '@/composables/useSnapshotRefresh'
 
 // 缓存名与路由 name 一致，keep-alive 与滚动恢复都依赖它
 defineOptions({ name: 'BookCategory' })
@@ -371,10 +372,16 @@ const dialogTitle = computed(() => {
   return cateForm.parentId ? '新增子分类' : '新增根分类'
 })
 
-const load = async () => {
-  const data = await bookApi.categoryTree()
-  categories.value = data
+// 快照 = 分类树本身；激活时取数比对，有差异就地替换
+const fetchSnapshot = () => bookApi.categoryTree()
+const applySnapshot = (tree) => {
+  categories.value = tree
 }
+const { reload: load } = useSnapshotRefresh({
+  fetch: fetchSnapshot,
+  apply: applySnapshot,
+})
+
 
 const openAddRoot = () => {
   Object.assign(cateForm, { mode: 'add', id: null, parentId: 0, parentName: '', categoryName: '', categoryCode: '', sortOrder: 1 })

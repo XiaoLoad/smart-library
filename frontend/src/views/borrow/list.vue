@@ -137,6 +137,7 @@ import { formatDateTime } from '@/utils/datetime.js'
 import BorrowCodeDialog from '@/components/BorrowCodeDialog.vue'
 import BorrowProcessDialog from '@/components/BorrowProcessDialog.vue'
 import { useScrollRestore } from '@/composables/useScrollRestore'
+import { useSnapshotRefresh } from '@/composables/useSnapshotRefresh'
 
 // 缓存名与路由 name 一致，keep-alive 与滚动恢复都依赖它
 defineOptions({ name: 'BorrowList' })
@@ -158,11 +159,25 @@ const selectedRows = ref([])
 const pickupLoading = ref(false)
 const processVisible = ref(false)
 
-const load = async () => {
-  const data = await borrowApi.list({ page: page.value, size: size.value, status: statusFilter.value, search: search.value })
-  list.value = data.list
-  total.value = data.total
+const fetchSnapshot = async () => {
+  const data = await borrowApi.list({
+    page: page.value,
+    size: size.value,
+    status: statusFilter.value,
+    search: search.value,
+  })
+  return { list: data.list, total: data.total }
 }
+
+const applySnapshot = (s) => {
+  list.value = s.list
+  total.value = s.total
+}
+
+const { reload: load } = useSnapshotRefresh({
+  fetch: fetchSnapshot,
+  apply: applySnapshot,
+})
 
 const onSizeChange = () => {
   page.value = 1

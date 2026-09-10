@@ -118,6 +118,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { borrowApi, systemApi } from '@/api'
 import { showPageLoading, hidePageLoading } from '@/utils/pageLoading.js'
 import { useScrollRestore } from '@/composables/useScrollRestore'
+import { useSnapshotRefresh } from '@/composables/useSnapshotRefresh'
 
 // 缓存名与路由 name 一致，keep-alive 与滚动恢复都依赖它
 defineOptions({ name: 'BorrowFine' })
@@ -158,15 +159,33 @@ const paidTotal = computed(() =>
 )
 const unpaidCount = computed(() => list.value.filter((f) => f.status === 0).length)
 
+// 快照含罚款列表与罚款费率：费率由系统设置页改动，同样会过期
+const fetchSnapshot = async () => {
+  const [data, rules] = await Promise.all([
+    borrowApi.fineList(),
+    systemApi.getLibraryRules().catch(() => null),
+  ])
+  return {
+    list: data.list,
+    fineRate: rules && rules.fineRatePerDay != null ? Number(rules.fineRatePerDay) : fineRate.value,
+  }
+}
+
+const applySnapshot = (s) => {
+  list.value = s.list
+  fineRate.value = s.fineRate
+}
+
+const { reload } = useSnapshotRefresh({
+  fetch: fetchSnapshot,
+  apply: applySnapshot,
+})
+
+// 页面自身的加载（首屏、缴费后）带遮罩；激活比对走静默路径，不闪遮罩
 const load = async () => {
   showPageLoading()
   try {
-    const [data, rules] = await Promise.all([
-      borrowApi.fineList(),
-      systemApi.getLibraryRules().catch(() => null),
-    ])
-    list.value = data.list
-    if (rules && rules.fineRatePerDay != null) fineRate.value = Number(rules.fineRatePerDay)
+    await reload()
   } finally {
     hidePageLoading()
   }

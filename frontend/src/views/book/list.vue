@@ -274,6 +274,7 @@ import { useUserStore } from "@/stores/user";
 import BorrowCodeDialog from "@/components/BorrowCodeDialog.vue";
 import BookFormDialog from "@/components/BookFormDialog.vue";
 import { useScrollRestore } from "@/composables/useScrollRestore";
+import { useSnapshotRefresh } from "@/composables/useSnapshotRefresh";
 
 // 缓存名与路由 name 一致，keep-alive 与滚动恢复都依赖它
 defineOptions({ name: "BookList" });
@@ -368,34 +369,37 @@ const filteredCategories = computed(() => {
   return filter(categories.value);
 });
 
-const loadBooks = async () => {
-  const data = await bookApi.list({
-    page: page.value,
-    size: size.value,
-    keyword: search.value,
-    categoryId: selectedCategory.value,
-  });
-  books.value = data.list;
-  total.value = data.total;
+// 快照覆盖列表、分类树与借阅额度：三者都可能在别处被改动（分类页增删、详情页借阅）
+const fetchSnapshot = async () => {
+  const [data, tree, q] = await Promise.all([
+    bookApi.list({
+      page: page.value,
+      size: size.value,
+      keyword: search.value,
+      categoryId: selectedCategory.value,
+    }),
+    bookApi.categoryTree(),
+    // 额度取失败时回落为当前值，避免一次抖动把展示的额度抹成 null、顺带禁用借阅按钮
+    userStore.isAdmin ? null : borrowApi.quota().catch(() => quota.value),
+  ]);
+  return { list: data.list, total: data.total, tree, quota: q };
 };
+
+const applySnapshot = (s) => {
+  books.value = s.list;
+  total.value = s.total;
+  categories.value = s.tree;
+  quota.value = s.quota;
+};
+
+const { reload: loadBooks } = useSnapshotRefresh({
+  fetch: fetchSnapshot,
+  apply: applySnapshot,
+});
 
 const onSizeChange = () => {
   page.value = 1;
   loadBooks();
-};
-
-const loadCategories = async () => {
-  const data = await bookApi.categoryTree();
-  categories.value = data;
-};
-
-const loadQuota = async () => {
-  if (userStore.isAdmin) return;
-  try {
-    quota.value = await borrowApi.quota();
-  } catch {
-    // 静默失败，不阻塞页面
-  }
 };
 
 const onBorrow = async (row) => {
@@ -424,7 +428,7 @@ const onBorrow = async (row) => {
     };
     codeVisible.value = true;
     ElMessage.success("借阅申请成功，请到馆取书");
-    await Promise.all([loadBooks(), loadQuota()]);
+    await loadBooks();
   } catch {
     // 错误已由拦截器提示
   } finally {
@@ -476,9 +480,8 @@ const checkEllipsis = (e, row, flagKey) => {
 };
 
 onMounted(async () => {
-  await loadCategories();
+  await loadBooks();
   nextTick(updateTreeScroll);
-  await Promise.all([loadBooks(), loadQuota()]);
 });
 </script>
 
