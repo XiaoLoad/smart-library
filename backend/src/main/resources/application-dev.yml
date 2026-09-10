@@ -1,0 +1,7 @@
+# 本地开发 profile（由 application.yml 的 spring.profiles.active=dev 激活）
+# 恢复 MyBatis mapper 的 SQL 调试日志，便于本地排错。
+# 生产部署请改用其他 profile（如 --spring.profiles.active=prod）或移除 dev 激活，
+# 主配置 application.yml 已默认将 com.library 设为 INFO，避免生产打印完整 SQL 与参数。
+logging:
+  level:
+    com.library.mapper: DEBUG
