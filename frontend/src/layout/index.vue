@@ -73,7 +73,7 @@
           <el-button text @click="appStore.toggleSidebar()" class="collapse-btn">
             <AppIcon name="chevron-left" :size="18" class="collapse-icon" :class="{ flipped: appStore.sidebarCollapsed }" />
           </el-button>
-          <el-breadcrumb separator="/">
+          <el-breadcrumb separator="›">
             <el-breadcrumb-item :to="{ path: '/dashboard' }">首页</el-breadcrumb-item>
             <!-- 三级面包屑：路由 meta.crumbs（如图书详情页）优先 -->
             <template v-if="route.meta.crumbs">

@@ -246,12 +246,44 @@
   color: var(--color-primary);
 }
 
-/* —— Breadcrumb —— */
-.el-breadcrumb__item .el-breadcrumb__inner {
-  color: var(--color-text-tertiary);
+/* —— Breadcrumb · 书卷感重构 —— */
+/* 衬线字体 + 箭头分隔 + 当前页底线，呼应图书馆主题 */
+.app-header .el-breadcrumb {
+  align-items: center;
 }
-.el-breadcrumb__item:last-child .el-breadcrumb__inner {
+.app-header .el-breadcrumb__item {
+  display: inline-flex;
+  align-items: center;
+}
+.app-header .el-breadcrumb__item .el-breadcrumb__inner,
+.app-header .el-breadcrumb__item .el-breadcrumb__inner a {
+  font-family: var(--font-serif);
+  font-size: var(--fs-small);
+  font-weight: 400;
+  line-height: 1.2;
+  letter-spacing: 0.02em;
+  color: var(--color-text-secondary);
+  text-decoration: none;
+  transition: color var(--duration-fast) var(--ease-soft);
+}
+.app-header .el-breadcrumb__item .el-breadcrumb__inner a:hover,
+.app-header .el-breadcrumb__item .el-breadcrumb__inner:hover {
+  color: var(--color-primary);
+}
+/* 当前页：墨色加粗 + 靛蓝底线 */
+.app-header .el-breadcrumb__item:last-child .el-breadcrumb__inner,
+.app-header .el-breadcrumb__item:last-child .el-breadcrumb__inner a {
+  font-weight: 600;
   color: var(--color-text);
+  border-bottom: 2px solid var(--color-primary);
+  padding-bottom: 1px;
+}
+/* 箭头分隔符：清晰可见 */
+.app-header .el-breadcrumb__separator {
+  margin: 0 6px;
+  color: var(--color-text-tertiary);
+  font-size: var(--fs-small);
+  font-weight: 400;
 }
 
 /* —— Loading 遮罩 —— */
