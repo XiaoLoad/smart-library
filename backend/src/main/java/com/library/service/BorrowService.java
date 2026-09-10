@@ -10,6 +10,8 @@ import com.library.entity.*;
 import com.library.mapper.*;
 import com.library.security.CurrentUser;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DuplicateKeyException;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -42,6 +44,8 @@ public class BorrowService {
      * 待取书超期 → 已取消 + 恢复库存
      * 借阅中超期 → 已逾期
      */
+    // 定时同步借阅状态（替代原 list()/quota() 内的实时写库，避免读接口产生写副作用）
+    @Scheduled(fixedDelay = 60000)
     @Transactional
     public void syncBorrowStatus() {
         LocalDateTime now = LocalDateTime.now();
@@ -66,7 +70,6 @@ public class BorrowService {
      * 借阅列表
      */
     public PageResult<Borrow> list(int page, int size, Integer status, String search) {
-        syncBorrowStatus();
         CurrentUser cu = CurrentUser.get();
         boolean isAdmin = cu.getUserType() == 3;
         PageHelper.startPage(page, size);
@@ -115,16 +118,11 @@ public class BorrowService {
             throw new BusinessException(400, "该图书暂无库存");
         }
 
-        // 生成借阅码 BR{YYYYMMDD}{seq4}
         String today = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
         String prefix = "BR" + today;
-        Integer maxSeq = borrowMapper.selectMaxSeqOfDay(prefix);
-        int seq = (maxSeq == null ? 0 : maxSeq) + 1;
-        String borrowNo = prefix + String.format("%04d", seq);
-
         LocalDateTime now = LocalDateTime.now();
+
         Borrow record = new Borrow();
-        record.setBorrowNo(borrowNo);
         record.setUserId(user.getId());
         record.setUserName(user.getRealName());
         record.setBookId(book.getId());
@@ -135,16 +133,31 @@ public class BorrowService {
         record.setPickupDeadline(now.plusDays(limit.getPickupDays()));
         record.setStatus(0);
         record.setRemark("待取书");
-        // 生成二维码 payload
-        String qrPayload = String.format(
-                "{\"borrowNo\":\"%s\",\"userId\":%d,\"bookId\":%d,\"bookTitle\":\"%s\"}",
-                borrowNo, user.getId(), book.getId(), book.getTitle()
-        );
-        record.setQrPayload(qrPayload);
 
-        borrowMapper.insert(record);
-        bookMapper.decreaseAvailable(book.getId(), 1);
-        return record;
+        // 借阅码按天全局，并发下 selectMaxSeqOfDay+1 可能取到相同序号；库表已有 uk_borrow_no
+        // 唯一约束，冲突时捕获 DuplicateKeyException 后重取序号重试（最多 3 次）。
+        // 库存扣减放在插入成功之后，且用条件更新，确保不重复扣减、不超借。
+        int maxAttempts = 3;
+        for (int attempt = 0; attempt < maxAttempts; attempt++) {
+            Integer maxSeq = borrowMapper.selectMaxSeqOfDay(prefix);
+            int seq = (maxSeq == null ? 0 : maxSeq) + 1;
+            String borrowNo = prefix + String.format("%04d", seq);
+            record.setBorrowNo(borrowNo);
+            record.setQrPayload(String.format(
+                    "{\"borrowNo\":\"%s\",\"userId\":%d,\"bookId\":%d,\"bookTitle\":\"%s\"}",
+                    borrowNo, user.getId(), book.getId(), book.getTitle()));
+            try {
+                borrowMapper.insert(record);
+                int rows = bookMapper.decreaseAvailable(book.getId(), 1);
+                if (rows == 0) {
+                    throw new BusinessException(400, "该图书暂无库存");
+                }
+                return record;
+            } catch (DuplicateKeyException e) {
+                // 借阅码并发冲突，重取序号重试
+            }
+        }
+        throw new BusinessException(500, "生成借阅码失败，请稍后重试");
     }
 
     /**
@@ -453,7 +466,6 @@ public class BorrowService {
      * 借阅额度
      */
     public BorrowQuotaVo quota() {
-        syncBorrowStatus();
         CurrentUser cu = CurrentUser.get();
         User user = userMapper.selectById(cu.getUserId());
         BorrowLimit limit = borrowLimitMapper.selectByType(user.getUserType());

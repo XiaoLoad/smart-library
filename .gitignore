@@ -57,3 +57,6 @@ spider/data/probe_*.html
 spider/data/Books_2.csv
 spider/data/tag_sample.csv
 spider/data/books_raw.json
+
+# ===== 运行时上传数据（封面等，由爬虫/用户上传生成，非源码） =====
+backend/uploads/

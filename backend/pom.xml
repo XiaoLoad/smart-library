@@ -95,6 +95,19 @@
       <artifactId>spring-boot-starter-cache</artifactId>
     </dependency>
 
+    <!-- Flyway 数据库迁移：直接引 flyway-core，版本由 Spring Boot BOM 管理（flyway.version=10.10.0）；
+         Spring Boot 自动配置会在启动时按 classpath:db/migration 执行迁移，无需额外 starter。 -->
+    <dependency>
+      <groupId>org.flywaydb</groupId>
+      <artifactId>flyway-core</artifactId>
+    </dependency>
+    <!-- Flyway MySQL 方言支持：Flyway 10.x 已将数据库方言拆分为独立模块，
+         flyway-core 本身不含 MySQL 方言，缺它会在启动时抛 Unsupported Database: MySQL 8.0 -->
+    <dependency>
+      <groupId>org.flywaydb</groupId>
+      <artifactId>flyway-mysql</artifactId>
+    </dependency>
+
     <!-- LangChain4j -->
     <dependency>
       <groupId>dev.langchain4j</groupId>

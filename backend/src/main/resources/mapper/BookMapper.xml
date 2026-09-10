@@ -68,8 +68,10 @@
         WHERE id = #{id}
     </update>
 
+    <!-- 原子扣减：仅当库存充足时生效，返回影响行数；行数为 0 即无库存，避免并发超借 -->
     <update id="decreaseAvailable">
-        UPDATE books SET available_count = available_count - #{count} WHERE id = #{id}
+        UPDATE books SET available_count = available_count - #{count}
+        WHERE id = #{id} AND available_count >= #{count}
     </update>
 
     <update id="increaseAvailable">

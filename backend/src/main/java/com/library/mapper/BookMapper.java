@@ -20,7 +20,8 @@ public interface BookMapper {
 
     void update(Book book);
 
-    void decreaseAvailable(@Param("id") Long id, @Param("count") int count);
+    /** 原子扣减库存，仅当 available_count >= count 时生效；返回影响行数（0 表示库存不足） */
+    int decreaseAvailable(@Param("id") Long id, @Param("count") int count);
 
     void increaseAvailable(@Param("id") Long id, @Param("count") int count);
 
