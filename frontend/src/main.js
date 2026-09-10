@@ -23,6 +23,9 @@ app.use(createPinia())
 app.use(router)
 app.use(ElementPlus, { locale: zhCn })
 
+// 滚动位置由 keep-alive 列表页自行恢复，关闭浏览器默认的自动恢复以免互相干扰
+if ('scrollRestoration' in history) history.scrollRestoration = 'manual'
+
 // 初始化主题
 import { useAppStore } from './stores/app'
 const appStore = useAppStore()

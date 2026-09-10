@@ -1,5 +1,5 @@
 <template>
-  <div class="page borrow-page">
+  <div class="page borrow-page" ref="pageRef">
     <header class="page-header">
       <span class="eyebrow">借阅 · CIRCULATION</span>
       <h1>借阅记录</h1>
@@ -136,6 +136,13 @@ import { useUserStore } from '@/stores/user'
 import { formatDateTime } from '@/utils/datetime.js'
 import BorrowCodeDialog from '@/components/BorrowCodeDialog.vue'
 import BorrowProcessDialog from '@/components/BorrowProcessDialog.vue'
+import { useScrollRestore } from '@/composables/useScrollRestore'
+
+// 缓存名与路由 name 一致，keep-alive 与滚动恢复都依赖它
+defineOptions({ name: 'BorrowList' })
+
+const pageRef = ref(null)
+useScrollRestore(pageRef)
 
 const userStore = useUserStore()
 const list = ref([])

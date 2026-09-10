@@ -1,5 +1,5 @@
 <template>
-  <div class="page user-page">
+  <div class="page user-page" ref="pageRef">
     <header class="page-header">
       <span class="eyebrow">读者 · READERS</span>
       <h1>读者管理</h1>
@@ -178,6 +178,13 @@ import { ElMessage } from 'element-plus'
 import { userApi } from '@/api'
 import { useUserStore } from '@/stores/user'
 import { showPageLoading, hidePageLoading } from '@/utils/pageLoading.js'
+import { useScrollRestore } from '@/composables/useScrollRestore'
+
+// 缓存名与路由 name 一致，keep-alive 与滚动恢复都依赖它
+defineOptions({ name: 'UserList' })
+
+const pageRef = ref(null)
+useScrollRestore(pageRef)
 
 const userStore = useUserStore()
 const list = ref([])
