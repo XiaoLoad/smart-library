@@ -29,6 +29,13 @@ const routes = [
         component: () => import('@/views/dashboard/index.vue'),
         meta: { title: '概览', roles: ALL_ROLES },
       },
+      // 个人中心：侧栏「服务」分节下对读者开放，管理员从顶栏用户菜单进入；两角色共用此页
+      {
+        path: 'profile',
+        name: 'Profile',
+        component: () => import('@/views/profile/index.vue'),
+        meta: { title: '个人中心', roles: ALL_ROLES },
+      },
       // 错误页挂在布局内：被拦下时侧栏还在，用户能直接改道，不必回退重来
       {
         path: '403',

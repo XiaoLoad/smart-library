@@ -14,6 +14,9 @@ export const userApi = {
   add: (data) => post('/user/add', data),
   update: (data) => post('/user/update', data),
   detail: (id) => get('/user/detail', { id }),
+  // 本人档案（自助）：后端恒取 token 里的用户，不接收入参
+  profile: () => get('/user/profile'),
+  updateProfile: (data) => post('/user/profile/update', data),
 }
 
 // 图书

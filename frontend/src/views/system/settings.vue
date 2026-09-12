@@ -37,27 +37,7 @@
               </div>
             </div>
 
-            <el-form
-              :model="pwdForm"
-              :rules="pwdRules"
-              ref="pwdFormRef"
-              label-width="92px"
-              class="settings-form"
-            >
-              <el-form-item label="原密码" prop="oldPassword">
-                <el-input v-model="pwdForm.oldPassword" type="password" show-password placeholder="请输入当前密码" />
-              </el-form-item>
-              <el-form-item label="新密码" prop="newPassword">
-                <el-input v-model="pwdForm.newPassword" type="password" show-password placeholder="至少 6 位" />
-              </el-form-item>
-              <el-form-item label="确认密码" prop="confirmPassword">
-                <el-input v-model="pwdForm.confirmPassword" type="password" show-password placeholder="再次输入新密码" />
-              </el-form-item>
-              <el-form-item>
-                <el-button type="primary" :loading="pwdLoading" @click="submitPassword">确认修改</el-button>
-                <el-button @click="resetPwdForm">重置</el-button>
-              </el-form-item>
-            </el-form>
+            <ChangePasswordForm />
           </div>
         </section>
 
@@ -290,11 +270,12 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import AppIcon from '@/components/AppIcon.vue'
 import EllipsisText from '@/components/EllipsisText.vue'
 import AiChannelDrawer from '@/components/AiChannelDrawer.vue'
+import ChangePasswordForm from '@/components/ChangePasswordForm.vue'
 import { systemApi } from '@/api'
 
 /* ===== 目次导航 ===== */
@@ -312,59 +293,6 @@ const onNav = (key) => {
   if (key === 'ai' && channelsError.value) {
     loadChannels()
   }
-}
-
-/* ===== 密码修改 ===== */
-const pwdFormRef = ref(null)
-const pwdLoading = ref(false)
-const pwdForm = reactive({
-  oldPassword: '',
-  newPassword: '',
-  confirmPassword: '',
-})
-
-const pwdRules = {
-  oldPassword: [{ required: true, message: '请输入原密码', trigger: 'blur' }],
-  newPassword: [
-    { required: true, message: '请输入新密码', trigger: 'blur' },
-    { min: 6, message: '密码长度不能少于 6 位', trigger: 'blur' },
-  ],
-  confirmPassword: [
-    { required: true, message: '请再次输入新密码', trigger: 'blur' },
-    {
-      validator: (rule, value, callback) => {
-        if (value !== pwdForm.newPassword) callback(new Error('两次输入的密码不一致'))
-        else callback()
-      },
-      trigger: 'blur',
-    },
-  ],
-}
-
-const submitPassword = () => {
-  pwdFormRef.value.validate(async (valid) => {
-    if (!valid) return
-    pwdLoading.value = true
-    try {
-      const res = await systemApi.changePassword({
-        oldPassword: pwdForm.oldPassword,
-        newPassword: pwdForm.newPassword,
-      })
-      ElMessage.success(res.message || '密码修改成功')
-      resetPwdForm()
-    } catch {
-      // 错误已由拦截器提示
-    } finally {
-      pwdLoading.value = false
-    }
-  })
-}
-
-const resetPwdForm = () => {
-  pwdForm.oldPassword = ''
-  pwdForm.newPassword = ''
-  pwdForm.confirmPassword = ''
-  pwdFormRef.value?.clearValidate()
 }
 
 /* ===== AI 渠道 ===== */
@@ -722,10 +650,6 @@ onMounted(() => {
   align-items: center;
   gap: 6px;
   flex-shrink: 0;
-}
-
-.settings-form {
-  max-width: 460px;
 }
 
 /* ===== AI 渠道 ===== */

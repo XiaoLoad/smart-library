@@ -2,6 +2,7 @@ package com.library.service;
 
 import com.library.common.exception.BusinessException;
 import com.library.dto.UserAddRequest;
+import com.library.dto.UserProfileUpdateRequest;
 import com.library.dto.UserUpdateRequest;
 import com.library.entity.User;
 import com.library.mapper.UserMapper;
@@ -78,6 +79,24 @@ public class UserService {
         user.setClassName(req.getClassName());
         user.setGrade(req.getGrade());
         user.setMajor(req.getMajor());
+        userMapper.update(user);
+        return user;
+    }
+
+    /**
+     * 读者自助修改本人联系方式。
+     * <p>
+     * 只写邮箱与手机：二者在 {@link UserProfileUpdateRequest} 上是必填，
+     * 故无需处理 null；姓名、身份、学号/工号、状态与档案信息（院系/职称/班级/年级/专业）
+     * 一律不在此处写入，由管理员在读者管理中维护。
+     */
+    public User updateProfile(Long userId, UserProfileUpdateRequest req) {
+        User user = userMapper.selectById(userId);
+        if (user == null) {
+            throw new BusinessException(404, "用户不存在");
+        }
+        user.setEmail(req.getEmail().trim());
+        user.setPhone(req.getPhone().trim());
         userMapper.update(user);
         return user;
     }

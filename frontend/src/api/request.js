@@ -25,7 +25,9 @@ service.interceptors.response.use(
   (response) => {
     const { code, message, data } = response.data
     if (code === 200) {
-      return data
+      // 只回传 data 会让「仅提示、无数据」接口（Result.success(msg, null)）丢掉提示语，
+      // 调用方取 res.message 会抛错，故此时补一个只带 message 的对象
+      return data === null ? { message } : data
     }
     ElMessage.error(message || '请求失败')
     return Promise.reject(new Error(message))

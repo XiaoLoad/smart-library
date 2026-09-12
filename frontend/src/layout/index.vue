@@ -105,7 +105,6 @@
             <template #dropdown>
               <el-dropdown-menu>
                 <el-dropdown-item command="profile">个人中心</el-dropdown-item>
-                <el-dropdown-item command="settings">账户设置</el-dropdown-item>
                 <el-dropdown-item divided command="logout">退出登录</el-dropdown-item>
               </el-dropdown-menu>
             </template>
@@ -163,6 +162,8 @@ const MENU_SECTIONS = [
   { title: '服务', items: [
     { title: 'AI 助手', path: '/ai/chat', icon: 'sparkles', roles: ALL },
     { title: '公告', path: '/announce/list', icon: 'bell', roles: ALL },
+    // 读者的账户入口（管理员从顶栏进，且其系统设置里已有账户安全）
+    { title: '个人中心', path: '/profile', icon: 'user', roles: [1, 2] },
   ]},
   { title: '平台', items: [
     { title: '系统设置', path: '/system/settings', icon: 'gear', roles: [3] },
@@ -198,7 +199,9 @@ const loadNotifications = async () => {
 }
 
 const handleUserCommand = (command) => {
-  if (command === 'logout') {
+  if (command === 'profile') {
+    router.push('/profile')
+  } else if (command === 'logout') {
     userStore.logout()
     router.push('/login')
   }
