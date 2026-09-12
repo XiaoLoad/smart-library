@@ -100,6 +100,19 @@
   --el-button-hover-bg-color: var(--color-primary-light);
 }
 
+/* 禁用态：明确中性灰度，与主色态形成清晰辨识度。
+   原因：主题把 --el-color-primary-light-5 压平到主色本身，
+   而 Element Plus 禁用背景取自 light-5，导致禁用按钮仍显示完整主色（"伪激活"）。
+   此处强制套用已定义的 --el-disabled-* 中性令牌，文本按钮除外（保持极简透明态）。 */
+.el-button.is-disabled:not(.is-text),
+.el-button.is-disabled:not(.is-text):hover,
+.el-button.is-disabled:not(.is-text):focus {
+  background-color: var(--el-disabled-bg-color);
+  border-color: var(--el-disabled-border-color);
+  color: var(--el-disabled-text-color);
+  cursor: not-allowed;
+}
+
 /* —— 输入框 —— */
 .el-input__wrapper {
   background-color: var(--color-bg-elevated);
