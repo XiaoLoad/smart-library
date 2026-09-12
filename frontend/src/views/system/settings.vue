@@ -379,8 +379,8 @@
                 <div class="mail-switch-item">
                   <el-switch v-model="mail.useTls" />
                   <div class="switch-text">
-                    <span class="switch-label">使用 TLS 加密</span>
-                    <span class="switch-desc">启用 STARTTLS 加密连接（推荐）</span>
+                    <span class="switch-label">使用加密连接</span>
+                    <span class="switch-desc">465 端口走隐式 SSL，587 走 STARTTLS，按端口自动识别</span>
                   </div>
                 </div>
                 <div class="mail-switch-item">
@@ -406,74 +406,136 @@
               </div>
             </div>
 
+            <!-- 说明横幅：让管理员一眼看懂本页在做什么、各字段含义 -->
+            <div class="log-help">
+              <AppIcon name="info" :size="16" />
+              <div>
+                本页记录系统<strong>自动</strong>与<strong>人工</strong>下发的每一条提醒（站内信 / 邮件）。
+                若某条显示「发送失败」或「已跳过」，可点击右侧「重发」补发；
+                「手动触发扫描」会按通知规则对当前<strong>即将到期 / 逾期</strong>的借阅批量补提醒（与管理员手动催还相互独立）。
+              </div>
+            </div>
+
             <div class="log-toolbar">
               <div class="log-filters">
-              <el-select v-model="logFilters.status" placeholder="状态" clearable size="small" class="log-filter">
-                <el-option label="全部状态" value="" />
-                <el-option label="待发送" value="PENDING" />
-                <el-option label="已发送" value="SENT" />
-                <el-option label="发送失败" value="FAILED" />
-                <el-option label="已跳过" value="SKIPPED" />
-              </el-select>
-              <el-select v-model="logFilters.channel" placeholder="渠道" clearable size="small" class="log-filter">
-                <el-option label="全部渠道" value="" />
-                <el-option label="站内信" value="INAPP" />
-                <el-option label="邮件" value="EMAIL" />
-              </el-select>
-              <el-select v-model="logFilters.eventType" placeholder="事件" clearable size="small" class="log-filter">
-                <el-option label="全部事件" value="" />
-                <el-option label="即将逾期" value="DUE_SOON" />
-                <el-option label="逾期第 1 天" value="OVERDUE_D1" />
-                <el-option label="逾期第 3 天" value="OVERDUE_D3" />
-                <el-option label="逾期第 7 天" value="OVERDUE_D7" />
-              </el-select>
-              <el-date-picker
-                v-model="logDateRange"
-                type="daterange"
-                size="small"
-                range-separator="至"
-                start-placeholder="开始日期"
-                end-placeholder="结束日期"
-                value-format="YYYY-MM-DD"
-                class="log-date"
-              />
+                <el-tooltip content="本条提醒的投递结果：待发送=后台投递中；已发送=已送达；发送失败=需重发；已跳过=读者无邮箱等" placement="top">
+                  <el-select v-model="logFilters.status" placeholder="发送状态" clearable size="small" class="log-filter">
+                    <el-option label="全部状态" value="" />
+                    <el-option label="待发送" value="PENDING" />
+                    <el-option label="已发送" value="SENT" />
+                    <el-option label="发送失败" value="FAILED" />
+                    <el-option label="已跳过" value="SKIPPED" />
+                  </el-select>
+                </el-tooltip>
+                <el-tooltip content="站内信=系统站内消息；邮件=发往读者邮箱" placement="top">
+                  <el-select v-model="logFilters.channel" placeholder="渠道" clearable size="small" class="log-filter">
+                    <el-option label="全部渠道" value="" />
+                    <el-option label="站内信" value="INAPP" />
+                    <el-option label="邮件" value="EMAIL" />
+                  </el-select>
+                </el-tooltip>
+                <el-tooltip content="不同提醒场景：即将到期 / 逾期第N天 / 管理员手动催还" placement="top">
+                  <el-select v-model="logFilters.eventType" placeholder="提醒类型" clearable size="small" class="log-filter">
+                    <el-option label="全部类型" value="" />
+                    <el-option label="即将到期提醒" value="DUE_SOON" />
+                    <el-option label="逾期第 1 天" value="OVERDUE_D1" />
+                    <el-option label="逾期第 3 天" value="OVERDUE_D3" />
+                    <el-option label="逾期第 7 天" value="OVERDUE_D7" />
+                    <el-option label="管理员催还" value="URGE_RETURN" />
+                  </el-select>
+                </el-tooltip>
+                <el-date-picker
+                  v-model="logDateRange"
+                  type="daterange"
+                  size="small"
+                  range-separator="至"
+                  start-placeholder="开始日期"
+                  end-placeholder="结束日期"
+                  value-format="YYYY-MM-DD"
+                  class="log-date"
+                />
               </div>
               <div class="log-toolbar-right">
                 <el-button :loading="logLoading" @click="loadLogs">
                   <AppIcon name="refresh" :size="14" />刷新
                 </el-button>
-                <el-button type="primary" :loading="triggering" @click="onTrigger">
-                  <AppIcon name="bolt" :size="14" />手动触发扫描
-                </el-button>
+                <el-tooltip content="按通知规则对当前即将到期 / 逾期的借阅批量补发提醒（与本条手动催还相互独立）" placement="top">
+                  <el-button type="primary" :loading="triggering" @click="onTrigger">
+                    <AppIcon name="bolt" :size="14" />手动触发扫描
+                  </el-button>
+                </el-tooltip>
               </div>
+            </div>
+
+            <!-- 图例：用颜色对应状态，免去管理员猜 tag 含义 -->
+            <div class="log-legend">
+              <span class="legend-item"><i class="dot dot-pending"></i>待发送</span>
+              <span class="legend-item"><i class="dot dot-sent"></i>已发送</span>
+              <span class="legend-item"><i class="dot dot-failed"></i>发送失败</span>
+              <span class="legend-item"><i class="dot dot-skipped"></i>已跳过</span>
             </div>
 
             <el-table :data="logs" v-loading="logLoading" class="log-table" empty-text="暂无发送记录">
               <el-table-column prop="id" label="ID" width="70" />
-              <el-table-column label="事件" width="130">
+              <el-table-column label="提醒类型" width="140">
+                <template #header>
+                  <el-tooltip content="系统自动或人工下发的提醒场景：即将到期 / 逾期第N天 / 管理员手动催还" placement="top">
+                    <span class="th-tip">提醒类型</span>
+                  </el-tooltip>
+                </template>
                 <template #default="{ row }">
                   <span class="cell-event">{{ eventLabel(row.eventType) }}</span>
                 </template>
               </el-table-column>
               <el-table-column label="渠道" width="90">
+                <template #header>
+                  <el-tooltip content="站内信=系统站内消息；邮件=发往读者邮箱" placement="top">
+                    <span class="th-tip">渠道</span>
+                  </el-tooltip>
+                </template>
                 <template #default="{ row }">
                   <el-tag :type="channelTag(row.channel)" size="small" effect="light">{{ channelLabel(row.channel) }}</el-tag>
                 </template>
               </el-table-column>
-              <el-table-column label="收件人" min-width="140">
+              <el-table-column label="接收人" min-width="140">
                 <template #default="{ row }">
                   <span class="cell-email">{{ row.toEmail || (row.channel === 'INAPP' ? '站内信' : '—') }}</span>
                 </template>
               </el-table-column>
-              <el-table-column label="状态" width="100">
+              <el-table-column label="发送状态" width="100">
+                <template #header>
+                  <el-tooltip content="待发送=后台投递中；已发送=已送达；发送失败=需重发；已跳过=读者无邮箱等" placement="top">
+                    <span class="th-tip">发送状态</span>
+                  </el-tooltip>
+                </template>
                 <template #default="{ row }">
                   <el-tag :type="statusTag(row.status)" size="small" effect="dark">{{ statusLabel(row.status) }}</el-tag>
                 </template>
               </el-table-column>
-              <el-table-column prop="subject" label="主题" min-width="180" show-overflow-tooltip />
-              <el-table-column prop="createdAt" label="创建时间" width="170" />
-              <el-table-column label="操作" width="90" fixed="right">
+              <el-table-column label="通知标题" min-width="200" prop="subject" show-overflow-tooltip />
+              <el-table-column label="下发时间" width="160">
+                <template #header>
+                  <el-tooltip content="本条通知创建 / 下发的时间" placement="top">
+                    <span class="th-tip">下发时间</span>
+                  </el-tooltip>
+                </template>
                 <template #default="{ row }">
+                  <span class="cell-time">{{ formatDateTime(row.createdAt) }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="送达时间" width="160">
+                <template #header>
+                  <el-tooltip content="邮件 / 站内信实际送达的时间；后台仍在投递中则显示 —" placement="top">
+                    <span class="th-tip">送达时间</span>
+                  </el-tooltip>
+                </template>
+                <template #default="{ row }">
+                  <span class="cell-time">{{ formatDateTime(row.sentAt) }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="操作" width="140" fixed="right">
+                <template #default="{ row }">
+                  <el-button text size="small" @click="openDetail(row)">详情</el-button>
                   <el-button text size="small" :loading="resendingId === row.id" @click="onResend(row)">重发</el-button>
                 </template>
               </el-table-column>
@@ -492,6 +554,48 @@
               />
             </div>
           </div>
+
+          <!-- 通知详情：让管理员不必去猜主题 / 正文 / 失败原因 -->
+          <el-dialog v-model="detailVisible" title="通知详情" width="560px" append-to-body>
+            <div v-if="detailRow" class="detail-body">
+              <div class="detail-row">
+                <span class="detail-label">提醒类型</span>
+                <span class="detail-value">{{ eventLabel(detailRow.eventType) }}</span>
+              </div>
+              <div class="detail-row">
+                <span class="detail-label">渠道</span>
+                <span class="detail-value">{{ channelLabel(detailRow.channel) }}</span>
+              </div>
+              <div class="detail-row">
+                <span class="detail-label">接收人</span>
+                <span class="detail-value">{{ detailRow.toEmail || (detailRow.channel === 'INAPP' ? '站内信' : '—') }}</span>
+              </div>
+              <div class="detail-row">
+                <span class="detail-label">发送状态</span>
+                <el-tag :type="statusTag(detailRow.status)" size="small" effect="dark">{{ statusLabel(detailRow.status) }}</el-tag>
+              </div>
+              <div class="detail-row">
+                <span class="detail-label">下发时间</span>
+                <span class="detail-value">{{ formatDateTime(detailRow.createdAt) }}</span>
+              </div>
+              <div class="detail-row">
+                <span class="detail-label">送达时间</span>
+                <span class="detail-value">{{ formatDateTime(detailRow.sentAt) }}</span>
+              </div>
+              <div class="detail-block">
+                <div class="detail-label">通知标题</div>
+                <div class="detail-text">{{ detailRow.subject }}</div>
+              </div>
+              <div class="detail-block">
+                <div class="detail-label">通知正文</div>
+                <div class="detail-text detail-pre">{{ detailRow.content }}</div>
+              </div>
+              <div class="detail-block" v-if="detailRow.errorMsg">
+                <div class="detail-label">失败原因</div>
+                <div class="detail-text detail-error">{{ detailRow.errorMsg }}</div>
+              </div>
+            </div>
+          </el-dialog>
         </section>
       </div>
     </div>
@@ -508,6 +612,7 @@ import EllipsisText from '@/components/EllipsisText.vue'
 import AiChannelDrawer from '@/components/AiChannelDrawer.vue'
 import ChangePasswordForm from '@/components/ChangePasswordForm.vue'
 import { systemApi } from '@/api'
+import { formatDateTime } from '@/utils/datetime.js'
 
 /* ===== 目次导航 ===== */
 // 按业务域分组：AI 渠道与 AI 人设归到「AI 配置」组，不再被借阅规则隔断
@@ -771,10 +876,11 @@ const savePrompt = async () => {
 
 /* ===== 催还通知 · 渠道配置 ===== */
 const EVENT_LABELS = {
-  DUE_SOON: '即将逾期提醒',
+  DUE_SOON: '即将到期提醒',
   OVERDUE_D1: '逾期第 1 天',
   OVERDUE_D3: '逾期第 3 天',
   OVERDUE_D7: '逾期第 7 天',
+  URGE_RETURN: '管理员催还',
 }
 const CHANNEL_LABELS = { INAPP: '站内信', EMAIL: '邮件', BOTH: '站内+邮件' }
 const CHANNEL_TAG = { INAPP: 'info', EMAIL: 'warning', BOTH: 'primary' }
@@ -882,6 +988,14 @@ const logFilters = ref({ status: '', channel: '', eventType: '' })
 const logDateRange = ref(null)
 const resendingId = ref(null)
 const triggering = ref(false)
+
+// 通知详情抽屉
+const detailVisible = ref(false)
+const detailRow = ref(null)
+const openDetail = (row) => {
+  detailRow.value = row
+  detailVisible.value = true
+}
 
 const loadLogs = async () => {
   logLoading.value = true
@@ -1787,6 +1901,129 @@ onMounted(() => {
   justify-content: flex-end;
   margin-top: var(--space-4);
 }
+
+/* 说明横幅：降低"专业化"门槛，让管理员秒懂本页用途 */
+.log-help {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: 10px 14px;
+  background: var(--color-bg-subtle);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: var(--fs-small);
+  color: var(--color-text-secondary);
+  line-height: 1.7;
+  margin-bottom: var(--space-4);
+}
+
+.log-help .app-icon,
+.log-help svg {
+  color: var(--color-primary);
+  flex-shrink: 0;
+  margin-top: 3px;
+}
+
+.log-help strong {
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+/* 状态图例：颜色对应，免猜 tag 含义 */
+.log-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  margin-bottom: var(--space-3);
+}
+
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-small);
+  color: var(--color-text-secondary);
+}
+
+.legend-item .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.dot-pending { background: var(--color-text-tertiary); }
+.dot-sent { background: var(--color-success); }
+.dot-failed { background: var(--color-danger); }
+.dot-skipped { background: var(--color-warning); }
+
+/* 表头带解释 tooltip 时的提示样式 */
+.th-tip {
+  display: inline-flex;
+  align-items: center;
+  cursor: help;
+  border-bottom: 1px dotted var(--color-border-strong);
+}
+
+.cell-time {
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption);
+  color: var(--color-text-secondary);
+}
+
+/* 详情弹窗 */
+.detail-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.detail-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.detail-label {
+  flex-shrink: 0;
+  width: 72px;
+  font-size: var(--fs-small);
+  color: var(--color-text-tertiary);
+}
+
+.detail-value {
+  font-size: var(--fs-body);
+  color: var(--color-text);
+}
+
+.detail-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.detail-text {
+  font-size: var(--fs-small);
+  color: var(--color-text);
+  line-height: 1.7;
+  background: var(--color-bg-subtle);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.detail-pre {
+  white-space: pre-wrap;
+}
+
+.detail-error {
+  color: var(--color-danger);
+  background: rgba(168, 90, 74, 0.08);
+  border-color: color-mix(in srgb, var(--color-danger) 40%, var(--color-border));
+}
+
 
 /* ===== 响应式 ===== */
 @media (max-width: 1100px) {

@@ -360,7 +360,7 @@ const onUrge = async (row) => {
       { type: 'warning', confirmButtonText: '下发催还', cancelButtonText: '取消' }
     )
     const res = await borrowApi.urge({ borrowNos: [row.borrowNo] })
-    ElMessage.success(`催还完成：成功 ${res.success} 条，跳过 ${res.skipped} 条`)
+    ElMessage.success(`催还通知已下发：成功 ${res.success} 条，跳过 ${res.skipped} 条（站内信即时送达，邮件在后台投递，稍后可在「系统设置 → 通知管理」查看结果）`)
   } catch (e) {
     if (e !== 'cancel') {
       // 错误已由拦截器提示
@@ -382,7 +382,7 @@ const onBatchUrge = async () => {
       { type: 'warning', confirmButtonText: '批量催还', cancelButtonText: '取消' }
     )
     const res = await borrowApi.urge({ borrowNos: overdue.map((r) => r.borrowNo) })
-    ElMessage.success(`催还完成：成功 ${res.success} 条，跳过 ${res.skipped} 条`)
+    ElMessage.success(`催还通知已下发：成功 ${res.success} 条，跳过 ${res.skipped} 条（站内信即时送达，邮件在后台投递，稍后可在「系统设置 → 通知管理」查看结果）`)
     load()
   } catch (e) {
     if (e !== 'cancel') {

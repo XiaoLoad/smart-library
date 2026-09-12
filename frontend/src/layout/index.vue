@@ -155,7 +155,7 @@
               <div class="notify-body">
                 <div class="notify-title">{{ n.title }}</div>
                 <div class="notify-content">{{ n.content }}</div>
-                <div class="notify-time">{{ n.createTime }}</div>
+                <div class="notify-time">{{ formatDateTime(n.createTime) }}</div>
               </div>
             </div>
           </div>
@@ -172,6 +172,7 @@ import { ElMessage } from 'element-plus'
 import { useAppStore } from '@/stores/app'
 import { useUserStore } from '@/stores/user'
 import { notificationApi } from '@/api'
+import { formatDateTime } from '@/utils/datetime.js'
 import AppIcon from '@/components/AppIcon.vue'
 import AppBreadcrumb from '@/components/AppBreadcrumb.vue'
 
