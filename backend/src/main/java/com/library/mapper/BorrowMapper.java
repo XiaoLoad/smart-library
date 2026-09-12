@@ -47,4 +47,8 @@ public interface BorrowMapper {
                       @Param("borrowTime") LocalDateTime borrowTime,
                       @Param("dueTime") LocalDateTime dueTime, @Param("remark") String remark,
                       @Param("pickupAdminId") Long pickupAdminId);
+
+    List<Borrow> selectDueOn(@Param("status") Integer status,
+                             @Param("start") LocalDateTime start,
+                             @Param("end") LocalDateTime end);
 }

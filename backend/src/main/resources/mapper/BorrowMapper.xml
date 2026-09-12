@@ -46,6 +46,11 @@
         SELECT * FROM borrows WHERE id = #{id}
     </select>
 
+    <select id="selectDueOn" resultMap="borrowMap">
+        SELECT * FROM borrows
+        WHERE status = #{status} AND due_time BETWEEN #{start} AND #{end}
+    </select>
+
     <select id="selectByBorrowNo" resultMap="borrowMap">
         SELECT * FROM borrows WHERE borrow_no = #{borrowNo}
     </select>

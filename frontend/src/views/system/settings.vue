@@ -268,6 +268,229 @@
             </div>
           </div>
         </section>
+
+        <!-- ===== 催还通知 · 渠道配置 ===== -->
+        <section v-show="active === 'notify'" class="setting-panel">
+          <!-- 催还通知规则 -->
+          <div class="card panel-card fade-in">
+            <div class="card-head card-head--between">
+              <div class="card-head-main">
+                <div class="card-head__icon"><AppIcon name="bell" :size="22" /></div>
+                <div>
+                  <h2 class="card-title">催还通知规则</h2>
+                  <p class="card-sub">为即将逾期与不同逾期天数的借阅，分别设置提醒渠道、提前/滞后天数与通知文案。</p>
+                </div>
+              </div>
+              <el-button type="primary" :loading="rulesSaving" @click="saveRules">
+                <AppIcon name="check" :size="15" />保存规则
+              </el-button>
+            </div>
+
+            <div v-loading="rulesLoading" class="rule-list">
+              <div v-for="r in rules" :key="r.eventType" class="rule-card" :class="{ 'is-off': !r.enabled }">
+                <div class="rule-head">
+                  <div class="rule-title">
+                    <AppIcon name="bell" :size="15" />
+                    <span>{{ eventLabel(r.eventType) }}</span>
+                  </div>
+                  <div class="rule-head-right">
+                    <el-switch v-model="r.enabled" />
+                    <el-button text class="rule-toggle" @click="r.open = !r.open">
+                      {{ r.open ? '收起模板' : '编辑模板' }}
+                      <AppIcon :name="r.open ? 'chevron-up' : 'chevron-down'" :size="13" />
+                    </el-button>
+                  </div>
+                </div>
+
+                <div class="rule-fields">
+                  <div class="rule-field">
+                    <label>提醒渠道</label>
+                    <el-select v-model="r.channel" size="small" class="rule-select">
+                      <el-option label="仅站内信" value="INAPP" />
+                      <el-option label="仅邮件" value="EMAIL" />
+                      <el-option label="站内信 + 邮件" value="BOTH" />
+                    </el-select>
+                  </div>
+                  <div class="rule-field">
+                    <label>{{ offsetLabel(r.eventType) }}</label>
+                    <el-input-number v-model="r.offsetDays" :step="1" size="small" controls-position="right" />
+                    <span class="rule-unit">{{ r.eventType === 'DUE_SOON' ? '天（应还前）' : '天（逾期后）' }}</span>
+                  </div>
+                </div>
+
+                <div v-if="r.open" class="rule-tpl">
+                  <div class="tpl-field">
+                    <label>邮件主题</label>
+                    <el-input v-model="r.subjectTpl" size="small" placeholder="支持 {readerName}{bookTitle}{dueDate}{borrowNo}{daysOverdue}" />
+                  </div>
+                  <div class="tpl-field">
+                    <label>正文模板</label>
+                    <el-input v-model="r.bodyTpl" type="textarea" :rows="3" placeholder="支持占位符 {readerName} {bookTitle} {dueDate} {borrowNo} {daysOverdue}" />
+                  </div>
+                  <p class="tpl-hint">
+                    占位符：<code>{readerName}</code> 读者姓名 · <code>{bookTitle}</code> 书名 ·
+                    <code>{dueDate}</code> 应还日期 · <code>{borrowNo}</code> 借阅号 · <code>{daysOverdue}</code> 逾期天数
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 邮件渠道配置 -->
+          <div class="card panel-card fade-in">
+            <div class="card-head card-head--between">
+              <div class="card-head-main">
+                <div class="card-head__icon icon-mail"><AppIcon name="mail" :size="22" /></div>
+                <div>
+                  <h2 class="card-title">邮件渠道（SMTP）</h2>
+                  <p class="card-sub">配置发件邮箱与 SMTP 服务器，催还邮件经此渠道发出；未启用时仅走站内信。</p>
+                </div>
+              </div>
+              <el-button type="primary" :loading="mailSaving" @click="saveMail">
+                <AppIcon name="check" :size="15" />保存配置
+              </el-button>
+            </div>
+
+            <div v-loading="mailLoading" class="mail-form">
+              <div class="mail-grid">
+                <div class="mail-field">
+                  <label>SMTP 主机</label>
+                  <el-input v-model="mail.smtpHost" placeholder="如 smtp.qq.com" />
+                </div>
+                <div class="mail-field">
+                  <label>端口</label>
+                  <el-input-number v-model="mail.smtpPort" :min="1" :max="65535" size="small" controls-position="right" />
+                </div>
+                <div class="mail-field">
+                  <label>发件账号</label>
+                  <el-input v-model="mail.username" placeholder="登录用户名" />
+                </div>
+                <div class="mail-field">
+                  <label>发件密码 / 授权码</label>
+                  <el-input v-model="mail.password" type="password" show-password placeholder="SMTP 授权码" />
+                </div>
+                <div class="mail-field mail-field--wide">
+                  <label>发件人地址</label>
+                  <el-input v-model="mail.fromAddr" placeholder="读者看到的发件邮箱" />
+                </div>
+              </div>
+
+              <div class="mail-switches">
+                <div class="mail-switch-item">
+                  <el-switch v-model="mail.useTls" />
+                  <div class="switch-text">
+                    <span class="switch-label">使用 TLS 加密</span>
+                    <span class="switch-desc">启用 STARTTLS 加密连接（推荐）</span>
+                  </div>
+                </div>
+                <div class="mail-switch-item">
+                  <el-switch v-model="mail.enabled" />
+                  <div class="switch-text">
+                    <span class="switch-label">启用邮件通知</span>
+                    <span class="switch-desc">关闭后催还通知仅通过站内信送达</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ===== 催还通知 · 通知管理 ===== -->
+        <section v-show="active === 'notify-manage'" class="setting-panel">
+          <div class="card panel-card fade-in">
+            <div class="card-head">
+              <div class="card-head__icon"><AppIcon name="receipt" :size="22" /></div>
+              <div>
+                <h2 class="card-title">通知发送管理</h2>
+                <p class="card-sub">查看每次催还通知的发送记录，失败或漏发可手动重发；亦可持续触发扫描。</p>
+              </div>
+            </div>
+
+            <div class="log-toolbar">
+              <el-select v-model="logFilters.status" placeholder="状态" clearable size="small" class="log-filter">
+                <el-option label="全部状态" value="" />
+                <el-option label="待发送" value="PENDING" />
+                <el-option label="已发送" value="SENT" />
+                <el-option label="发送失败" value="FAILED" />
+                <el-option label="已跳过" value="SKIPPED" />
+              </el-select>
+              <el-select v-model="logFilters.channel" placeholder="渠道" clearable size="small" class="log-filter">
+                <el-option label="全部渠道" value="" />
+                <el-option label="站内信" value="INAPP" />
+                <el-option label="邮件" value="EMAIL" />
+              </el-select>
+              <el-select v-model="logFilters.eventType" placeholder="事件" clearable size="small" class="log-filter">
+                <el-option label="全部事件" value="" />
+                <el-option label="即将逾期" value="DUE_SOON" />
+                <el-option label="逾期第 1 天" value="OVERDUE_D1" />
+                <el-option label="逾期第 3 天" value="OVERDUE_D3" />
+                <el-option label="逾期第 7 天" value="OVERDUE_D7" />
+              </el-select>
+              <el-date-picker
+                v-model="logDateRange"
+                type="daterange"
+                size="small"
+                range-separator="至"
+                start-placeholder="开始日期"
+                end-placeholder="结束日期"
+                value-format="YYYY-MM-DD"
+                class="log-date"
+              />
+              <div class="log-toolbar-right">
+                <el-button :loading="logLoading" @click="loadLogs">
+                  <AppIcon name="refresh" :size="14" />刷新
+                </el-button>
+                <el-button type="primary" :loading="triggering" @click="onTrigger">
+                  <AppIcon name="bolt" :size="14" />手动触发扫描
+                </el-button>
+              </div>
+            </div>
+
+            <el-table :data="logs" v-loading="logLoading" class="log-table" empty-text="暂无发送记录">
+              <el-table-column prop="id" label="ID" width="70" />
+              <el-table-column label="事件" width="130">
+                <template #default="{ row }">
+                  <span class="cell-event">{{ eventLabel(row.eventType) }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="渠道" width="90">
+                <template #default="{ row }">
+                  <el-tag :type="channelTag(row.channel)" size="small" effect="light">{{ channelLabel(row.channel) }}</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="收件人" min-width="140">
+                <template #default="{ row }">
+                  <span class="cell-email">{{ row.toEmail || (row.channel === 'INAPP' ? '站内信' : '—') }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="状态" width="100">
+                <template #default="{ row }">
+                  <el-tag :type="statusTag(row.status)" size="small" effect="dark">{{ statusLabel(row.status) }}</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="subject" label="主题" min-width="180" show-overflow-tooltip />
+              <el-table-column prop="createdAt" label="创建时间" width="170" />
+              <el-table-column label="操作" width="90" fixed="right">
+                <template #default="{ row }">
+                  <el-button text size="small" :loading="resendingId === row.id" @click="onResend(row)">重发</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+
+            <div class="log-pager">
+              <el-pagination
+                v-model:current-page="logPage"
+                v-model:page-size="logSize"
+                :total="logTotal"
+                :page-sizes="[10, 20, 50]"
+                layout="total, sizes, prev, pager, next"
+                background
+                @current-change="loadLogs"
+                @size-change="loadLogs"
+              />
+            </div>
+          </div>
+        </section>
       </div>
     </div>
 
@@ -309,6 +532,14 @@ const navGroups = [
       { key: 'rules', label: '借阅规则', en: 'RULES', icon: 'ruler' },
     ],
   },
+  {
+    title: '消息通知',
+    en: 'NOTIFY',
+    items: [
+      { key: 'notify', label: '通知渠道配置', en: 'CHANNELS', icon: 'bell' },
+      { key: 'notify-manage', label: '通知管理', en: 'LOGS', icon: 'receipt' },
+    ],
+  },
 ]
 const active = ref('account')
 
@@ -317,6 +548,9 @@ const onNav = (key) => {
   active.value = key
   if (key === 'ai' && channelsError.value) {
     loadChannels()
+  }
+  if (key === 'notify-manage') {
+    loadLogs()
   }
 }
 
@@ -533,11 +767,175 @@ const savePrompt = async () => {
   }
 }
 
+/* ===== 催还通知 · 渠道配置 ===== */
+const EVENT_LABELS = {
+  DUE_SOON: '即将逾期提醒',
+  OVERDUE_D1: '逾期第 1 天',
+  OVERDUE_D3: '逾期第 3 天',
+  OVERDUE_D7: '逾期第 7 天',
+}
+const CHANNEL_LABELS = { INAPP: '站内信', EMAIL: '邮件', BOTH: '站内+邮件' }
+const CHANNEL_TAG = { INAPP: 'info', EMAIL: 'warning', BOTH: 'primary' }
+const STATUS_LABELS = { PENDING: '待发送', SENT: '已发送', FAILED: '发送失败', SKIPPED: '已跳过' }
+const STATUS_TAG = { PENDING: 'info', SENT: 'success', FAILED: 'danger', SKIPPED: 'warning' }
+
+const eventLabel = (e) => EVENT_LABELS[e] || e || '—'
+const channelLabel = (c) => CHANNEL_LABELS[c] || c || '—'
+const channelTag = (c) => CHANNEL_TAG[c] || 'info'
+const statusLabel = (s) => STATUS_LABELS[s] || s || '—'
+const statusTag = (s) => STATUS_TAG[s] || 'info'
+const offsetLabel = (e) => (e === 'DUE_SOON' ? '提前天数' : '逾期天数')
+
+// 通知规则
+const rules = ref([])
+const rulesLoading = ref(false)
+const rulesSaving = ref(false)
+
+const loadRules = async () => {
+  rulesLoading.value = true
+  try {
+    const data = await systemApi.getNotificationRules()
+    rules.value = (data || []).map((r) => ({ ...r, enabled: r.enabled === 1, open: false }))
+  } catch {
+    rules.value = []
+  } finally {
+    rulesLoading.value = false
+  }
+}
+
+const saveRules = async () => {
+  rulesSaving.value = true
+  try {
+    const payload = rules.value.map((r) => ({
+      eventType: r.eventType,
+      channel: r.channel,
+      enabled: r.enabled ? 1 : 0,
+      offsetDays: r.offsetDays,
+      subjectTpl: r.subjectTpl,
+      bodyTpl: r.bodyTpl,
+    }))
+    await systemApi.saveNotificationRules(payload)
+    ElMessage.success('通知规则已保存')
+  } catch {
+    // 拦截器已提示
+  } finally {
+    rulesSaving.value = false
+  }
+}
+
+// 邮件渠道配置
+const mail = ref({ smtpHost: '', smtpPort: 465, username: '', password: '', fromAddr: '', useTls: true, enabled: false })
+const mailLoading = ref(false)
+const mailSaving = ref(false)
+
+const loadMail = async () => {
+  mailLoading.value = true
+  try {
+    const data = await systemApi.getMailConfig()
+    if (data) {
+      mail.value = {
+        smtpHost: data.smtpHost || '',
+        smtpPort: data.smtpPort || 465,
+        username: data.username || '',
+        password: data.password || '',
+        fromAddr: data.fromAddr || '',
+        useTls: data.useTls === 1,
+        enabled: data.enabled === 1,
+      }
+    }
+  } catch {
+    // 静默
+  } finally {
+    mailLoading.value = false
+  }
+}
+
+const saveMail = async () => {
+  mailSaving.value = true
+  try {
+    await systemApi.saveMailConfig({
+      smtpHost: mail.value.smtpHost,
+      smtpPort: mail.value.smtpPort,
+      username: mail.value.username,
+      password: mail.value.password,
+      fromAddr: mail.value.fromAddr,
+      useTls: mail.value.useTls ? 1 : 0,
+      enabled: mail.value.enabled ? 1 : 0,
+    })
+    ElMessage.success('邮件配置已保存')
+  } catch {
+    // 拦截器已提示
+  } finally {
+    mailSaving.value = false
+  }
+}
+
+/* ===== 催还通知 · 通知管理 ===== */
+const logs = ref([])
+const logLoading = ref(false)
+const logTotal = ref(0)
+const logPage = ref(1)
+const logSize = ref(20)
+const logFilters = ref({ status: '', channel: '', eventType: '' })
+const logDateRange = ref(null)
+const resendingId = ref(null)
+const triggering = ref(false)
+
+const loadLogs = async () => {
+  logLoading.value = true
+  try {
+    const params = {
+      page: logPage.value,
+      size: logSize.value,
+      status: logFilters.value.status || undefined,
+      channel: logFilters.value.channel || undefined,
+      eventType: logFilters.value.eventType || undefined,
+      startDate: logDateRange.value ? logDateRange.value[0] : undefined,
+      endDate: logDateRange.value ? logDateRange.value[1] : undefined,
+    }
+    const data = await systemApi.getNotificationLogs(params)
+    logs.value = data.list || []
+    logTotal.value = data.total || 0
+  } catch {
+    logs.value = []
+  } finally {
+    logLoading.value = false
+  }
+}
+
+const onResend = async (row) => {
+  resendingId.value = row.id
+  try {
+    const data = await systemApi.resendNotification(row.id)
+    ElMessage.success(data.message || '已重发')
+    await loadLogs()
+  } catch {
+    // 拦截器已提示
+  } finally {
+    resendingId.value = null
+  }
+}
+
+const onTrigger = async () => {
+  triggering.value = true
+  try {
+    const data = await systemApi.triggerNotification()
+    ElMessage.success(data.message || '已触发扫描')
+    await loadLogs()
+  } catch {
+    // 拦截器已提示
+  } finally {
+    triggering.value = false
+  }
+}
+
 onMounted(() => {
   loadChannels()
   loadLibraryRules()
   loadLimits()
   loadPrompt()
+  loadRules()
+  loadMail()
 })
 </script>
 
@@ -1147,6 +1545,233 @@ onMounted(() => {
   font-size: var(--fs-caption);
   color: var(--color-text-tertiary);
   font-family: var(--font-mono);
+}
+
+/* ===== 催还通知 · 规则 ===== */
+.rule-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+}
+
+.rule-card {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4) var(--space-5);
+  transition: opacity var(--duration-fast) var(--ease-soft), border-color var(--duration-fast) var(--ease-soft);
+}
+
+.rule-card.is-off {
+  opacity: 0.62;
+}
+
+.rule-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.rule-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-family: var(--font-serif);
+  font-size: var(--fs-body);
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.rule-title .app-icon,
+.rule-title svg {
+  color: var(--color-primary);
+}
+
+.rule-head-right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.rule-toggle {
+  color: var(--color-text-tertiary);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--fs-small);
+}
+
+.rule-toggle:hover {
+  color: var(--color-primary);
+  background: var(--color-bg-subtle);
+}
+
+.rule-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-5);
+  margin-top: var(--space-4);
+}
+
+.rule-field {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.rule-field label {
+  font-size: var(--fs-small);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.rule-select {
+  width: 150px;
+}
+
+.rule-unit {
+  font-size: var(--fs-caption);
+  color: var(--color-text-tertiary);
+}
+
+.rule-tpl {
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px dashed var(--color-divider);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.tpl-field label {
+  display: block;
+  font-size: var(--fs-small);
+  color: var(--color-text-secondary);
+  margin-bottom: 6px;
+}
+
+.tpl-hint {
+  font-size: var(--fs-caption);
+  color: var(--color-text-tertiary);
+  line-height: 1.8;
+  margin: 0;
+}
+
+.tpl-hint code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  background: var(--color-bg-elevated);
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  color: var(--color-primary);
+}
+
+/* 邮件渠道配置 */
+.icon-mail {
+  background: var(--color-secondary-light);
+  color: var(--color-secondary);
+}
+
+.mail-form {
+  margin-top: var(--space-4);
+}
+
+.mail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--space-4);
+}
+
+.mail-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mail-field--wide {
+  grid-column: 1 / -1;
+}
+
+.mail-field label {
+  font-size: var(--fs-small);
+  color: var(--color-text-secondary);
+}
+
+.mail-switches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-6);
+  margin-top: var(--space-5);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-divider);
+}
+
+.mail-switch-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.switch-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.switch-label {
+  font-size: var(--fs-small);
+  color: var(--color-text);
+  font-weight: 500;
+}
+
+.switch-desc {
+  font-size: var(--fs-caption);
+  color: var(--color-text-tertiary);
+}
+
+/* 通知管理 */
+.log-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.log-filter {
+  width: 130px;
+}
+
+.log-date {
+  width: 240px;
+}
+
+.log-toolbar-right {
+  margin-left: auto;
+  display: flex;
+  gap: var(--space-2);
+}
+
+.log-table {
+  margin-top: var(--space-2);
+}
+
+.cell-event {
+  font-weight: 500;
+  color: var(--color-text);
+}
+
+.cell-email {
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption);
+  color: var(--color-text-secondary);
+}
+
+.log-pager {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: var(--space-4);
 }
 
 /* ===== 响应式 ===== */

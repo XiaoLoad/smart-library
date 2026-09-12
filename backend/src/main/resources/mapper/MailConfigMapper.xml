@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.library.mapper.MailConfigMapper">
+
+    <resultMap id="mailMap" type="com.library.entity.MailConfig">
+        <id property="id" column="id"/>
+        <result property="smtpHost" column="smtp_host"/>
+        <result property="smtpPort" column="smtp_port"/>
+        <result property="username" column="username"/>
+        <result property="password" column="password"/>
+        <result property="fromAddr" column="from_addr"/>
+        <result property="useTls" column="use_tls"/>
+        <result property="enabled" column="enabled"/>
+    </resultMap>
+
+    <select id="selectOne" resultMap="mailMap">
+        SELECT * FROM mail_config LIMIT 1
+    </select>
+
+    <update id="update">
+        UPDATE mail_config SET
+            smtp_host = #{smtpHost},
+            smtp_port = #{smtpPort},
+            username = #{username},
+            password = #{password},
+            from_addr = #{fromAddr},
+            use_tls = #{useTls},
+            enabled = #{enabled}
+        WHERE id = #{id}
+    </update>
+</mapper>

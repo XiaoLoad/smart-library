@@ -68,6 +68,9 @@ export const announcementApi = {
 // 通知
 export const notificationApi = {
   list: () => get('/notification/list'),
+  unreadCount: () => get('/notification/unread-count'),
+  read: (id) => post('/notification/read', { id }),
+  readAll: () => post('/notification/read-all'),
 }
 
 // Dashboard
@@ -104,4 +107,12 @@ export const systemApi = {
   // AI 人设（可调整 Prompt 段）
   getAiPrompt: () => get('/system/ai-prompt'),
   saveAiPrompt: (data) => service.put('/system/ai-prompt', data),
+  // 催还通知
+  getNotificationRules: () => get('/system/notification-rules'),
+  saveNotificationRules: (rules) => post('/system/notification-rules', rules),
+  getMailConfig: () => get('/system/mail-config'),
+  saveMailConfig: (data) => post('/system/mail-config', data),
+  getNotificationLogs: (params) => get('/system/notifications', params),
+  resendNotification: (id) => post('/system/notifications/resend', { id }),
+  triggerNotification: () => post('/system/notifications/trigger'),
 }
