@@ -1,15 +1,25 @@
 package com.library.controller;
 
+import com.github.pagehelper.PageHelper;
+import com.github.pagehelper.PageInfo;
 import com.library.common.Result;
 import com.library.common.exception.BusinessException;
 import com.library.dto.*;
 import com.library.entity.BorrowLimit;
+import com.library.entity.MailConfig;
+import com.library.entity.NotificationLog;
+import com.library.entity.NotificationRule;
 import com.library.entity.User;
 import com.library.mapper.BorrowLimitMapper;
+import com.library.mapper.MailConfigMapper;
+import com.library.mapper.NotificationLogMapper;
 import com.library.mapper.UserMapper;
 import com.library.security.CurrentUser;
 import com.library.service.AiService;
 import com.library.service.LibraryConfigService;
+import com.library.service.NotificationRuleService;
+import com.library.service.NotificationScheduler;
+import com.library.service.NotificationService;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -51,6 +61,21 @@ public class SystemSettingController {
 
     @Autowired
     private BorrowLimitMapper borrowLimitMapper;
+
+    @Autowired
+    private NotificationRuleService ruleService;
+
+    @Autowired
+    private MailConfigMapper mailConfigMapper;
+
+    @Autowired
+    private NotificationLogMapper logMapper;
+
+    @Autowired
+    private NotificationService notificationService;
+
+    @Autowired
+    private NotificationScheduler notificationScheduler;
 
     /** 仅管理员可访问的设置项校验 */
     private void requireAdmin() {
@@ -273,5 +298,105 @@ public class SystemSettingController {
         requireAdmin();
         configService.saveCustomizablePromptSegment(req.getContent());
         return Result.success("AI 人设已保存并即时生效", null);
+    }
+
+    // ==================== 催还通知 ====================
+
+    /**
+     * 通知规则列表（即将逾期与各类逾期事件，管理员可整表读写）。
+     */
+    @GetMapping("/notification-rules")
+    public Result<List<NotificationRule>> notificationRules() {
+        requireAdmin();
+        return Result.success(ruleService.listAll());
+    }
+
+    /**
+     * 保存通知规则（按 event_type upsert；前端整表编辑后一次性提交）。
+     */
+    @PostMapping("/notification-rules")
+    public Result<Void> saveNotificationRules(@RequestBody List<NotificationRule> rules) {
+        requireAdmin();
+        if (rules == null || rules.isEmpty()) {
+            throw new BusinessException(400, "规则不能为空");
+        }
+        for (NotificationRule r : rules) {
+            if (r.getEventType() == null || r.getEventType().isBlank()) {
+                throw new BusinessException(400, "存在缺少事件类型的规则");
+            }
+        }
+        ruleService.saveAll(rules);
+        return Result.success("通知规则已保存", null);
+    }
+
+    /**
+     * 邮件渠道配置（SMTP）。
+     */
+    @GetMapping("/mail-config")
+    public Result<MailConfig> mailConfig() {
+        requireAdmin();
+        return Result.success(mailConfigMapper.selectOne());
+    }
+
+    /**
+     * 保存邮件渠道配置。
+     */
+    @PostMapping("/mail-config")
+    public Result<Void> saveMailConfig(@RequestBody MailConfig cfg) {
+        requireAdmin();
+        cfg.setId(1L);
+        mailConfigMapper.update(cfg);
+        return Result.success("邮件配置已保存", null);
+    }
+
+    /**
+     * 通知发送日志（管理员分页查询，支持状态/渠道/事件/日期筛选）。
+     */
+    @GetMapping("/notifications")
+    public Result<Map<String, Object>> notificationLogs(
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String channel,
+            @RequestParam(required = false) String eventType,
+            @RequestParam(required = false) String startDate,
+            @RequestParam(required = false) String endDate,
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        requireAdmin();
+        PageHelper.startPage(page, size);
+        List<NotificationLog> list = logMapper.selectAdminPage(status, channel, eventType, startDate, endDate);
+        PageInfo<NotificationLog> info = new PageInfo<>(list);
+        Map<String, Object> data = new HashMap<>();
+        data.put("list", info.getList());
+        data.put("total", info.getTotal());
+        data.put("page", info.getPageNum());
+        data.put("size", info.getPageSize());
+        return Result.success(data);
+    }
+
+    /**
+     * 重发某条通知（邮件失败或站内未送达时人工补救）。
+     */
+    @PostMapping("/notifications/resend")
+    public Result<Map<String, Object>> resendNotification(@RequestBody IdRequest req) {
+        requireAdmin();
+        if (req.getId() == null) {
+            throw new BusinessException(400, "通知 ID 不能为空");
+        }
+        String msg = notificationService.resend(req.getId());
+        Map<String, Object> data = new HashMap<>();
+        data.put("message", msg);
+        return Result.success(msg, data);
+    }
+
+    /**
+     * 手动触发一次催还扫描（立即按当前规则对到期/逾期借阅发通知）。
+     */
+    @PostMapping("/notifications/trigger")
+    public Result<Map<String, Object>> triggerNotification() {
+        requireAdmin();
+        int n = notificationScheduler.manualTrigger();
+        Map<String, Object> data = new HashMap<>();
+        data.put("dispatched", n);
+        return Result.success("已触发扫描，本次分发 " + n + " 条通知", data);
     }
 }

@@ -74,5 +74,11 @@ const ICONS = {
   'arrow-down': '<path d="M12 5v14M6 13l6 6 6-6"/>',
   // 成功 · 对勾
   check: '<path d="M4.5 12.5 10 18 19.5 6.5"/>',
+  // 邮件 · 信封
+  mail: '<rect x="3.5" y="6" width="17" height="12" rx="2"/><path d="M4 7.8 12 13l8-5.2"/>',
+  // 刷新 · 环形箭头
+  refresh: '<path d="M20 11a8 8 0 0 0-13.5-4.5L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 13.5 4.5L20 16"/><path d="M20 20v-4h-4"/>',
+  // 收起 · 上箭头
+  'chevron-up': '<path d="M6.75 14.5 12 9.25l5.25 5.25"/>',
 }
 </script>

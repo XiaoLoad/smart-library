@@ -85,7 +85,7 @@
 
           <el-tooltip content="通知" placement="bottom">
             <el-badge :value="unreadCount" :hidden="unreadCount === 0" class="notify-badge">
-              <el-button text class="icon-btn">
+              <el-button text class="icon-btn" @click="openNotifyDrawer">
                 <AppIcon name="bell" :size="18" />
               </el-button>
             </el-badge>
@@ -123,6 +123,44 @@
           </transition>
         </router-view>
       </main>
+
+      <!-- 通知抽屉 -->
+      <el-drawer
+        v-model="notifyDrawerVisible"
+        title="通知"
+        direction="rtl"
+        size="380px"
+        :append-to-body="true"
+      >
+        <div class="notify-drawer">
+          <div class="notify-drawer-head">
+            <span class="notify-count">共 {{ notifyList.length }} 条</span>
+            <el-button text type="primary" :disabled="unreadCount === 0" @click="onNotifyReadAll">
+              全部已读
+            </el-button>
+          </div>
+          <div v-loading="notifyLoading" class="notify-list">
+            <div v-if="notifyList.length === 0 && !notifyLoading" class="notify-empty">
+              <AppIcon name="bell" :size="30" />
+              <p>暂无通知</p>
+            </div>
+            <div
+              v-for="n in notifyList"
+              :key="n.id"
+              class="notify-item"
+              :class="{ 'is-unread': !n.isRead }"
+              @click="onNotifyRead(n)"
+            >
+              <span v-if="!n.isRead" class="notify-dot"></span>
+              <div class="notify-body">
+                <div class="notify-title">{{ n.title }}</div>
+                <div class="notify-content">{{ n.content }}</div>
+                <div class="notify-time">{{ n.createTime }}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </el-drawer>
     </div>
   </div>
 </template>
@@ -130,6 +168,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import { useAppStore } from '@/stores/app'
 import { useUserStore } from '@/stores/user'
 import { notificationApi } from '@/api'
@@ -193,9 +232,53 @@ const unreadCount = ref(0)
 
 const loadNotifications = async () => {
   try {
-    const data = await notificationApi.list()
-    unreadCount.value = data.list.filter((n) => !n.isRead).length
+    const data = await notificationApi.unreadCount()
+    unreadCount.value = data.count || 0
   } catch (e) {}
+}
+
+/* ===== 通知抽屉 ===== */
+const notifyDrawerVisible = ref(false)
+const notifyList = ref([])
+const notifyLoading = ref(false)
+
+const loadNotifyList = async () => {
+  notifyLoading.value = true
+  try {
+    const data = await notificationApi.list()
+    notifyList.value = data.list || []
+  } catch (e) {
+    notifyList.value = []
+  } finally {
+    notifyLoading.value = false
+  }
+}
+
+const openNotifyDrawer = async () => {
+  notifyDrawerVisible.value = true
+  await loadNotifyList()
+}
+
+const onNotifyRead = async (n) => {
+  if (n.isRead) return
+  try {
+    await notificationApi.read(n.id)
+    n.isRead = 1
+    unreadCount.value = Math.max(0, unreadCount.value - 1)
+  } catch (e) {
+    // 拦截器已提示
+  }
+}
+
+const onNotifyReadAll = async () => {
+  try {
+    await notificationApi.readAll()
+    notifyList.value.forEach((n) => (n.isRead = 1))
+    unreadCount.value = 0
+    ElMessage.success('已全部标记为已读')
+  } catch (e) {
+    // 拦截器已提示
+  }
 }
 
 const handleUserCommand = (command) => {
@@ -546,6 +629,98 @@ onMounted(() => {
 .app-content {
   flex: 1;
   overflow-x: hidden;
+}
+
+/* 通知抽屉 */
+.notify-drawer {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.notify-drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: var(--space-3);
+  margin-bottom: var(--space-3);
+  border-bottom: 1px solid var(--color-divider);
+}
+
+.notify-count {
+  font-size: var(--fs-small);
+  color: var(--color-text-tertiary);
+}
+
+.notify-list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0 calc(var(--space-4) * -1);
+  padding: 0 var(--space-4);
+}
+
+.notify-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 36px 0;
+  color: var(--color-text-tertiary);
+  text-align: center;
+}
+
+.notify-item {
+  display: flex;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-soft);
+}
+
+.notify-item:hover {
+  background: var(--color-bg-subtle);
+}
+
+.notify-item.is-unread {
+  background: var(--color-primary-light);
+}
+
+.notify-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  flex-shrink: 0;
+  margin-top: 6px;
+}
+
+.notify-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.notify-title {
+  font-size: var(--fs-body);
+  font-weight: 600;
+  color: var(--color-text);
+  margin-bottom: 4px;
+}
+
+.notify-content {
+  font-size: var(--fs-small);
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+}
+
+.notify-time {
+  font-size: var(--fs-caption);
+  color: var(--color-text-tertiary);
+  font-family: var(--font-mono);
+  margin-top: 6px;
 }
 
 /* 过渡动画 */

@@ -9,6 +9,8 @@
         <result property="title" column="title"/>
         <result property="content" column="content"/>
         <result property="isRead" column="is_read"/>
+        <result property="eventType" column="event_type"/>
+        <result property="refBorrowNo" column="ref_borrow_no"/>
         <result property="createTime" column="create_time"/>
     </resultMap>
 
@@ -16,6 +18,33 @@
         SELECT * FROM notifications
         WHERE user_id = #{userId}
         ORDER BY create_time DESC
+    </select>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO notifications (user_id, type, title, content, is_read, event_type, ref_borrow_no)
+        VALUES (#{userId}, #{type}, #{title}, #{content}, COALESCE(#{isRead}, 0), COALESCE(#{eventType}, 0), COALESCE(#{refBorrowNo}, ''))
+    </insert>
+
+    <select id="countUnread" resultType="int">
+        SELECT COUNT(*) FROM notifications
+        WHERE user_id = #{userId} AND is_read = 0
+    </select>
+
+    <update id="markRead">
+        UPDATE notifications SET is_read = 1
+        WHERE id = #{id} AND user_id = #{userId}
+    </update>
+
+    <update id="markAllRead">
+        UPDATE notifications SET is_read = 1
+        WHERE user_id = #{userId}
+    </update>
+
+    <select id="selectByRef" resultMap="notifyMap">
+        SELECT * FROM notifications
+        WHERE ref_borrow_no = #{refBorrowNo} AND event_type = #{eventType}
+        ORDER BY create_time DESC
+        LIMIT 1
     </select>
 
 </mapper>

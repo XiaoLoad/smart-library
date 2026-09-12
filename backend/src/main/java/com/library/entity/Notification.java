@@ -11,5 +11,7 @@ public class Notification {
     private String title;
     private String content;
     private Integer isRead;
+    private Integer eventType;
+    private String refBorrowNo;
     private LocalDateTime createTime;
 }

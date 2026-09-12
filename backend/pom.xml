@@ -95,6 +95,12 @@
       <artifactId>spring-boot-starter-cache</artifactId>
     </dependency>
 
+    <!-- 邮件发送：催还通知的邮件渠道 -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-mail</artifactId>
+    </dependency>
+
     <!-- Flyway 数据库迁移：直接引 flyway-core，版本由 Spring Boot BOM 管理（flyway.version=10.10.0）；
          Spring Boot 自动配置会在启动时按 classpath:db/migration 执行迁移，无需额外 starter。 -->
     <dependency>
