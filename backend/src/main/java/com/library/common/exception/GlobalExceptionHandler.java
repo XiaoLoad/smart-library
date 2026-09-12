@@ -30,7 +30,8 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public Result<Void> handleOther(Exception e) {
+        // 异常原文（含 SQL、mapper 路径、栈信息）一律不回传前端，避免信息泄露
         log.error("系统异常", e);
-        return Result.error(500, "系统异常: " + e.getMessage());
+        return Result.error(500, "系统异常，请联系管理员");
     }
 }
