@@ -16,6 +16,12 @@ public interface BookMapper {
 
     Book selectByIsbn(@Param("isbn") String isbn);
 
+    /**
+     * 按书名模糊匹配在架图书（仅 status=1）。
+     * 用于 AI 借阅按书名定位书目：命中多本时由调用方返回候选让用户消歧，不自行选取。
+     */
+    List<Book> selectByTitleLike(@Param("title") String title);
+
     void insert(Book book);
 
     void update(Book book);
