@@ -24,6 +24,13 @@
           <el-button v-if="userStore.isAdmin" :icon="Tickets" @click="onProcessByCode">扫码办理</el-button>
           <el-button
             v-if="userStore.isAdmin"
+            type="warning"
+            :icon="Bell"
+            :disabled="selectedOverdue.length === 0"
+            @click="onBatchUrge"
+          >批量催还({{ selectedOverdue.length }})</el-button>
+          <el-button
+            v-if="userStore.isAdmin"
             type="primary"
             :icon="Checked"
             :disabled="selectedRows.length === 0"
@@ -80,6 +87,7 @@
             <el-button text type="primary" size="small" v-if="row.status === 0" @click="openCode(row)">借阅码</el-button>
             <el-button text type="primary" size="small" v-if="row.status === 0 && userStore.isAdmin" @click="onPickup(row)">取书确认</el-button>
             <el-button text type="primary" size="small" :disabled="row.status !== 1" @click="onRenew(row)">续借</el-button>
+            <el-button text type="warning" size="small" v-if="row.status === 3 && userStore.isAdmin" @click="onUrge(row)">催还</el-button>
             <template v-if="row.status === 5 && userStore.isAdmin">
               <el-button text type="success" size="small" @click="onConfirmReturn(row)">归还确认</el-button>
               <el-button text type="danger" size="small" @click="onRejectReturn(row)">驳回</el-button>
@@ -128,8 +136,8 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
-import { Search, Tickets, Checked } from '@element-plus/icons-vue'
+import { ref, onMounted, computed } from 'vue'
+import { Search, Tickets, Checked, Bell } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { borrowApi } from '@/api'
 import { useUserStore } from '@/stores/user'
@@ -156,6 +164,7 @@ const statusFilter = ref('')
 const codeVisible = ref(false)
 const codeData = ref({ borrowNo: '', pickupDeadline: '', bookTitle: '', qrPayload: '', status: null })
 const selectedRows = ref([])
+const selectedOverdue = computed(() => selectedRows.value.filter((r) => r.status === 3))
 const pickupLoading = ref(false)
 const processVisible = ref(false)
 
@@ -339,6 +348,46 @@ const onRenew = async (row) => {
     load()
   } catch {
     // 错误已由拦截器提示
+  }
+}
+
+// 单条催还：向逾期读者下发站内信 + 邮件催还通知
+const onUrge = async (row) => {
+  try {
+    await ElMessageBox.confirm(
+      `确认向「${row.userName}」下发《${row.bookTitle}》的催还通知（站内信 + 邮件）？`,
+      '催还通知',
+      { type: 'warning', confirmButtonText: '下发催还', cancelButtonText: '取消' }
+    )
+    const res = await borrowApi.urge({ borrowNos: [row.borrowNo] })
+    ElMessage.success(`催还完成：成功 ${res.success} 条，跳过 ${res.skipped} 条`)
+  } catch (e) {
+    if (e !== 'cancel') {
+      // 错误已由拦截器提示
+    }
+  }
+}
+
+// 批量催还：对勾选中的逾期记录统一下发催还通知
+const onBatchUrge = async () => {
+  const overdue = selectedOverdue.value
+  if (!overdue.length) {
+    ElMessage.warning('请先勾选逾期的借阅记录')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      `确认向选中的 ${overdue.length} 条逾期记录下发催还通知？`,
+      '批量催还',
+      { type: 'warning', confirmButtonText: '批量催还', cancelButtonText: '取消' }
+    )
+    const res = await borrowApi.urge({ borrowNos: overdue.map((r) => r.borrowNo) })
+    ElMessage.success(`催还完成：成功 ${res.success} 条，跳过 ${res.skipped} 条`)
+    load()
+  } catch (e) {
+    if (e !== 'cancel') {
+      // 错误已由拦截器提示
+    }
   }
 }
 

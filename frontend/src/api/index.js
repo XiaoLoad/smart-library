@@ -51,6 +51,7 @@ export const borrowApi = {
   confirmReturn: (data) => post('/borrow/return/confirm', data),
   rejectReturn: (data) => post('/borrow/return/reject', data),
   batchProcess: (data) => post('/borrow/batch-process', data),
+  urge: (data) => post('/borrow/urge', data),
   renew: (data) => post('/borrow/renew', data),
   quota: () => get('/borrow/quota'),
   payFine: (data) => post('/fine/pay', data),

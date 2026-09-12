@@ -407,6 +407,7 @@
             </div>
 
             <div class="log-toolbar">
+              <div class="log-filters">
               <el-select v-model="logFilters.status" placeholder="状态" clearable size="small" class="log-filter">
                 <el-option label="全部状态" value="" />
                 <el-option label="待发送" value="PENDING" />
@@ -436,6 +437,7 @@
                 value-format="YYYY-MM-DD"
                 class="log-date"
               />
+              </div>
               <div class="log-toolbar-right">
                 <el-button :loading="logLoading" @click="loadLogs">
                   <AppIcon name="refresh" :size="14" />刷新
@@ -943,7 +945,7 @@ onMounted(() => {
 /* ===== 布局：左侧目次 + 右侧面板 ===== */
 .settings-layout {
   display: grid;
-  grid-template-columns: 188px minmax(0, 1fr);
+  grid-template-columns: 232px minmax(0, 1fr);
   gap: var(--space-5);
   align-items: start;
 }
@@ -1020,6 +1022,9 @@ onMounted(() => {
 
 .nav-label {
   flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .nav-en {
@@ -1734,23 +1739,32 @@ onMounted(() => {
 .log-toolbar {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   flex-wrap: wrap;
   gap: var(--space-3);
   margin-bottom: var(--space-4);
 }
 
+.log-filters {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
 .log-filter {
-  width: 130px;
+  width: 120px;
 }
 
 .log-date {
-  width: 240px;
+  width: 210px;
 }
 
 .log-toolbar-right {
-  margin-left: auto;
   display: flex;
   gap: var(--space-2);
+  flex-shrink: 0;
 }
 
 .log-table {

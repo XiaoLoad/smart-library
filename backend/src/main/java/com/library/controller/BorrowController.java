@@ -5,6 +5,7 @@ import com.library.common.Result;
 import com.library.dto.*;
 import com.library.entity.Borrow;
 import com.library.service.BorrowService;
+import com.library.service.NotificationService;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
@@ -21,6 +22,9 @@ public class BorrowController {
 
     @Autowired
     private BorrowService borrowService;
+
+    @Autowired
+    private NotificationService notificationService;
 
     @GetMapping("/list")
     public Result<PageResult<Borrow>> list(
@@ -73,6 +77,11 @@ public class BorrowController {
     @PostMapping("/batch-process")
     public Result<PickupResultVo> batchProcess(@Valid @RequestBody BatchProcessRequest req) {
         return Result.success("办理完成", borrowService.batchProcess(req.getIds(), req.getBorrowNos()));
+    }
+
+    @PostMapping("/urge")
+    public Result<UrgeResultVo> urge(@Valid @RequestBody BorrowUrgeRequest req) {
+        return Result.success("催还通知已下发", notificationService.urgeReturn(req.getBorrowNos()));
     }
 
     @PostMapping("/renew")

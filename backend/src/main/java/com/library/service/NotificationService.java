@@ -5,18 +5,24 @@ import com.library.entity.Borrow;
 import com.library.entity.Notification;
 import com.library.entity.NotificationLog;
 import com.library.entity.NotificationRule;
+import com.library.dto.UrgeResultVo;
 import com.library.entity.User;
 import com.library.mapper.BorrowMapper;
 import com.library.mapper.NotificationLogMapper;
 import com.library.mapper.NotificationMapper;
 import com.library.mapper.UserMapper;
+import com.library.security.CurrentUser;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 催还通知编排：扫描在借记录 → 按规则触发事件 → 去重 → 分发站内信与邮件 → 回写发送日志。
@@ -165,6 +171,121 @@ public class NotificationService {
         }
         logMapper.updateStatus(logId, "FAILED", err, null);
         return "重发失败：" + err;
+    }
+
+    /**
+     * 手动催还（管理员入口）：对逾期记录下发催还通知。
+     * 复用站内信 + 邮件分发与写日志能力，但事件类型用独立的 URGE_RETURN，
+     * 不与自动逾期通知（OVERDUE_D*）去重，支持管理员重复催还。
+     */
+    public UrgeResultVo urgeReturn(List<String> borrowNos) {
+        CurrentUser cu = CurrentUser.get();
+        if (cu.getUserType() != 3) {
+            throw new BusinessException(403, "仅管理员可催还");
+        }
+        return urgeReturn(borrowNos, cu.getUserId());
+    }
+
+    /**
+     * 手动催还（显式管理员 ID，供 AI 工具在无 ThreadLocal 的异步线程中调用）。
+     * 调用方需自行保证操作者为管理员。
+     */
+    @Transactional
+    public UrgeResultVo urgeReturn(List<String> borrowNos, Long adminId) {
+        List<String> nos = borrowNos == null ? Collections.emptyList() : borrowNos;
+        List<Map<String, Object>> results = new ArrayList<>(nos.size());
+        int success = 0;
+        int skipped = 0;
+        LocalDate today = LocalDate.now();
+        // 催还文案：清晰告知已逾期、请尽快归还（后续可改为读取管理员配置的 OVERDUE_D3 模板）
+        String subjectTpl = "借阅催还提醒";
+        String bodyTpl = "亲爱的{readerName}：您借阅的《{bookTitle}》（借阅号 {borrowNo}）已逾期 {daysOverdue} 天，"
+                + "请尽快到馆归还，逾期将产生滞纳金并影响后续借阅权限。";
+        for (String no : nos) {
+            Map<String, Object> r = new HashMap<>();
+            r.put("borrowNo", no);
+            try {
+                Borrow b = borrowMapper.selectByBorrowNo(no);
+                if (b == null) {
+                    throw new BusinessException("借阅记录不存在");
+                }
+                if (b.getStatus() != 3) {
+                    r.put("success", false);
+                    r.put("message", "仅逾期记录可催还");
+                    skipped++;
+                    results.add(r);
+                    continue;
+                }
+                int daysOverdue = b.getDueTime() == null ? 0
+                        : (int) ChronoUnit.DAYS.between(b.getDueTime().toLocalDate(), today);
+                String readerName = b.getUserName();
+                String bookTitle = b.getBookTitle();
+                String dueDate = b.getDueTime() == null ? "" : b.getDueTime().toLocalDate().toString();
+                String subject = render(subjectTpl, readerName, bookTitle, dueDate, b.getBorrowNo(), daysOverdue);
+                String body = render(bodyTpl, readerName, bookTitle, dueDate, b.getBorrowNo(), daysOverdue);
+                for (String channel : parseChannels("BOTH")) {
+                    sendUrge(b, "URGE_RETURN", channel, subject, body);
+                }
+                r.put("success", true);
+                r.put("bookTitle", bookTitle);
+                r.put("userName", readerName);
+                success++;
+            } catch (BusinessException e) {
+                r.put("success", false);
+                r.put("message", e.getMessage());
+                skipped++;
+            }
+            results.add(r);
+        }
+        return new UrgeResultVo(results, success, skipped);
+    }
+
+    /**
+     * 下发单条催还通知（站内信 + 邮件），按 URGE_RETURN 事件独立记录。
+     * 复用 dispatch 的去重思路：notification_log 有唯一键 (borrow_no, event_type, channel)，
+     * 故重催时更新原日志而非重复插入，避免唯一键冲突；站内信每次新插入一条（无唯一约束）。
+     */
+    private void sendUrge(Borrow b, String eventType, String channel, String subject, String body) {
+        NotificationLog existing = logMapper.selectByDedup(b.getBorrowNo(), eventType, channel);
+        NotificationLog log = new NotificationLog();
+        log.setBorrowNo(b.getBorrowNo());
+        log.setUserId(b.getUserId());
+        log.setEventType(eventType);
+        log.setChannel(channel);
+        log.setSubject(subject);
+        log.setContent(body);
+        log.setStatus("SENT");
+        log.setSentAt(LocalDateTime.now());
+        if ("INAPP".equals(channel)) {
+            Notification n = new Notification();
+            n.setUserId(b.getUserId());
+            n.setType(2);
+            n.setTitle(subject);
+            n.setContent(body);
+            n.setIsRead(0);
+            n.setEventType(2);
+            n.setRefBorrowNo(b.getBorrowNo());
+            notificationMapper.insert(n);
+        } else {
+            User u = userMapper.selectById(b.getUserId());
+            String email = u == null ? null : u.getEmail();
+            if (email == null || email.isBlank()) {
+                log.setStatus("SKIPPED");
+                log.setErrorMsg("读者邮箱为空");
+            } else {
+                log.setToEmail(email);
+                String err = mailService.send(email, subject, body);
+                if (err != null) {
+                    log.setStatus("FAILED");
+                    log.setErrorMsg(err);
+                }
+            }
+        }
+        if (existing == null) {
+            logMapper.insert(log);
+        } else {
+            logMapper.updateStatus(existing.getId(), log.getStatus(), log.getErrorMsg(), log.getSentAt());
+        }
     }
 
     private List<String> parseChannels(String channel) {
