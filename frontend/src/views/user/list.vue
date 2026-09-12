@@ -104,11 +104,11 @@
             <el-option label="管理员" :value="3" />
           </el-select>
         </el-form-item>
-        <el-form-item label="邮箱">
-          <el-input v-model="userForm.email" placeholder="邮箱" />
+        <el-form-item label="邮箱" prop="email">
+          <el-input v-model="userForm.email" placeholder="邮箱" clearable />
         </el-form-item>
-        <el-form-item label="电话">
-          <el-input v-model="userForm.phone" placeholder="手机号" />
+        <el-form-item label="电话" prop="phone">
+          <el-input v-model="userForm.phone" placeholder="11 位手机号" clearable />
         </el-form-item>
         <el-form-item v-if="userForm.userType === 1" label="工号">
           <el-input v-model="userForm.teacherNo" placeholder="教师工号" />
@@ -235,6 +235,14 @@ const userRules = {
   password: [{ required: true, message: '请输入密码', trigger: 'blur' }],
   realName: [{ required: true, message: '请输入姓名', trigger: 'blur' }],
   userType: [{ required: true, message: '请选择类型', trigger: 'change' }],
+  email: [
+    { required: true, message: '请输入邮箱', trigger: 'blur' },
+    { type: 'email', message: '邮箱格式不正确', trigger: 'blur' },
+  ],
+  phone: [
+    { required: true, message: '请输入手机号', trigger: 'blur' },
+    { pattern: /^1[3-9]\d{9}$/, message: '手机号须为 11 位手机号', trigger: 'blur' },
+  ],
 }
 const userDialogTitle = computed(() => userForm.mode === 'edit' ? '编辑读者' : '新增读者')
 

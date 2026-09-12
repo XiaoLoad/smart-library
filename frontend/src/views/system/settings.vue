@@ -10,18 +10,24 @@
       <!-- 左侧 · 设置目次 -->
       <aside class="settings-nav">
         <div class="nav-toc">设置目次</div>
-        <button
-          v-for="s in sections"
-          :key="s.key"
-          type="button"
-          class="nav-item"
-          :class="{ active: active === s.key }"
-          @click="onNav(s.key)"
-        >
-          <AppIcon :name="s.icon" :size="16" />
-          <span class="nav-label">{{ s.label }}</span>
-          <span class="nav-en">{{ s.en }}</span>
-        </button>
+        <template v-for="g in navGroups" :key="g.title">
+          <div class="nav-group-title">
+            <span>{{ g.title }}</span>
+            <span class="en">{{ g.en }}</span>
+          </div>
+          <button
+            v-for="s in g.items"
+            :key="s.key"
+            type="button"
+            class="nav-item"
+            :class="{ active: active === s.key }"
+            @click="onNav(s.key)"
+          >
+            <AppIcon :name="s.icon" :size="16" />
+            <span class="nav-label">{{ s.label }}</span>
+            <span class="nav-en">{{ s.en }}</span>
+          </button>
+        </template>
       </aside>
 
       <!-- 右侧 · 设置面板 -->
@@ -279,11 +285,30 @@ import ChangePasswordForm from '@/components/ChangePasswordForm.vue'
 import { systemApi } from '@/api'
 
 /* ===== 目次导航 ===== */
-const sections = [
-  { key: 'account', label: '账户安全', en: 'ACCOUNT', icon: 'lock' },
-  { key: 'ai', label: 'AI 渠道', en: 'CHANNELS', icon: 'cpu' },
-  { key: 'rules', label: '借阅规则', en: 'RULES', icon: 'ruler' },
-  { key: 'prompt', label: 'AI 人设', en: 'PERSONA', icon: 'sparkles' },
+// 按业务域分组：AI 渠道与 AI 人设归到「AI 配置」组，不再被借阅规则隔断
+const navGroups = [
+  {
+    title: '基础设置',
+    en: 'GENERAL',
+    items: [
+      { key: 'account', label: '账户安全', en: 'ACCOUNT', icon: 'lock' },
+    ],
+  },
+  {
+    title: 'AI 配置',
+    en: 'AI',
+    items: [
+      { key: 'ai', label: 'AI 渠道', en: 'CHANNELS', icon: 'cpu' },
+      { key: 'prompt', label: 'AI 人设', en: 'PERSONA', icon: 'sparkles' },
+    ],
+  },
+  {
+    title: '借阅管理',
+    en: 'RULES',
+    items: [
+      { key: 'rules', label: '借阅规则', en: 'RULES', icon: 'ruler' },
+    ],
+  },
 ]
 const active = ref('account')
 
@@ -539,6 +564,32 @@ onMounted(() => {
   letter-spacing: var(--ls-wide);
   color: var(--color-text-tertiary);
   padding: var(--space-1) var(--space-2) var(--space-2);
+}
+
+/* 分组标题：聚合同类目次项（如 AI 渠道 / AI 人设归到「AI 配置」组） */
+.nav-group-title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-size: var(--fs-caption);
+  letter-spacing: var(--ls-wide);
+  color: var(--color-text-tertiary);
+  margin-top: var(--space-3);
+  padding: var(--space-3) var(--space-2) var(--space-1);
+  border-top: 1px solid var(--color-divider);
+}
+
+/* 紧接总标题「设置目次」的第一个分组不画分隔线 */
+.nav-toc + .nav-group-title {
+  margin-top: 0;
+  border-top: none;
+}
+
+.nav-group-title .en {
+  font-size: 9px;
+  font-family: var(--font-mono);
+  letter-spacing: 0.06em;
+  opacity: 0.7;
 }
 
 .nav-item {
@@ -1119,6 +1170,10 @@ onMounted(() => {
   }
 
   .nav-toc {
+    display: none;
+  }
+
+  .nav-group-title {
     display: none;
   }
 
