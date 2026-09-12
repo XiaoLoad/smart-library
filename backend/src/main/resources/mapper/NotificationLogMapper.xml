@@ -35,6 +35,16 @@
         SELECT <include refid="logColumns"/> FROM notification_log WHERE id = #{id}
     </select>
 
+    <select id="selectStuckPendingEmails" resultMap="logMap">
+        SELECT <include refid="logColumns"/> FROM notification_log
+        WHERE status = 'PENDING' AND channel = 'EMAIL' AND created_at &lt; #{before}
+        ORDER BY id ASC
+    </select>
+
+    <update id="claimPending">
+        UPDATE notification_log SET status = 'SENDING' WHERE id = #{id} AND status = 'PENDING'
+    </update>
+
     <select id="selectAdminPage" resultMap="logMap">
         SELECT <include refid="logColumns"/> FROM notification_log
         <where>

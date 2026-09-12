@@ -12,8 +12,11 @@ import com.library.mapper.NotificationLogMapper;
 import com.library.mapper.NotificationMapper;
 import com.library.mapper.UserMapper;
 import com.library.security.CurrentUser;
+import com.library.service.AsyncMailDispatcher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -26,6 +29,8 @@ import java.util.Map;
 
 /**
  * 催还通知编排：扫描在借记录 → 按规则触发事件 → 去重 → 分发站内信与邮件 → 回写发送日志。
+ * 邮件发送已异步化：HTTP 请求线程只负责落库（站内信即时、邮件置为待发送），
+ * 真正的 SMTP 投递在事务提交后由 EmailDispatchListener 在独立线程完成，前端不再被 SMTP 阻塞。
  */
 @Service
 public class NotificationService {
@@ -36,16 +41,19 @@ public class NotificationService {
     private final NotificationMapper notificationMapper;
     private final UserMapper userMapper;
     private final MailService mailService;
+    private final AsyncMailDispatcher asyncMailDispatcher;
 
     public NotificationService(NotificationRuleService ruleService, BorrowMapper borrowMapper,
                               NotificationLogMapper logMapper, NotificationMapper notificationMapper,
-                              UserMapper userMapper, MailService mailService) {
+                              UserMapper userMapper, MailService mailService,
+                              AsyncMailDispatcher asyncMailDispatcher) {
         this.ruleService = ruleService;
         this.borrowMapper = borrowMapper;
         this.logMapper = logMapper;
         this.notificationMapper = notificationMapper;
         this.userMapper = userMapper;
         this.mailService = mailService;
+        this.asyncMailDispatcher = asyncMailDispatcher;
     }
 
     @Transactional
@@ -54,20 +62,22 @@ public class NotificationService {
         if (rules.isEmpty()) return 0;
         LocalDate today = LocalDate.now();
         int dispatched = 0;
+        List<EmailTask> emailTasks = new ArrayList<>();
         for (NotificationRule rule : rules) {
             int offset = rule.getOffsetDays() == null ? 0 : rule.getOffsetDays();
             LocalDate target = today.plusDays(offset);
             List<Borrow> borrows = borrowMapper.selectDueOn(1, target.atStartOfDay(), target.atTime(23, 59, 59));
             for (Borrow b : borrows) {
                 for (String channel : parseChannels(rule.getChannel())) {
-                    dispatched += dispatch(b, rule, channel);
+                    dispatched += dispatch(b, rule, channel, emailTasks);
                 }
             }
         }
+        dispatchAfterCommit(emailTasks);
         return dispatched;
     }
 
-    private int dispatch(Borrow b, NotificationRule rule, String channel) {
+    private int dispatch(Borrow b, NotificationRule rule, String channel, List<EmailTask> emailTasks) {
         NotificationLog existing = logMapper.selectByDedup(b.getBorrowNo(), rule.getEventType(), channel);
         if (existing != null && "SENT".equals(existing.getStatus())) {
             return 0;
@@ -75,7 +85,9 @@ public class NotificationService {
         String readerName = b.getUserName();
         String bookTitle = b.getBookTitle();
         String dueDate = b.getDueTime() == null ? "" : b.getDueTime().toLocalDate().toString();
-        int daysOverdue = rule.getOffsetDays() == null ? 0 : Math.max(rule.getOffsetDays(), 0);
+        // DUE_SOON 用绝对值表示"距到期天数"，避免模板里出现负数；逾期场景本就为正数
+        int rawOffset = rule.getOffsetDays() == null ? 0 : rule.getOffsetDays();
+        int daysOverdue = "DUE_SOON".equals(rule.getEventType()) ? Math.abs(rawOffset) : Math.max(rawOffset, 0);
         String subject = render(rule.getSubjectTpl(), readerName, bookTitle, dueDate, b.getBorrowNo(), daysOverdue);
         String body = render(rule.getBodyTpl(), readerName, bookTitle, dueDate, b.getBorrowNo(), daysOverdue);
 
@@ -101,28 +113,35 @@ public class NotificationService {
             notificationMapper.insert(n);
             log.setStatus("SENT");
             log.setSentAt(LocalDateTime.now());
+            if (existing == null) {
+                logMapper.insert(log);
+            } else {
+                logMapper.updateStatus(existing.getId(), "SENT", null, log.getSentAt());
+            }
         } else {
             User u = userMapper.selectById(b.getUserId());
             String email = u == null ? null : u.getEmail();
             if (email == null || email.isBlank()) {
                 log.setStatus("SKIPPED");
                 log.setErrorMsg("读者邮箱为空");
+                if (existing == null) {
+                    logMapper.insert(log);
+                } else {
+                    logMapper.updateStatus(existing.getId(), "SKIPPED", "读者邮箱为空", existing.getSentAt());
+                }
             } else {
                 log.setToEmail(email);
-                String err = mailService.send(email, subject, body);
-                if (err == null) {
-                    log.setStatus("SENT");
-                    log.setSentAt(LocalDateTime.now());
+                Long logId;
+                if (existing == null) {
+                    logMapper.insert(log);
+                    logId = log.getId();
                 } else {
-                    log.setStatus("FAILED");
-                    log.setErrorMsg(err);
+                    logId = existing.getId();
+                    // 重投：先回置为待发送，由后台异步投递后回写最终结果
+                    logMapper.updateStatus(logId, "PENDING", null, null);
                 }
+                emailTasks.add(new EmailTask(logId, email, subject, body));
             }
-        }
-        if (existing == null) {
-            logMapper.insert(log);
-        } else {
-            logMapper.updateStatus(existing.getId(), log.getStatus(), log.getErrorMsg(), log.getSentAt());
         }
         return 1;
     }
@@ -130,7 +149,7 @@ public class NotificationService {
     /**
      * 重发单条通知（邮件发送失败或站内未送达时人工补救）。
      * 站内信：若对应通知已存在则视为已送达，否则补建一条未读通知。
-     * 邮件：用日志中保存的主题/正文重投，收件人缺失时回查读者邮箱。
+     * 邮件：将日志置为待发送并交后台异步重投，调用方立即得到"正在重发"反馈。
      */
     @Transactional
     public String resend(Long logId) {
@@ -164,13 +183,11 @@ public class NotificationService {
             }
             email = u.getEmail();
         }
-        String err = mailService.send(email, log.getSubject(), log.getContent());
-        if (err == null) {
-            logMapper.updateStatus(logId, "SENT", null, LocalDateTime.now());
-            return "邮件已重新发送";
-        }
-        logMapper.updateStatus(logId, "FAILED", err, null);
-        return "重发失败：" + err;
+        // 异步重投：先置为待发送，后台投递完成后回写 SENT / FAILED
+        logMapper.updateStatus(logId, "PENDING", null, null);
+        dispatchAfterCommit(Collections.singletonList(
+                new EmailTask(logId, email, log.getSubject(), log.getContent())));
+        return "邮件正在重新发送，请稍后刷新查看结果";
     }
 
     /**
@@ -197,10 +214,13 @@ public class NotificationService {
         int success = 0;
         int skipped = 0;
         LocalDate today = LocalDate.now();
-        // 催还文案：清晰告知已逾期、请尽快归还（后续可改为读取管理员配置的 OVERDUE_D3 模板）
-        String subjectTpl = "借阅催还提醒";
-        String bodyTpl = "亲爱的{readerName}：您借阅的《{bookTitle}》（借阅号 {borrowNo}）已逾期 {daysOverdue} 天，"
-                + "请尽快到馆归还，逾期将产生滞纳金并影响后续借阅权限。";
+        // 催还文案：正式、规范的公文式措辞，含称呼、书名号、借阅号、逾期天数、归还指引与落款
+        String subjectTpl = "【图书催还通知】请尽快归还逾期图书";
+        String bodyTpl = "尊敬的{readerName}读者：\n"
+                + "　　您借阅的《{bookTitle}》（借阅号：{borrowNo}）已于 {dueDate} 到期，截至今日已逾期 {daysOverdue} 天，至今尚未归还。\n"
+                + "　　管理员已就此发起催还，请尽快携带图书至图书馆服务台办理归还手续。逾期归还将按馆内规定计收滞纳金；长期逾期将影响您的后续借阅权限。\n"
+                + "　　如有疑问，请联系图书馆服务台。感谢您的配合。";
+        List<EmailTask> emailTasks = new ArrayList<>();
         for (String no : nos) {
             Map<String, Object> r = new HashMap<>();
             r.put("borrowNo", no);
@@ -224,7 +244,7 @@ public class NotificationService {
                 String subject = render(subjectTpl, readerName, bookTitle, dueDate, b.getBorrowNo(), daysOverdue);
                 String body = render(bodyTpl, readerName, bookTitle, dueDate, b.getBorrowNo(), daysOverdue);
                 for (String channel : parseChannels("BOTH")) {
-                    sendUrge(b, "URGE_RETURN", channel, subject, body);
+                    sendUrge(b, "URGE_RETURN", channel, subject, body, emailTasks);
                 }
                 r.put("success", true);
                 r.put("bookTitle", bookTitle);
@@ -237,6 +257,7 @@ public class NotificationService {
             }
             results.add(r);
         }
+        dispatchAfterCommit(emailTasks);
         return new UrgeResultVo(results, success, skipped);
     }
 
@@ -244,8 +265,10 @@ public class NotificationService {
      * 下发单条催还通知（站内信 + 邮件），按 URGE_RETURN 事件独立记录。
      * 复用 dispatch 的去重思路：notification_log 有唯一键 (borrow_no, event_type, channel)，
      * 故重催时更新原日志而非重复插入，避免唯一键冲突；站内信每次新插入一条（无唯一约束）。
+     * 邮件统一置为待发送并交后台异步投递，HTTP 线程无需等待 SMTP。
      */
-    private void sendUrge(Borrow b, String eventType, String channel, String subject, String body) {
+    private void sendUrge(Borrow b, String eventType, String channel, String subject, String body,
+                          List<EmailTask> emailTasks) {
         NotificationLog existing = logMapper.selectByDedup(b.getBorrowNo(), eventType, channel);
         NotificationLog log = new NotificationLog();
         log.setBorrowNo(b.getBorrowNo());
@@ -266,25 +289,63 @@ public class NotificationService {
             n.setEventType(2);
             n.setRefBorrowNo(b.getBorrowNo());
             notificationMapper.insert(n);
+            if (existing == null) {
+                logMapper.insert(log);
+            } else {
+                logMapper.updateStatus(existing.getId(), "SENT", null, log.getSentAt());
+            }
         } else {
             User u = userMapper.selectById(b.getUserId());
             String email = u == null ? null : u.getEmail();
             if (email == null || email.isBlank()) {
                 log.setStatus("SKIPPED");
                 log.setErrorMsg("读者邮箱为空");
+                if (existing == null) {
+                    logMapper.insert(log);
+                } else {
+                    logMapper.updateStatus(existing.getId(), "SKIPPED", "读者邮箱为空", existing.getSentAt());
+                }
             } else {
                 log.setToEmail(email);
-                String err = mailService.send(email, subject, body);
-                if (err != null) {
-                    log.setStatus("FAILED");
-                    log.setErrorMsg(err);
+                log.setStatus("PENDING");
+                log.setSentAt(null);
+                Long logId;
+                if (existing == null) {
+                    logMapper.insert(log);
+                    logId = log.getId();
+                } else {
+                    logId = existing.getId();
+                    logMapper.updateStatus(logId, "PENDING", null, null);
                 }
+                emailTasks.add(new EmailTask(logId, email, subject, body));
             }
         }
-        if (existing == null) {
-            logMapper.insert(log);
+    }
+
+    /**
+     * 事务提交后异步投递邮件。在 @Transactional 方法内注册 afterCommit 回调，
+     * 由独立线程池（taskExecutor）真正发送并回写状态。
+     * 相比 @TransactionalEventListener，这种直接注册同步回调的方式不依赖事件适配器的代理机制，
+     * 必然在提交后触发、不会静默丢弃事件（此前事件方案在本环境不触发，导致邮件永久卡在 PENDING）。
+     */
+    private void dispatchAfterCommit(List<EmailTask> tasks) {
+        if (tasks == null || tasks.isEmpty()) {
+            return;
+        }
+        final List<EmailTask> toSend = new ArrayList<>(tasks);
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    asyncMailDispatcher.dispatch(toSend);
+                }
+                @Override
+                public void flush() {
+                }
+            });
         } else {
-            logMapper.updateStatus(existing.getId(), log.getStatus(), log.getErrorMsg(), log.getSentAt());
+            // 不在事务中（兜底）：直接派发，尽量投递
+            asyncMailDispatcher.dispatch(toSend);
         }
     }
 

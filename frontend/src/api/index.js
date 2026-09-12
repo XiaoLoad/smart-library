@@ -51,7 +51,8 @@ export const borrowApi = {
   confirmReturn: (data) => post('/borrow/return/confirm', data),
   rejectReturn: (data) => post('/borrow/return/reject', data),
   batchProcess: (data) => post('/borrow/batch-process', data),
-  urge: (data) => post('/borrow/urge', data),
+  // 催还含邮件下发，单条/批量都可能较久，单独放宽超时避免 10s 悬崖
+  urge: (data) => post('/borrow/urge', data, { timeout: 30000 }),
   renew: (data) => post('/borrow/renew', data),
   quota: () => get('/borrow/quota'),
   payFine: (data) => post('/fine/pay', data),
@@ -114,6 +115,8 @@ export const systemApi = {
   getMailConfig: () => get('/system/mail-config'),
   saveMailConfig: (data) => post('/system/mail-config', data),
   getNotificationLogs: (params) => get('/system/notifications', params),
-  resendNotification: (id) => post('/system/notifications/resend', { id }),
-  triggerNotification: () => post('/system/notifications/trigger'),
+  // 重发含邮件下发，单独放宽超时避免 10s 悬崖
+  resendNotification: (id) => post('/system/notifications/resend', { id }, { timeout: 30000 }),
+  // 手动触发扫描可能批量发多封邮件，给更长超时
+  triggerNotification: () => post('/system/notifications/trigger', {}, { timeout: 60000 }),
 }

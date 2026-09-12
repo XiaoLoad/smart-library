@@ -51,5 +51,6 @@ service.request = async function (config) {
 
 // 便捷方法
 export const get = (url, params) => service.request({ method: 'get', url, params })
-export const post = (url, data) => service.request({ method: 'post', url, data })
+// config 透传，便于个别耗时接口（如批量催还）单独放宽超时
+export const post = (url, data, config = {}) => service.request({ method: 'post', url, data, ...config })
 export default service
