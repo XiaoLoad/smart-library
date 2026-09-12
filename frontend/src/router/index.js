@@ -29,6 +29,20 @@ const routes = [
         component: () => import('@/views/dashboard/index.vue'),
         meta: { title: '概览', roles: ALL_ROLES },
       },
+      // 错误页挂在布局内：被拦下时侧栏还在，用户能直接改道，不必回退重来
+      {
+        path: '403',
+        name: 'Forbidden',
+        component: () => import('@/views/error/index.vue'),
+        meta: { title: '无权访问', hidden: true, errorCode: 403 },
+      },
+      // 兜底：未匹配任何路由的地址落在这里。静态路径优先级更高，放最后即可
+      {
+        path: ':pathMatch(.*)*',
+        name: 'NotFound',
+        component: () => import('@/views/error/index.vue'),
+        meta: { title: '页面未找到', hidden: true, errorCode: 404 },
+      },
     ],
   },
   {
@@ -164,13 +178,17 @@ router.beforeEach((to, from, next) => {
     next()
   } else if (!userStore.isLoggedIn) {
     next({ path: '/login', query: { redirect: to.fullPath } })
+  } else if (to.name === 'Forbidden') {
+    // 错误页自身不再做权限判断，避免重定向成环
+    next()
   } else {
-    // 角色权限校验：无 roles 视为公开；用户类型不在允许列表则拒绝
+    // 角色权限校验：无 roles 视为公开；用户类型不在允许列表则拦到错误页
     const allowed = to.meta.roles
     const userType = userStore.userType
     if (allowed && !allowed.includes(userType)) {
-      // 无权访问，回退到首页
-      next({ path: '/dashboard' })
+      // 带上来路供错误页指明是哪一页，并 replace 掉历史项，
+      // 否则用户按返回会再次命中守卫、弹回同一页
+      next({ name: 'Forbidden', query: { from: to.fullPath }, replace: true })
     } else {
       next()
     }
