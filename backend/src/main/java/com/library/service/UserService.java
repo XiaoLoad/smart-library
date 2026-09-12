@@ -52,6 +52,7 @@ public class UserService {
         user.setClassName(req.getClassName());
         user.setGrade(req.getGrade());
         user.setMajor(req.getMajor());
+        normalize(user);
         userMapper.insert(user);
         return user;
     }
@@ -79,6 +80,7 @@ public class UserService {
         user.setClassName(req.getClassName());
         user.setGrade(req.getGrade());
         user.setMajor(req.getMajor());
+        normalize(user);
         userMapper.update(user);
         return user;
     }
@@ -99,5 +101,20 @@ public class UserService {
         user.setPhone(req.getPhone().trim());
         userMapper.update(user);
         return user;
+    }
+
+    /**
+     * 规范化可空的唯一约束字段：空白字符串统一转为 NULL。
+     * teacher_no / student_no 带 UNIQUE 索引，角色无关的字段本就为空；
+     * MySQL 把 '' 当作具体值，多个空串会撞键（Duplicate entry ''），
+     * 而 NULL 不受唯一约束限制，存 NULL 才能满足「唯一但允许多个空值」。
+     */
+    private void normalize(User user) {
+        if (user.getTeacherNo() != null && user.getTeacherNo().isBlank()) {
+            user.setTeacherNo(null);
+        }
+        if (user.getStudentNo() != null && user.getStudentNo().isBlank()) {
+            user.setStudentNo(null);
+        }
     }
 }
