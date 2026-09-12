@@ -82,7 +82,7 @@ export const dashboardApi = {
 // 注：流式对话 SSE 不走 axios（不支持流式解析），在 chat.vue 内用 fetch+ReadableStream 实现
 export const aiApi = {
   conversationList: () => get('/ai/conversation/list'),
-  messageList: (conversationId) => get('/ai/message/list', { conversationId }),
+  messageList: (conversationId, params) => get('/ai/message/list', { conversationId, ...(params || {}) }),
   createConversation: () => post('/ai/conversation/create'),
   deleteConversation: (id) => service.delete(`/ai/conversation/${id}`),
 }

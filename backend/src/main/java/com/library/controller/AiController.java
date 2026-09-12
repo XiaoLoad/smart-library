@@ -44,12 +44,21 @@ public class AiController {
     }
 
     /**
-     * 消息列表
+     * 消息列表（窗口分页：按 id 游标向后翻页，先取最新一页，向上滚动加载更早）
+     *
+     * @param conversationId 会话 ID
+     * @param beforeId      游标：传最老已加载消息的 id 返回更早一页；为空则取最新一页
+     * @param pageSize      每页条数，默认 20
      */
     @GetMapping("/message/list")
-    public Result<Map<String, Object>> messageList(@RequestParam Long conversationId) {
-        List<AiMessage> list = messageMapper.selectByConversationId(conversationId);
-        return Result.success(Map.of("list", list, "total", list.size()));
+    public Result<Map<String, Object>> messageList(
+            @RequestParam Long conversationId,
+            @RequestParam(required = false) Long beforeId,
+            @RequestParam(defaultValue = "20") int pageSize) {
+        List<AiMessage> list = messageMapper.selectHistoryPage(conversationId, beforeId, pageSize);
+        int total = messageMapper.countByConversationId(conversationId);
+        // hasMore：本页满页即可能还有更早消息；前端亦可用 loadedCount < total 判定
+        return Result.success(Map.of("list", list, "total", total, "hasMore", list.size() == pageSize));
     }
 
     /**

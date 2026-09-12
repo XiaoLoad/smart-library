@@ -9,6 +9,13 @@ import java.util.List;
 public interface AiMessageMapper {
     List<AiMessage> selectByConversationId(@Param("conversationId") Long conversationId);
 
+    // 窗口分页：按 id 游标向后翻页（beforeId 为空取最新一页，否则取更早一页）
+    List<AiMessage> selectHistoryPage(@Param("conversationId") Long conversationId,
+                                      @Param("beforeId") Long beforeId,
+                                      @Param("pageSize") int pageSize);
+
+    int countByConversationId(@Param("conversationId") Long conversationId);
+
     void insert(AiMessage m);
 
     void deleteByConversationId(@Param("conversationId") Long conversationId);
