@@ -136,7 +136,7 @@
                   </div>
                 </div>
 
-                <div class="msg-content markdown" v-html="renderMarkdown(m.content)"></div>
+                <div class="msg-content markdown" v-html="m.html"></div>
               </div>
             </div>
           </template>
@@ -212,6 +212,10 @@ import hljs from 'highlight.js'
 import 'highlight.js/styles/github.css'
 import { aiApi } from '@/api'
 import ConversationNav from '@/components/ConversationNav.vue'
+import AppIcon from '@/components/AppIcon.vue'
+
+// keep-alive 缓存名单按路由 name 匹配，故显式声明组件名
+defineOptions({ name: 'AIChat' })
 
 // 初始化 Markdown 渲染器：启用代码高亮、链接安全属性
 const md = new MarkdownIt({
@@ -281,6 +285,17 @@ const renderMarkdown = (content) => {
   }
 }
 
+// 历史/分页消息映射：预渲染 Markdown 为 html 缓存，避免模板内反复重渲染
+const enrichMsg = (m) => ({
+  ...m,
+  html: renderMarkdown(m.content),
+  toolEvents: [], // 历史消息无工具调用记录
+  // 历史消息不持久化思维链（与工具中间态一致），仅本轮流式生成时展示
+  reasoningSegments: [],
+  reasoningOpen: false,
+  reasoningStreaming: false,
+})
+
 // ===== 日期分隔（历史导航锚点） =====
 const dayKey = (t) => (t ? String(t).slice(0, 10) : '')
 const dayLabel = (t) => {
@@ -306,6 +321,12 @@ const messages = ref([])
 const input = ref('')
 const thinking = ref(false)
 const msgListRef = ref(null)
+// 历史分页加载状态
+const oldestLoadedId = ref(null)   // 当前已加载消息中最老的 id（更早一页的游标）
+const loadedCount = ref(0)         // 已加载消息数
+const totalMessages = ref(0)       // 会话消息总数
+const hasMore = ref(false)         // 是否还有更早消息
+const loadingOlder = ref(false)    // 防重复拉取守卫
 // 当前流式请求的 AbortController（用于取消）
 let abortController = null
 
@@ -332,6 +353,11 @@ const onScroll = () => {
   const atBottom = isAtBottom()
   isAutoFollow.value = atBottom
   showJumpBtn.value = !atBottom && messages.value.length > 0
+  // 向上滚动到接近顶部时，懒加载更早的历史消息
+  const el = msgListRef.value
+  if (el && el.scrollTop < 300 && hasMore.value && !loadingOlder.value && !isAutoFollow.value) {
+    loadOlder()
+  }
 }
 
 const scrollToBottom = async () => {
@@ -404,18 +430,49 @@ const switchConv = async (id) => {
   isAutoFollow.value = true
   try {
     const data = await aiApi.messageList(id)
-    messages.value = (data.list || []).map((m) => ({
-      ...m,
-      toolEvents: [], // 历史消息无工具调用记录
-      // 历史消息不持久化思维链（与工具中间态一致），仅本轮流式生成时展示
-      reasoningSegments: [],
-      reasoningOpen: false,
-      reasoningStreaming: false,
-    }))
+    // 后端返回最新一页（id DESC），倒转为正序后再渲染
+    const page = (data.list || []).map(enrichMsg).reverse()
+    messages.value = page
+    loadedCount.value = page.length
+    totalMessages.value = data.total || page.length
+    oldestLoadedId.value = page.length ? page[0].id : null
+    hasMore.value = loadedCount.value < totalMessages.value
   } catch (e) {
     messages.value = []
+    hasMore.value = false
   }
   await scrollToBottomForce()
+}
+
+// 向上懒加载更早的历史消息：prepend 后按 DOM 高度差保持视口位置，避免跳动
+const loadOlder = async () => {
+  if (loadingOlder.value || !hasMore.value || !currentConvId.value || !oldestLoadedId.value) return
+  loadingOlder.value = true
+  const el = msgListRef.value
+  const prevHeight = el ? el.scrollHeight : 0
+  const prevTop = el ? el.scrollTop : 0
+  try {
+    const data = await aiApi.messageList(currentConvId.value, { beforeId: oldestLoadedId.value })
+    const older = (data.list || []).map(enrichMsg).reverse()
+    if (!older.length) {
+      hasMore.value = false
+      return
+    }
+    messages.value = [...older, ...messages.value]
+    loadedCount.value += older.length
+    oldestLoadedId.value = older[0].id
+    hasMore.value = loadedCount.value < (data.total || totalMessages.value)
+  } catch (e) {
+    // 加载失败静默
+  } finally {
+    await nextTick()
+    if (el) {
+      // 高度差法：内容前插后，把滚动条下移新增高度，使视口锚定的内容不跳动
+      suppressScrollUntil()
+      el.scrollTop = el.scrollHeight - prevHeight + prevTop
+    }
+    loadingOlder.value = false
+  }
 }
 
 const newConv = async () => {
@@ -550,6 +607,7 @@ const send = async () => {
           conversationId: convId,
           role: 'assistant',
           content: '',
+          html: '',
           toolEvents: [],
           // 深度思考：reasoningSegments 按「思考轮次」分段（工具调用会产生多段）；
           // reasoningStreaming 控制头部「思考中/已思考」与脉冲；reasoningOpen 控制折叠
@@ -600,6 +658,7 @@ const send = async () => {
         msg.reasoningStreaming = false
         msg.reasoningOpen = false
         msg.content += data
+        msg.html = renderMarkdown(msg.content)
         scrollToBottom()
       } else if (event === 'reset') {
         // 进入工具调用轮：清空工具调用前的过渡文本（正文只保留最终回答，
@@ -609,10 +668,12 @@ const send = async () => {
         msg.reasoningStreaming = false
         msg.reasoningOpen = false
         msg.content = ''
+        msg.html = ''
       } else if (event === 'final') {
         // 后端完成回答后的最终文本（已剔除误输出的工具调用代码），整体替换流式拼接内容
         const msg = ensureAssistantMsg()
         msg.content = data
+        msg.html = renderMarkdown(msg.content)
         scrollToBottom()
       } else if (event === 'tool') {
         const msg = ensureAssistantMsg()
@@ -681,6 +742,7 @@ const send = async () => {
         msg.reasoningStreaming = false
         msg.reasoningOpen = false
         msg.content = `⚠️ ${data || 'AI 请求出错'}`
+        msg.html = renderMarkdown(msg.content)
         scrollToBottom()
       }
     }

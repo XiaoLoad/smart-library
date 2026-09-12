@@ -16,6 +16,21 @@
         ORDER BY create_time ASC
     </select>
 
+    <!-- 窗口分页：beforeId 为空取最新一页（id 倒序），否则取更早一页 -->
+    <select id="selectHistoryPage" resultMap="msgMap">
+        SELECT * FROM ai_messages
+        WHERE conversation_id = #{conversationId}
+        <if test="beforeId != null">
+            AND id &lt; #{beforeId}
+        </if>
+        ORDER BY id DESC
+        LIMIT #{pageSize}
+    </select>
+
+    <select id="countByConversationId" resultType="java.lang.Integer">
+        SELECT COUNT(*) FROM ai_messages WHERE conversation_id = #{conversationId}
+    </select>
+
     <insert id="insert" parameterType="com.library.entity.AiMessage" useGeneratedKeys="true" keyProperty="id">
         INSERT INTO ai_messages (conversation_id, role, content, create_time)
         VALUES (#{conversationId}, #{role}, #{content}, #{createTime})

@@ -132,7 +132,7 @@ const routes = [
         path: 'chat',
         name: 'AIChat',
         component: () => import('@/views/ai/chat.vue'),
-        meta: { title: 'AI 助手', roles: ALL_ROLES },
+        meta: { title: 'AI 助手', roles: ALL_ROLES, keepAlive: true },
       },
     ],
   },
