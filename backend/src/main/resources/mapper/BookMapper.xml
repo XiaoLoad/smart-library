@@ -45,6 +45,14 @@
         SELECT * FROM books WHERE isbn = #{isbn}
     </select>
 
+    <!-- 仅供 AI 借阅按书名定位：短名优先，便于同名多版本时把最贴近的候选排在前面 -->
+    <select id="selectByTitleLike" resultMap="bookMap">
+        SELECT * FROM books
+        WHERE status = 1
+          AND title LIKE CONCAT('%', #{title}, '%')
+        ORDER BY CHAR_LENGTH(title), create_time DESC
+    </select>
+
     <insert id="insert" parameterType="com.library.entity.Book" useGeneratedKeys="true" keyProperty="id">
         INSERT INTO books (title, author, publisher, isbn, category_id, location, price, publish_date,
                           cover_url, description, total_count, available_count, status, create_time)
