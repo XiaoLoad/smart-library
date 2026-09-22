@@ -1,5 +1,5 @@
 /* —— 页面容器 · 三列网格比默认多留两侧余量 —— */
-.page { padding: 32rpx 36rpx 80rpx; }
+.page { padding: 32rpx 36rpx calc(var(--tabbar-h) + env(safe-area-inset-bottom)); }
 
 /* —— 页头 · Editorial（保留完整三行，不做压缩） —— */
 .page-header { margin-bottom: 32rpx; }

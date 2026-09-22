@@ -2,9 +2,11 @@
 .chat-page {
   display: flex;
   flex-direction: column;
-  /* 本项目 tabBar 页的 100vh 已排除原生 tabBar（book/detail 同约定），不再做减法；
-     否则会在输入条下方留出空隙（原 calc 多减了 tabBar 高度） */
+  /* 底部导航是贴地实栏（高 --tabbar-h），100vh 内减去它 + 安全区，输入条正好落在栏上方，
+     不再需要为「破出的光球」额外预留补偿量 */
   height: 100vh;
+  box-sizing: border-box;
+  padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom));
   background: var(--bg);
   /* 关键：锁死页面自身不滚动，溢出全部交给中间 scroll-view；否则长消息会把输入条顶出视口 */
   overflow: hidden;

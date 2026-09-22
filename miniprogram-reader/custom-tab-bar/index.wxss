@@ -1,0 +1,75 @@
+/* 自定义底部导航 · 贴地实栏 + 选中态颜色过渡
+   约束：
+   1. 导航是贴底实栏（不透明、无破出元素），高度恒为 112rpx，
+      页面避让统一引用 --tabbar-h（见 app.wxss），不存在遮挡；
+   2. 不做跨 tab 的指示条滑动动画，也不做任何跨页位移——框架机制决定做不到不闪，
+      原因见 index.js 顶部注释。选中态只用 .tab / .tab.on 的颜色过渡表达。
+
+   ⚠ 色值必须写死，不能用 var(--xxx)：
+   自定义 tabBar 由框架渲染在页面容器层级、不在 page 元素内部，
+   app.wxss 中 page { --bg-elevated: ... } 定义的变量继承不到本组件，
+   用 var() 会导致 background / border 整条声明失效（背景透明）。 */
+.tabbar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 50; /* 低于分类抽屉(91)等模态，保证弹层能盖住导航 */
+  height: 112rpx;
+  box-sizing: content-box; /* 112rpx 是栏体本身，安全区另加 */
+  padding-bottom: env(safe-area-inset-bottom);
+  background: #ffffff; /* --bg-elevated */
+  border-top: 1rpx solid #e8e3dc; /* --border */
+  display: flex;
+}
+
+/* 选中标记：每个 tab 自带一条，随选中淡入。
+   位置写死在各自槽位正中，没有任何跨 tab 位移，因此不存在抖动。 */
+.tab-mark {
+  position: absolute;
+  top: -1rpx;
+  left: 50%;
+  width: 36rpx;
+  height: 4rpx;
+  margin-left: -18rpx;
+  border-radius: 4rpx;
+  background: #3a5a6b; /* --primary */
+  opacity: 0;
+  transform: scaleX(0.4);
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+.tab.on .tab-mark { opacity: 1; transform: scaleX(1); }
+
+.tab {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4rpx;
+  color: #9c958d; /* --text-3 */
+  font-size: 24rpx;
+  transition: color 0.2s ease;
+}
+.tab.on { color: #3a5a6b; } /* --primary */
+.ico-wrap { position: relative; display: flex; }
+.ico { width: 44rpx; height: 44rpx; }
+.label { line-height: 1; }
+
+/* 未读角标（自定义 tabBar 下 wx.setTabBarBadge 失效，改由组件自绘） */
+.badge {
+  position: absolute;
+  top: -6rpx;
+  right: -14rpx;
+  min-width: 28rpx;
+  height: 28rpx;
+  padding: 0 6rpx;
+  box-sizing: border-box;
+  border-radius: 14rpx;
+  background: #a85a4a; /* --danger */
+  color: #ffffff;
+  font-size: 18rpx;
+  line-height: 28rpx;
+  text-align: center;
+}

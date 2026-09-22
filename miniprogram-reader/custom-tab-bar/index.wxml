@@ -1,0 +1,17 @@
+<view class="tabbar">
+  <view
+    class="tab {{selected === item.index ? 'on' : ''}}"
+    wx:for="{{list}}"
+    wx:for-item="item"
+    wx:key="index"
+    data-index="{{item.index}}"
+    bindtap="onTap"
+  >
+    <view class="tab-mark"></view>
+    <view class="ico-wrap">
+      <image class="ico" src="{{selected === item.index ? item.activeIcon : item.icon}}" />
+      <view wx:if="{{item.index === 3 && unread > 0}}" class="badge">{{unread > 99 ? '99+' : unread}}</view>
+    </view>
+    <text class="label">{{item.text}}</text>
+  </view>
+</view>

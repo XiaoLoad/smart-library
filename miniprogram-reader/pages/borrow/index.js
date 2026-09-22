@@ -27,6 +27,9 @@ Page({
     this.reload()
   },
   onShow() {
+    if (typeof this.getTabBar === 'function' && this.getTabBar()) {
+      this.getTabBar().setData({ selected: 1 })
+    }
     this.loadQuota()
     // 从详情页/取书码页回来时静默刷新首页，否则刚提交的借阅与归还看不到
     if (!this.data.firstLoad) this.reload(true)

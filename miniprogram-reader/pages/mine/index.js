@@ -7,6 +7,9 @@ Page({
   data: { user: null, avatar: '', wechatBound: false, wechatLoading: false },
 
   onShow() {
+    if (typeof this.getTabBar === 'function' && this.getTabBar()) {
+      this.getTabBar().setData({ selected: 4 })
+    }
     const user = auth.getUser() || (getApp().globalData.user || null)
     if (!user) {
       wx.navigateTo({ url: '/pages/auth/login' })
