@@ -44,6 +44,7 @@ Page({
     currentConv: null,
     messages: [], // {id, role, content, shown, html, segments, pending, thinking, thinkingOpen, toolEvents}
     input: '',
+    kbOffset: 0, // 输入条上移补偿（px，见 onKeyboardHeightChange）
     streaming: false,
     drawerOpen: false,
     hasMoreHistory: false,
@@ -53,7 +54,28 @@ Page({
   },
 
   onLoad() {
+    this.cacheKeyboardGap()
     this.loadConversations(true)
+  },
+
+  // 键盘补偿的几何量必须在「键盘收起时」量一次并缓存（onLoad 即此时机）。
+  // 原因：键盘弹出后 getWindowInfo 的 windowHeight 会随视口缩小（实测约缩小一个键盘高），
+  // 若在键盘事件里现算 screenHeight − windowHeight，会把键盘高度也一并减掉，补偿归零、输入条纹丝不动。
+  // 需要的量是「页面视口底 → 屏幕底」的间距：窗口底即页面底，故
+  //   gap = screenHeight − screenTop − windowHeight（= 原生 tabBar + 底部安全区）
+  // 这正是输入条静止位置已高出屏幕底的那一段，补偿量 = 键盘高 − gap。
+  cacheKeyboardGap() {
+    let info = {}
+    try {
+      info = (wx.getWindowInfo ? wx.getWindowInfo() : wx.getSystemInfoSync()) || {}
+    } catch (e) {
+      info = {}
+    }
+    const sh = info.screenHeight || 0
+    const top = typeof info.screenTop === 'number' ? info.screenTop : info.statusBarHeight || 0
+    const gap = sh - top - (info.windowHeight || 0)
+    // 只信落在合理区间的值；异常（负值 / 过半屏）退化为 0，即补偿量 = 键盘高度
+    this._bottomGap = gap > 0 && gap < sh / 2 ? gap : 0
   },
   // 作为 tabBar 页常驻：每次进入补齐会话（登录后首切场景）
   onShow() {
@@ -177,6 +199,15 @@ Page({
   // ===== 发送 & 流式渲染 =====
   onInput(e) {
     this.setData({ input: e.detail.value })
+  },
+
+  // 软键盘高度变化：输入条上移，恰好停在键盘上沿
+  // 补偿量 = 键盘高 − 页面底到屏幕底的间距（后者在 onLoad 已缓存，见 cacheKeyboardGap）
+  onKeyboardHeightChange(e) {
+    const h = e.detail.height || 0
+    const delta = h - (this._bottomGap || 0)
+    // 键盘比「输入条到屏幕底」还矮时不遮挡，无需上移
+    this.setData({ kbOffset: delta > 0 ? delta : 0 })
   },
 
   async send() {

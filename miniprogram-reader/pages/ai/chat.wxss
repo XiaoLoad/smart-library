@@ -27,7 +27,9 @@
 /* —— 消息区 —— */
 /* flex:1 + min-height:0 是 scroll-view 能被压缩、内部滚动的前提；
    缺 min-height:0 时它会按内容撑大、把底部输入条顶出视口 */
-.msgs { flex: 1; min-height: 0; padding: 24rpx 24rpx 120rpx; box-sizing: border-box; }
+/* 输入条是 in-flow 的 flex 子项（非 fixed 浮层），消息区底部本就贴其顶部，
+   无需再留避让空间；此前 120rpx 的 padding-bottom 成了死白（输入框上方那条留白） */
+.msgs { flex: 1; min-height: 0; padding: 24rpx; box-sizing: border-box; }
 /* 内部容器底部对齐：消息少时贴近输入条、不顶在顶部留大片空白；消息多时自然向下生长可滚动 */
 .msgs-inner { min-height: 100%; display: flex; flex-direction: column; justify-content: flex-end; box-sizing: border-box; }
 .load-earlier { text-align: center; padding: 12rpx 0 24rpx; color: var(--primary); }
@@ -221,6 +223,7 @@
 .chat-input {
   flex: 1;
   min-width: 0;
+  width: 100%;
   box-sizing: border-box;
   background: var(--bg-subtle);
   border: 1rpx solid var(--border);
@@ -230,6 +233,7 @@
   padding: 18rpx 28rpx;
   font-size: 28rpx;
   line-height: 1.5;
+  color: var(--text);
 }
 .ph { color: var(--text-3); }
 .send-btn {

@@ -132,18 +132,23 @@
     </view>
   </scroll-view>
 
-  <!-- 输入区（固定底部，圆角书写条） -->
-  <view class="input-bar">
-    <input
+  <!-- 输入区（普通流 flex 子项；键盘弹出时整体上移，避免被遮挡） -->
+  <view class="input-bar" style="transform: translateY(-{{kbOffset}}px);">
+    <!-- 用 textarea 支持多行：换行键真正换行（confirm-type=return），发送走右侧圆形按钮 -->
+    <textarea
       class="chat-input"
       value="{{input}}"
       bindinput="onInput"
-      bindconfirm="send"
-      confirm-type="send"
+      bindkeyboardheightchange="onKeyboardHeightChange"
+      confirm-type="return"
+      auto-height
+      maxlength="-1"
+      show-confirm-bar="{{false}}"
+      cursor-spacing="16"
       placeholder="{{streaming ? '馆员 AI 正在回复…' : '问问馆员 AI…'}}"
       placeholder-class="ph"
       disabled="{{streaming}}"
-      adjust-position
+      adjust-position="{{false}}"
     />
     <view
       wx:if="{{streaming}}"
