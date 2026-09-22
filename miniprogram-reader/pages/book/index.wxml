@@ -64,7 +64,12 @@
 
 <!-- 分类树抽屉：父节点即筛选，箭头单独负责展开收起 -->
 <view class="cat-mask {{catOpen ? 'show' : ''}}" catchtap="closeCat" catchtouchmove="noop" />
-<view class="cat-sheet {{catOpen ? 'show' : ''}} {{catDragging ? 'dragging' : ''}}" style="height:{{catHeight}}vh">
+<!-- catchtouchmove 必须挂在弹层最外层：抽屉里只有 .cat-tree 是 scroll-view，
+     其余区域（拖动条以外的手柄/标题行/分隔线，以及树内容不满或滚到尽头时的拖动）
+     touchmove 会一路冒泡到页面根节点，被页面的滚动手势识别器接走，底层书库页就跟着滚了。
+     拦在这里之后，scroll-view 自身的滚动不受影响——它是浏览器原生的滚动，
+     不依赖这条 JS 事件链，所以树照样能滚。 -->
+<view class="cat-sheet {{catOpen ? 'show' : ''}} {{catDragging ? 'dragging' : ''}}" style="height:{{catHeight}}vh" catchtouchmove="noop">
   <view class="cat-grip" catchtouchstart="onCatGripStart" catchtouchmove="onCatGripMove" catchtouchend="onCatGripEnd" catchtouchcancel="onCatGripEnd"><view class="cat-grip-bar"></view></view>
   <view class="cat-head">
     <view class="cat-title serif">分类</view>
@@ -86,8 +91,12 @@
       <view wx:if="{{catSelId === node.id}}" class="node-bar"></view>
       <view wx:if="{{node.lv >= 2}}" class="node-guide" style="left:52rpx"></view>
       <view wx:if="{{node.lv >= 3}}" class="node-guide" style="left:88rpx"></view>
-      <view wx:if="{{node.hasChildren}}" class="node-chevron" catchtap="onCatToggle" data-id="{{node.id}}">
-        <app-icon name="{{node.open ? 'chevron-down' : 'chevron-right'}}" size="24" color="#9c958d" />
+      <view wx:if="{{node.hasChildren}}" class="node-chevron">
+        <app-icon name="{{node.open ? 'chevron-down' : 'chevron-right'}}" size="28" color="#9c958d" />
+        <!-- 箭头的透明命中层：视觉上箭头仍只占 32rpx，但可点范围向左扩到 88rpx、上下撑满整行 84rpx。
+             向左扩是刻意的——那一带是缩进留白（只有装饰性的树线），把它让给「展开」，
+             才不会误触到右侧书名的「筛选并关闭」。 -->
+        <view class="chevron-hit" catchtap="onCatToggle" data-id="{{node.id}}"></view>
       </view>
       <view wx:else class="node-chevron"></view>
       <view class="node-name ellipsis">{{node.name}}</view>

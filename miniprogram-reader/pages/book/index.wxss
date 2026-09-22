@@ -138,7 +138,9 @@
 .cat-title { font-size: 32rpx; font-weight: 600; }
 .cat-reset { font-size: 26rpx; font-weight: 500; color: var(--primary); }
 .cat-divider { height: 1rpx; background: var(--border); }
-.cat-tree { flex: 1; min-height: 0; }
+/* overscroll-behavior: contain 兜住「树滚到尽头后滚动链传给页面」这一路：
+   上面 .cat-sheet 的 catchtouchmove 拦的是 JS 事件冒泡，滚动链是浏览器层面的，两回事。 */
+.cat-tree { flex: 1; min-height: 0; overscroll-behavior: contain; }
 .cat-tail { height: 40rpx; }
 
 .node {
@@ -151,12 +153,24 @@
 .node-hover { background: var(--bg-subtle); }
 .node-guide { position: absolute; top: 0; bottom: 0; width: 1rpx; background: var(--border); }
 .node-chevron {
+  position: relative; /* chevron-hit 以此为定位基准 */
   display: flex;
   align-items: center;
   justify-content: center;
   width: 32rpx;
   flex-shrink: 0;
   margin-right: 12rpx;
+}
+/* 箭头的可点区域：绝对定位的透明覆盖层，不参与布局，所以树的视觉缩进一点没变。
+   宽 88rpx（44px）满足触控最小命中尺寸；height 84rpx 正好等于 .node 的整行高，
+   上下不会溢到相邻行去抢点击。 */
+.chevron-hit {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  width: 88rpx;
+  height: 84rpx;
+  transform: translateY(-50%);
 }
 .node-name { flex: 1; min-width: 0; font-size: 26rpx; color: var(--text); }
 .node-count { flex-shrink: 0; margin-left: 16rpx; font-size: 22rpx; color: var(--text-3); }
