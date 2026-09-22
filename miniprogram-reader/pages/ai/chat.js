@@ -54,28 +54,40 @@ Page({
   },
 
   onLoad() {
-    this.cacheKeyboardGap()
     this.loadConversations(true)
   },
 
-  // 键盘补偿的几何量必须在「键盘收起时」量一次并缓存（onLoad 即此时机）。
+  // 布局稳定后再量键盘补偿量（见 cacheKeyboardGap）
+  onReady() {
+    this.cacheKeyboardGap()
+  },
+
+  // 键盘补偿的几何量必须在「键盘收起时」量一次并缓存（onReady 即此时机）。
   // 原因：键盘弹出后 getWindowInfo 的 windowHeight 会随视口缩小（实测约缩小一个键盘高），
-  // 若在键盘事件里现算 screenHeight − windowHeight，会把键盘高度也一并减掉，补偿归零、输入条纹丝不动。
-  // 需要的量是「页面视口底 → 屏幕底」的间距：窗口底即页面底，故
-  //   gap = screenHeight − screenTop − windowHeight（= 原生 tabBar + 底部安全区）
-  // 这正是输入条静止位置已高出屏幕底的那一段，补偿量 = 键盘高 − gap。
+  // 若在键盘事件里现算，会把键盘高度也一并减掉，补偿归零、输入条纹丝不动。
+  // 需要的量是「输入条底 → 屏幕底」的距离：补偿量 = 键盘高 − 该距离。
+  // 这里直接量 DOM，而不是用 screenHeight − screenTop − windowHeight 反推：
+  // 底部导航由悬浮改为贴地实栏后，输入条静止位置已高出屏幕底「栏高 + 安全区」，
+  // 反推口径漏掉这层 padding，键盘一弹就把输入条多抬这一段，键盘上方漏出空隙。
+  // rect.bottom 是相对页面显示区（导航栏下沿）的坐标，加 screenTop 即换成屏幕坐标。
   cacheKeyboardGap() {
-    let info = {}
-    try {
-      info = (wx.getWindowInfo ? wx.getWindowInfo() : wx.getSystemInfoSync()) || {}
-    } catch (e) {
-      info = {}
-    }
-    const sh = info.screenHeight || 0
-    const top = typeof info.screenTop === 'number' ? info.screenTop : info.statusBarHeight || 0
-    const gap = sh - top - (info.windowHeight || 0)
-    // 只信落在合理区间的值；异常（负值 / 过半屏）退化为 0，即补偿量 = 键盘高度
-    this._bottomGap = gap > 0 && gap < sh / 2 ? gap : 0
+    wx.createSelectorQuery()
+      .select('.input-bar')
+      .boundingClientRect((rect) => {
+        if (!rect) return
+        let info = {}
+        try {
+          info = (wx.getWindowInfo ? wx.getWindowInfo() : wx.getSystemInfoSync()) || {}
+        } catch (e) {
+          info = {}
+        }
+        const sh = info.screenHeight || 0
+        const top = typeof info.screenTop === 'number' ? info.screenTop : info.statusBarHeight || 0
+        const gap = sh - top - rect.bottom
+        // 只信落在合理区间的值；异常（负值 / 过半屏）退化为 0，即补偿量 = 键盘高度
+        this._bottomGap = gap > 0 && gap < sh / 2 ? gap : 0
+      })
+      .exec()
   },
   // 作为 tabBar 页常驻：每次进入补齐会话（登录后首切场景）
   onShow() {
