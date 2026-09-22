@@ -1,5 +1,5 @@
 const request = require('../../utils/request')
-const { resolveUrl } = require('../../utils/config')
+const cover = require('../../utils/cover')
 const { fmtDate, fmtMoney } = require('../../utils/datetime')
 
 Page({
@@ -28,12 +28,13 @@ Page({
       const book = await request.get('/book/' + this.bookId)
       this.setData({
         book,
-        cover: resolveUrl(book.coverUrl),
+        cover: cover.coverSrc(book.coverUrl),
         pubDateText: fmtDate(book.publishDate),
         priceText: fmtMoney(book.price),
         loading: false,
       })
       wx.setNavigationBarTitle({ title: book.title || '图书详情' })
+      this.fillCover(book.coverUrl)
     } catch (e) {
       this.setData({ loading: false })
       return
@@ -47,11 +48,19 @@ Page({
         request.get('/book/' + this.bookId, undefined, { silent: true }),
         request.get('/borrow/quota', undefined, { silent: true }),
       ])
-      this.setData({ book, quota, cover: resolveUrl(book.coverUrl) })
+      this.setData({ book, quota, cover: cover.coverSrc(book.coverUrl) })
+      this.fillCover(book.coverUrl)
     } catch (e) {
       /* 静默：不把已渲染的详情打回空态 */
     }
     this.syncBorrowState()
+  },
+
+  /** 封面按需编码：编码回来后就地替换 */
+  async fillCover(uri) {
+    if (await cover.prefetch([uri])) {
+      this.setData({ cover: cover.coverSrc(uri) })
+    }
   },
 
   async loadQuota() {

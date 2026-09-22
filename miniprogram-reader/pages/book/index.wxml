@@ -46,7 +46,7 @@
             <view class="cover-inner-title serif">{{book.displayTitle}}</view>
             <view class="cover-seal"></view>
           </view>
-          <image wx:if="{{book.cover}}" class="cover-img" src="{{book.cover}}" mode="aspectFill" lazy-load />
+          <view wx:if="{{book.cover}}" class="cover-img" style="background-image:url('{{book.cover}}');background-size:cover;background-position:center"></view>
         </view>
         <view class="book-title ellipsis">{{book.displayTitle}}</view>
         <view class="book-loc ellipsis">{{book.location || '—'}}</view>
