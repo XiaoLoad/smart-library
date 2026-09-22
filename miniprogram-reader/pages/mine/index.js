@@ -2,10 +2,9 @@ const request = require('../../utils/request')
 const auth = require('../../utils/auth')
 const badge = require('../../utils/badge')
 const cover = require('../../utils/cover')
-const { IS_DEV } = require('../../utils/config')
 
 Page({
-  data: { user: null, avatar: '', wechatBound: false, wechatLoading: false, isDev: IS_DEV },
+  data: { user: null, avatar: '', wechatBound: false, wechatLoading: false },
 
   onShow() {
     const user = auth.getUser() || (getApp().globalData.user || null)

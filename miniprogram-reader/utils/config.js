@@ -12,7 +12,7 @@ const ORIGIN = IS_DEV ? DEV_ORIGIN : PROD_ORIGIN
 /* ===== 封面加载通道 =====
  * 真机上 <image> 加载 http 资源会被微信客户端拦截，开发者工具的「不校验合法域名」对图片不生效
  * （那个开关只管 wx.request 一类的 API 请求），因此接口数据能出来、封面却一片空白。
- * 四条通道的实测对照见 pages/debug/cover-check（A 直连 <image> / B 背景图 / C base64 <image> / D 外链 https）。
+ * 四条通道：A 直连 <image> / B 背景图 / C base64 <image> / D 外链 https。
  *
  * 两条渲染路径，行为不同：
  *  · 书库网格：CSS background-image 直连 ORIGIN 图片（utils/cover.bgSrc，通道 B）。

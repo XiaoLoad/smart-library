@@ -12,8 +12,7 @@
     "pages/mine/quota",
     "pages/mine/profile",
     "pages/mine/password",
-    "pages/ai/chat",
-    "pages/debug/cover-check"
+    "pages/ai/chat"
   ],
   "window": {
     "navigationBarTitleText": "智慧图书馆",
