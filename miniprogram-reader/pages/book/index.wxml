@@ -3,10 +3,10 @@
   <view class="page-header">
     <text class="eyebrow">COLLECTION</text>
     <view class="page-title serif">馆藏图书</view>
-    <view class="tiny" wx:if="{{total}}">共 {{total}} 种馆藏</view>
+    <view class="tiny" wx:if="{{countText}}">{{countText}}</view>
   </view>
 
-  <!-- 检索 -->
+  <!-- 检索 + 分类入口 -->
   <view class="searchbar">
     <app-icon name="search" size="28" color="#9c958d" />
     <input
@@ -17,35 +17,82 @@
       bindinput="onKeyword"
       confirm-type="search"
     />
-    <picker range="{{categories}}" range-key="label" value="{{categoryIndex}}" bindchange="onCategoryChange">
-      <view class="filter-btn">
-        分类
-        <app-icon name="chevron-down" size="22" color="#6b6560" />
-      </view>
-    </picker>
+    <view wx:if="{{keyword}}" class="search-clear" catchtap="onClearKeyword">
+      <app-icon name="close" size="26" color="#9c958d" />
+    </view>
+    <view class="filter-btn" catchtap="openCat">
+      <view class="filter-label ellipsis">{{catSelName || '分类'}}</view>
+      <app-icon name="chevron-down" size="22" color="#3a5a6b" />
+    </view>
   </view>
 
   <view wx:if="{{firstLoad && loading}}" class="tiny status-line">正在整理书架…</view>
 
-  <view class="book-item fade-in" wx:for="{{list}}" wx:key="id" data-id="{{item.id}}" bindtap="goDetail">
-    <image wx:if="{{item.cover}}" class="cover" src="{{item.cover}}" mode="aspectFill" lazy-load />
-    <view wx:else class="cover cover-blank">
-      <app-icon name="book-open" size="48" color="#c9c1b6" />
-    </view>
-    <view class="flex-1 info">
-      <view class="book-title serif ellipsis">{{item.title}}</view>
-      <view class="tiny ellipsis">{{item.author}} · {{item.publisher || '—'}}</view>
-      <view class="row meta">
-        <view class="badge {{item.availableCount > 0 ? 'badge-green' : 'badge-red'}}">
-          {{item.availableCount > 0 ? '可借 ' + item.availableCount : '已借完'}}
+  <!-- 书目 · 三列封面立在架线上，架签在台板下方 -->
+  <view class="shelf-row fade-in" wx:for="{{rows}}" wx:for-item="row" wx:key="key">
+    <view class="grid">
+      <view
+        class="shelf-cell"
+        wx:for="{{row.items}}"
+        wx:for-item="book"
+        wx:key="id"
+        data-id="{{book.id}}"
+        bindtap="goDetail"
+        hover-class="shelf-cell-hover"
+        hover-stay-time="80"
+      >
+        <view class="cover">
+          <view class="cover-inner">
+            <view class="cover-inner-title serif">{{book.displayTitle}}</view>
+            <view class="cover-seal"></view>
+          </view>
+          <image wx:if="{{book.cover}}" class="cover-img" src="{{book.cover}}" mode="aspectFill" lazy-load />
         </view>
-        <text class="tiny">馆藏 {{item.totalCount}}</text>
-        <text wx:if="{{item.status === 0}}" class="badge badge-gray">已下架</text>
+        <view class="book-title ellipsis">{{book.displayTitle}}</view>
+        <view class="book-loc ellipsis">{{book.location || '—'}}</view>
+        <view class="book-state {{book.stateClass}}">{{book.stateText}}</view>
       </view>
     </view>
+    <view class="shelf-line"></view>
+    <view class="shelf-edge"></view>
   </view>
 
   <empty-state wx:if="{{!firstLoad && !loading && !list.length}}" text="没有找到相关图书" icon="search" />
   <view wx:if="{{loading && !firstLoad}}" class="tiny status-line">加载中…</view>
   <view wx:if="{{finished && list.length}}" class="tiny status-line eyebrow">— END OF COLLECTION —</view>
+</view>
+
+<!-- 分类树抽屉：父节点即筛选，箭头单独负责展开收起 -->
+<view class="cat-mask {{catOpen ? 'show' : ''}}" catchtap="closeCat" catchtouchmove="noop" />
+<view class="cat-sheet {{catOpen ? 'show' : ''}}">
+  <view class="cat-grip"><view class="cat-grip-bar"></view></view>
+  <view class="cat-head">
+    <view class="cat-title serif">分类</view>
+    <view class="cat-reset" catchtap="onCatReset">全部图书</view>
+  </view>
+  <view class="cat-divider"></view>
+  <scroll-view class="cat-tree" scroll-y>
+    <view
+      class="node {{node.count ? '' : 'is-off'}} {{catSelId === node.id ? 'is-on' : ''}}"
+      wx:for="{{catNodes}}"
+      wx:for-item="node"
+      wx:key="id"
+      style="padding-left:{{node.pad}}rpx"
+      data-id="{{node.id}}"
+      bindtap="onCatSelect"
+      hover-class="node-hover"
+      hover-stay-time="60"
+    >
+      <view wx:if="{{catSelId === node.id}}" class="node-bar"></view>
+      <view wx:if="{{node.lv >= 2}}" class="node-guide" style="left:52rpx"></view>
+      <view wx:if="{{node.lv >= 3}}" class="node-guide" style="left:88rpx"></view>
+      <view wx:if="{{node.hasChildren}}" class="node-chevron" catchtap="onCatToggle" data-id="{{node.id}}">
+        <app-icon name="{{node.open ? 'chevron-down' : 'chevron-right'}}" size="24" color="#9c958d" />
+      </view>
+      <view wx:else class="node-chevron"></view>
+      <view class="node-name ellipsis">{{node.name}}</view>
+      <view class="node-count">{{node.count}}</view>
+    </view>
+    <view class="cat-tail"></view>
+  </scroll-view>
 </view>

@@ -1,5 +1,4 @@
 {
-  "navigationBarTitleText": "馆藏图书",
   "enablePullDownRefresh": true,
   "usingComponents": {
     "empty-state": "/components/empty-state/empty-state",
