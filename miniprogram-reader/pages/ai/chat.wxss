@@ -1,47 +1,73 @@
+/* 方案 A · 编辑栏手稿：固定顶栏 + 固定底部书写条，消息区正好落在 tabBar 上方 */
 .chat-page {
   display: flex;
   flex-direction: column;
+  /* 本项目 tabBar 页的 100vh 已排除原生 tabBar（book/detail 同约定），不再做减法；
+     否则会在输入条下方留出空隙（原 calc 多减了 tabBar 高度） */
   height: 100vh;
   background: var(--bg);
+  /* 关键：锁死页面自身不滚动，溢出全部交给中间 scroll-view；否则长消息会把输入条顶出视口 */
+  overflow: hidden;
 }
 
-/* —— 顶栏 · 细线 —— */
+/* —— 顶栏 · 细线 · 固定不滚 —— */
 .topbar {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: 16rpx;
-  padding: 18rpx 28rpx;
+  padding: 16rpx 28rpx;
   background: var(--bg-elevated);
   border-bottom: 1rpx solid var(--border);
 }
 .topbar-btn { display: flex; align-items: center; }
+.topbar-btn:active { opacity: 0.55; }
 .topbar-title { text-align: center; font-size: 32rpx; font-weight: 600; }
 
 /* —— 消息区 —— */
-.msgs { flex: 1; padding: 28rpx; box-sizing: border-box; }
+/* flex:1 + min-height:0 是 scroll-view 能被压缩、内部滚动的前提；
+   缺 min-height:0 时它会按内容撑大、把底部输入条顶出视口 */
+.msgs { flex: 1; min-height: 0; padding: 24rpx 24rpx 120rpx; box-sizing: border-box; }
+/* 内部容器底部对齐：消息少时贴近输入条、不顶在顶部留大片空白；消息多时自然向下生长可滚动 */
+.msgs-inner { min-height: 100%; display: flex; flex-direction: column; justify-content: flex-end; box-sizing: border-box; }
 .load-earlier { text-align: center; padding: 12rpx 0 24rpx; color: var(--primary); }
-.msg-row { display: flex; margin-bottom: 28rpx; }
+.msg-row { display: flex; margin-bottom: 24rpx; }
 .msg-row-user { justify-content: flex-end; }
 .bubble {
-  max-width: 80%;
-  padding: 22rpx 26rpx;
-  border-radius: 8rpx;
+  max-width: 82%;
+  padding: 20rpx 26rpx;
   font-size: 28rpx;
-  line-height: 1.8;
+  line-height: 1.75;
+  box-sizing: border-box;
   word-break: break-word;
+  overflow-wrap: anywhere; /* 长串（ISBN/URL）换行，气泡不被撑破 */
 }
-.bubble-user { background: var(--primary); color: var(--inverse); }
+.bubble-user {
+  background: var(--primary);
+  color: var(--inverse);
+  border-radius: 24rpx 8rpx 24rpx 24rpx;
+}
 .bubble-ai {
   background: var(--bg-elevated);
   border: 1rpx solid var(--border);
+  border-left: 4rpx solid var(--secondary); /* 批注边距线（签名元素） */
+  border-radius: 8rpx 22rpx 22rpx 22rpx;
 }
-.typing { color: var(--primary); }
+.ai-label {
+  display: block;
+  font-family: 'Songti SC', 'STSong', 'SimSun', serif;
+  font-size: 22rpx;
+  letter-spacing: 2rpx;
+  color: var(--text-3);
+  margin-bottom: 10rpx;
+}
+.typing { color: var(--primary); margin-left: 2rpx; }
 
 /* —— 思维链 · 纸面脚注风 —— */
 .thinking {
   border-left: 3rpx solid var(--border-strong);
   padding: 8rpx 0 8rpx 18rpx;
-  margin-bottom: 18rpx;
+  margin-bottom: 16rpx;
 }
 .thinking-body {
   font-size: 24rpx;
@@ -50,42 +76,134 @@
   white-space: pre-wrap;
 }
 
-/* —— 工具调用 · 细线标签行 —— */
-.tools { margin-bottom: 16rpx; }
-.tool-chip {
-  display: flex;
-  align-items: center;
-  gap: 10rpx;
-  border: 1rpx solid var(--border);
-  background: var(--bg-subtle);
-  border-radius: 4rpx;
-  padding: 8rpx 16rpx;
-  font-size: 23rpx;
-  margin-bottom: 10rpx;
-  color: var(--text-2);
-}
-.tool-name { color: var(--text); }
-.tool-detail { color: var(--text-3); }
+/* —— 工具调用链 · 卡片化（移动端适配） —— */
+.tools { margin: 6rpx 0 14rpx; display: flex; flex-direction: column; gap: 10rpx; }
 
-/* —— 输入区 —— */
-.input-bar {
+/* 多工具时的链头说明：细小眉标 + 圆点，不再是大虚线药丸 */
+.tool-chain-head {
   display: flex;
   align-items: center;
-  gap: 18rpx;
-  padding: 18rpx 28rpx calc(18rpx + env(safe-area-inset-bottom));
+  gap: 8rpx;
+  font-size: 22rpx;
+  color: var(--text-3);
+  padding: 0 4rpx;
+  margin-bottom: 2rpx;
+}
+.chain-dot {
+  width: 10rpx;
+  height: 10rpx;
+  border-radius: 50%;
+  background: var(--secondary);
+  flex-shrink: 0;
+}
+
+/* 单条工具卡：圆角卡片 + 左侧相位色边线（呼应 AI 气泡批注线签名） */
+.tool-card {
+  background: var(--bg-elevated);
+  border: 1rpx solid var(--border);
+  border-left: 4rpx solid var(--secondary);
+  border-radius: 14rpx;
+  padding: 14rpx 16rpx;
+  overflow: hidden;
+}
+.tool-card.start { border-left-color: var(--primary); }
+.tool-card.end { border-left-color: var(--success); }
+.tool-card.error { border-left-color: var(--danger); }
+
+.tool-head { display: flex; align-items: center; gap: 14rpx; }
+
+/* 状态图标装入浅色圆底，窄屏也不挤 */
+.tool-icon-wrap {
+  width: 48rpx;
+  height: 48rpx;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-subtle);
+}
+.tool-card.start .tool-icon-wrap { background: var(--primary-light); }
+.tool-card.end .tool-icon-wrap { background: rgba(125, 146, 112, 0.16); }
+.tool-card.error .tool-icon-wrap { background: rgba(168, 90, 74, 0.16); }
+
+/* 文字区：名称与摘要上下叠放，窄屏不挤成一行 */
+.tool-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4rpx; }
+.tool-title-row { display: flex; align-items: center; gap: 8rpx; min-width: 0; }
+.tool-seq { font-size: 20rpx; color: var(--text-3); flex-shrink: 0; }
+.tool-name { font-size: 26rpx; font-weight: 500; color: var(--text); min-width: 0; }
+.tool-detail {
+  font-size: 22rpx;
+  color: var(--text-3);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap; /* 窄屏下摘要单行省略，避免把整条工具链挤变形 */
+}
+
+/* 展开按钮（仅 end 且有 data）漂浮右侧 */
+.tool-toggle { margin-left: auto; padding: 6rpx; display: flex; align-items: center; flex-shrink: 0; }
+.tool-toggle.on .tool-chev { transform: rotate(180deg); }
+
+/* 数据抽屉：等宽字体、浅底、可滚动 */
+.tool-data {
+  margin-top: 12rpx;
+  padding: 14rpx 16rpx;
+  background: var(--bg-subtle);
+  border: 1rpx solid var(--border);
+  border-radius: 10rpx;
+  max-height: 300rpx;
+  overflow: auto;
+}
+.tool-data-json {
+  font-size: 22rpx;
+  line-height: 1.6;
+  color: var(--text-2);
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-family: monospace;
+}
+.tool-card.start .tool-icon { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* —— 输入区 · 圆角书写条（固定底部） —— */
+.input-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: flex-end;
+  gap: 16rpx;
+  padding: 14rpx 24rpx 16rpx;
   background: var(--bg-elevated);
   border-top: 1rpx solid var(--border);
 }
 .chat-input {
   flex: 1;
-  background: var(--bg);
+  min-width: 0;
+  box-sizing: border-box;
+  background: var(--bg-subtle);
   border: 1rpx solid var(--border);
-  border-radius: 6rpx;
-  height: 72rpx;
-  padding: 0 26rpx;
+  border-radius: 36rpx;
+  min-height: 72rpx;
+  max-height: 200rpx;
+  padding: 18rpx 28rpx;
   font-size: 28rpx;
+  line-height: 1.5;
 }
 .ph { color: var(--text-3); }
+.send-btn {
+  flex: 0 0 auto;
+  width: 72rpx;
+  height: 72rpx;
+  border-radius: 50%;
+  background: var(--primary);
+  color: var(--inverse);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.send-btn:active { background: var(--primary-hover); }
+.send-btn.disabled { background: var(--bg-muted); }
+.send-btn.stop { background: var(--danger); }
 
 /* —— 会话抽屉 —— */
 .drawer-mask {
