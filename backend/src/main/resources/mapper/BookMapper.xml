@@ -34,7 +34,8 @@
                 <foreach collection="categoryIds" item="cid" open="(" separator="," close=")">#{cid}</foreach>
             </if>
         </where>
-        ORDER BY create_time DESC
+        <!-- id 作兜底键：批量导入的图书 create_time 常同秒，排序键不唯一时 LIMIT/OFFSET 无稳定全序，跨页会重复与漏行 -->
+        ORDER BY create_time DESC, id DESC
     </select>
 
     <select id="selectById" resultMap="bookMap">
