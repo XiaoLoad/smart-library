@@ -25,7 +25,7 @@
     "color": "#9c958d",
     "selectedColor": "#3a5a6b",
     "backgroundColor": "#ffffff",
-    "borderStyle": "white",
+    "borderStyle": "black",
     "list": [
       {
         "pagePath": "pages/book/index",
@@ -43,7 +43,7 @@
         "pagePath": "pages/ai/chat",
         "text": "AI 助手",
         "iconPath": "assets/tab/ai.png",
-        "selectedIconPath": "assets/tab/ai.png"
+        "selectedIconPath": "assets/tab/ai-active.png"
       },
       {
         "pagePath": "pages/message/index",

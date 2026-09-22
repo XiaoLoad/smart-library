@@ -1,5 +1,6 @@
 const request = require('../../utils/request')
 const auth = require('../../utils/auth')
+const badge = require('../../utils/badge')
 const { resolveUrl } = require('../../utils/config')
 
 Page({
@@ -90,6 +91,7 @@ Page({
       success(r) {
         if (!r.confirm) return
         auth.clear()
+        badge.dismiss()
         wx.reLaunch({ url: '/pages/auth/login' })
       },
     })

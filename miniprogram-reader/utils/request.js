@@ -3,6 +3,7 @@
  */
 const { BASE_URL } = require('./config')
 const auth = require('./auth')
+const badge = require('./badge')
 
 let redirecting = false
 function toLoginOnce() {
@@ -51,6 +52,7 @@ function request(method, url, data, opts = {}) {
         }
         if (body.code === 401) {
           auth.clear()
+          badge.dismiss()
           wx.showToast({ title: '请先登录', icon: 'none' })
           toLoginOnce()
           reject(new Error(body.message || '未登录'))
