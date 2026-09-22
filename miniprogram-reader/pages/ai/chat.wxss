@@ -63,6 +63,48 @@
 }
 .typing { color: var(--primary); margin-left: 2rpx; }
 
+/* —— 表格片段：原生 WXML 网格 + 卡片内横向滑动（rich-text 的 border/padding 不可靠，改用 CSS 类） —— */
+.table-scroll {
+  width: 100%;
+  margin: 10rpx 0;
+  padding: 6rpx;
+  background: #ffffff;
+  border: 1rpx solid var(--border);
+  border-radius: 12rpx;
+  box-sizing: border-box;
+  -webkit-overflow-scrolling: touch;
+}
+.grid-table {
+  display: inline-flex;
+  flex-direction: column;
+  border: 1rpx solid #e3ddd3;
+  border-radius: 10rpx;
+  overflow: hidden;
+}
+.grid-row { display: flex; flex-direction: row; }
+.grid-head { background: #f6f2ec; }
+.grid-row.odd { background: #faf8f5; }
+.grid-cell {
+  flex: 0 0 220rpx;
+  min-width: 220rpx;
+  padding: 14rpx 16rpx;
+  border-right: 1rpx solid #e3ddd3;
+  border-bottom: 1rpx solid #e3ddd3;
+  font-size: 24rpx;
+  line-height: 1.45;
+  color: #3a3a36;
+  text-align: left;
+  box-sizing: border-box;
+  word-break: break-word;
+}
+.grid-row .grid-cell:last-child { border-right: none; }
+.grid-row:last-child .grid-cell { border-bottom: none; }
+.grid-head .grid-cell {
+  color: #3a5a6b;
+  font-weight: 600;
+}
+
+
 /* —— 思维链 · 纸面脚注风 —— */
 .thinking {
   border-left: 3rpx solid var(--border-strong);
