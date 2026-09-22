@@ -1,40 +1,124 @@
 .detail-page { padding-bottom: 220rpx; }
 
-/* —— 书影区 · 非对称双栏 —— */
-.book-head {
-  display: flex;
-  gap: 32rpx;
-  padding-bottom: 32rpx;
+/* page 继承的 line-height:1.8 会把编辑级密排撑松（标题行盒变高、大号数字基线偏移），
+   详情页按设计稿收紧行高；其余页面不受影响 */
+.eyebrow { line-height: 1.4; }
+.section-title { line-height: 1.4; }
+.author,
+.kv,
+.kv .k,
+.kv .v { line-height: 1.5; }
+
+/* —— 藏书票 · 书影 + 定价 + 库存刻度 —— */
+.plate {
+  background: var(--bg-elevated);
+  border: 1rpx solid var(--border);
+  border-radius: 8rpx;
+  padding: 32rpx;
   margin-bottom: 24rpx;
-  border-bottom: 1rpx solid var(--border);
 }
+.plate-main { display: flex; gap: 28rpx; }
+
 .big-cover {
+  position: relative;
+  flex-shrink: 0;
   width: 192rpx;
   height: 264rpx;
   border-radius: 4rpx;
+  overflow: hidden;
+  border: 1rpx solid var(--border);
   background: var(--bg-subtle);
-  flex-shrink: 0;
+  box-shadow: 0 18rpx 34rpx -22rpx rgba(31, 27, 22, 0.5);
 }
+.cover-img { display: block; width: 100%; height: 100%; }
 .cover-blank {
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 1rpx solid var(--border);
+  width: 100%;
+  height: 100%;
 }
-.title { font-size: 46rpx; font-weight: 600; line-height: 1.35; margin: 6rpx 0; }
+/* 无封面时以书脊立柱代替封面图，保持"实体书"的体积感 */
+.spine {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 12rpx;
+  background: var(--bg-muted);
+  border-right: 1rpx solid var(--border);
+}
+.cover-char {
+  font-size: 76rpx;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--primary);
+  opacity: 0.45;
+}
+
+.title { font-size: 42rpx; font-weight: 600; line-height: 1.35; margin: 6rpx 0; }
 .author { margin-bottom: 4rpx; }
 .meta { gap: 16rpx; margin-top: 20rpx; }
 
-/* —— 信息行 · 细线分隔 —— */
+/* 票价条：定价与库存数同一基线，刻度片独占一行横贯整宽 */
+.plate-strip {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 24rpx;
+  margin-top: 28rpx;
+  padding-top: 24rpx;
+  border-top: 1rpx solid var(--border);
+  line-height: 1.4;
+}
+.price { display: flex; align-items: baseline; flex-shrink: 0; line-height: 1.2; }
+.price-cny { font-size: 26rpx; color: var(--primary); }
+.price-num { font-size: 40rpx; font-weight: 600; letter-spacing: -1rpx; }
+.price-unit { margin-left: 10rpx; font-size: 20rpx; letter-spacing: 4rpx; color: var(--text-3); }
+.stock-text { flex-shrink: 0; font-size: 22rpx; letter-spacing: 1rpx; color: var(--text-3); }
+/* 库存刻度片：一格代表一册（超过 10 册按比例折算，精确值见上方文字） */
+.ticks { display: flex; gap: 4rpx; height: 8rpx; margin-top: 14rpx; }
+.tick { flex: 1; border-radius: 4rpx; background: var(--bg-muted); }
+.tick.on { background: var(--primary); }
+
+/* —— 信息行 · 目录式点状引线 —— */
 .kv {
   display: flex;
-  padding: 14rpx 0;
+  align-items: baseline;
+  gap: 12rpx;
+  padding: 16rpx 0;
   font-size: 27rpx;
   border-bottom: 1rpx solid var(--bg-muted);
 }
 .kv:last-child { border-bottom: none; }
-.kv .k { width: 140rpx; color: var(--text-3); flex-shrink: 0; letter-spacing: 2rpx; }
-.desc { font-size: 27rpx; color: var(--text-2); line-height: 1.9; }
+.kv .k { flex-shrink: 0; color: var(--text-3); letter-spacing: 2rpx; }
+.kv .ldr {
+  flex: 1;
+  min-width: 24rpx;
+  height: 1rpx;
+  border-bottom: 1rpx dotted var(--border-strong);
+  transform: translateY(-4rpx);
+}
+.kv .v {
+  flex-shrink: 0;
+  max-width: 62%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mono { font-family: Consolas, 'Cascadia Mono', 'Courier New', monospace; }
+.kv .v.mono { font-size: 25rpx; }
+
+/* —— 简介 · 首字下沉 —— */
+.desc { display: block; font-size: 27rpx; color: var(--text-2); line-height: 1.9; }
+.dropcap {
+  float: left;
+  margin: 6rpx 12rpx 0 0;
+  font-size: 56rpx;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--primary);
+}
 
 /* —— 底部操作条 —— */
 .footer-bar {
