@@ -1,10 +1,11 @@
 const request = require('../../utils/request')
 const auth = require('../../utils/auth')
 const badge = require('../../utils/badge')
-const { resolveUrl } = require('../../utils/config')
+const cover = require('../../utils/cover')
+const { IS_DEV } = require('../../utils/config')
 
 Page({
-  data: { user: null, avatar: '', wechatBound: false, wechatLoading: false },
+  data: { user: null, avatar: '', wechatBound: false, wechatLoading: false, isDev: IS_DEV },
 
   onShow() {
     const user = auth.getUser() || (getApp().globalData.user || null)
@@ -12,8 +13,16 @@ Page({
       wx.navigateTo({ url: '/pages/auth/login' })
       return
     }
-    this.setData({ user, avatar: resolveUrl(user.avatar) })
+    this.setData({ user, avatar: cover.coverSrc(user.avatar) })
+    this.fillAvatar(user.avatar)
     this.loadWechatStatus()
+  },
+
+  /** 头像与封面同走一条通道：编码回来后就地替换 */
+  async fillAvatar(uri) {
+    if (await cover.prefetch([uri])) {
+      this.setData({ avatar: cover.coverSrc(uri) })
+    }
   },
 
   async loadWechatStatus() {

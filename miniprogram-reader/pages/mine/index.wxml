@@ -52,6 +52,16 @@
     </view>
   </view>
 
+  <!-- 局域网真机调试辅助页，仅开发环境出现 -->
+  <view class="cells" wx:if="{{isDev}}">
+    <view class="cell" data-url="/pages/debug/cover-check" bindtap="go">
+      <app-icon name="book" size="34" color="#6b6560" />
+      <text class="cell-label">封面通道自检</text>
+      <text class="tiny" style="margin-right:16rpx;">开发调试</text>
+      <app-icon name="chevron-right" size="26" color="#9c958d" />
+    </view>
+  </view>
+
   <button class="btn btn-danger-quiet btn-block logout" bindtap="onLogout">退出登录</button>
   <view class="tiny footer eyebrow">SMART LIBRARY READER · V1.0</view>
 </view>

@@ -1,25 +1,37 @@
 <view class="page qr-page" wx:if="{{record}}">
-  <view class="card qr-card">
-    <text class="eyebrow">PICKUP CODE</text>
-    <view class="qr-title serif">到馆取书码</view>
-    <view class="qr-frame">
-      <canvas type="2d" id="qrCanvas" class="qr-canvas" style="width:{{qrSize}}rpx;height:{{qrSize}}rpx;"></canvas>
-      <view wx:if="{{qrFailed}}" class="qr-fallback">
-        <text user-select>{{record.qrPayload || record.borrowNo}}</text>
+  <block wx:if="{{canUse}}">
+    <view class="card qr-card">
+      <text class="eyebrow">PICKUP CODE</text>
+      <view class="qr-title serif">到馆取书码</view>
+      <view class="qr-frame">
+        <canvas type="2d" id="qrCanvas" class="qr-canvas" style="width:{{qrSize}}rpx;height:{{qrSize}}rpx;"></canvas>
+        <view wx:if="{{qrFailed}}" class="qr-fallback">
+          <text user-select>{{record.qrPayload || record.borrowNo}}</text>
+        </view>
       </view>
+      <view class="qr-no serif">{{record.borrowNo}}</view>
+      <view class="muted">《{{record.bookTitle}}》</view>
+      <view class="tiny">请于 {{pickupText}} 前到馆取书</view>
     </view>
-    <view class="qr-no serif">{{record.borrowNo}}</view>
+
+    <view class="card">
+      <text class="eyebrow">NOTES</text>
+      <view class="section-title serif">使用说明</view>
+      <view class="tip-row"><text class="tip-no serif">一</text><text class="tiny">出示本页二维码给管理员扫码取书</text></view>
+      <view class="tip-row"><text class="tip-no serif">二</text><text class="tiny">请在取书截止时间前领取，逾期自动取消</text></view>
+      <view class="tip-row"><text class="tip-no serif">三</text><text class="tiny">识别失败时可报借阅单号 {{record.borrowNo}} 人工处理</text></view>
+    </view>
+
+    <button class="btn btn-outline btn-block" bindtap="onPreview">扫码小贴士</button>
+  </block>
+
+  <!-- 状态已不是待取书：码作废，不再出示 -->
+  <view wx:else class="card qr-card">
+    <text class="eyebrow">CODE VOID</text>
+    <view class="qr-title serif">取书码已失效</view>
     <view class="muted">《{{record.bookTitle}}》</view>
-    <view class="tiny">请于 {{pickupText}} 前到馆取书</view>
+    <view class="tiny">{{voidText}}</view>
+    <view class="tiny">{{record.borrowNo}}</view>
+    <button class="btn btn-outline btn-block" bindtap="onBack" style="margin-top:40rpx;">返回借阅列表</button>
   </view>
-
-  <view class="card">
-    <text class="eyebrow">NOTES</text>
-    <view class="section-title serif">使用说明</view>
-    <view class="tip-row"><text class="tip-no serif">一</text><text class="tiny">出示本页二维码给管理员扫码取书</text></view>
-    <view class="tip-row"><text class="tip-no serif">二</text><text class="tiny">请在取书截止时间前领取，逾期自动取消</text></view>
-    <view class="tip-row"><text class="tip-no serif">三</text><text class="tiny">识别失败时可报借阅单号 {{record.borrowNo}} 人工处理</text></view>
-  </view>
-
-  <button class="btn btn-outline btn-block" bindtap="onPreview">扫码小贴士</button>
 </view>

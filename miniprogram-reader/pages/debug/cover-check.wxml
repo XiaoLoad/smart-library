@@ -1,0 +1,66 @@
+<view class="page">
+  <view class="page-header">
+    <text class="eyebrow">COVER CHANNEL</text>
+    <view class="page-title serif">封面通道自检</view>
+    <view class="tiny">同一张封面交给四条通道，各自独立判定：哪格有图，哪条通道在你这台机器上就能用</view>
+  </view>
+
+  <view wx:if="{{loading}}" class="tiny status-line">正在取样本…</view>
+
+  <block wx:else>
+    <view class="card">
+      <text class="eyebrow">SAMPLE</text>
+      <view class="muted ellipsis">《{{title}}》</view>
+      <view class="tiny path">{{localPath}}</view>
+      <view class="tiny">编码后 {{b64KB}} KB · 未缩放 {{rawKB}} KB</view>
+      <view class="tiny probe">{{probe}}</view>
+      <view class="act-row">
+        <button class="btn btn-outline btn-mini" bindtap="onCopyHttp">复制直连地址</button>
+        <button class="btn btn-quiet btn-mini" bindtap="onRetest">重测</button>
+      </view>
+      <view class="tiny">把复制的地址粘到手机浏览器打开，打不开就是局域网或防火墙问题，与小程序无关</view>
+    </view>
+
+    <view class="card verdict-card" wx:if="{{verdict}}">
+      <text class="eyebrow">RESULT</text>
+      <view class="verdict serif">{{verdict}}</view>
+      <view class="tiny advice" wx:if="{{advice}}">{{advice}}</view>
+    </view>
+
+    <view class="card" wx:for="{{channels}}" wx:for-item="ch" wx:key="key">
+      <view class="chan-head">
+        <view class="letter {{ch.letterCls}}">{{ch.key}}</view>
+        <view class="flex-1">
+          <view class="chan-name">{{ch.name}}</view>
+          <view class="tiny chan-hint">{{ch.hint}}</view>
+        </view>
+        <view class="badge {{ch.badgeCls}}">{{ch.st}}</view>
+      </view>
+
+      <view class="shot">
+        <image
+          wx:if="{{ch.kind === 'image' && ch.src}}"
+          class="shot-img"
+          src="{{ch.src}}"
+          mode="aspectFill"
+          data-ch="{{ch.key}}"
+          bindload="onImgLoad"
+          binderror="onImgError"
+        />
+        <view
+          wx:elif="{{ch.kind === 'view' && ch.src}}"
+          class="shot-img"
+          style="background-image:url('{{ch.src}}');background-size:cover;background-position:center"
+        ></view>
+        <view wx:else class="shot-img shot-blank">无图源</view>
+      </view>
+
+      <view class="judge" wx:if="{{ch.tone === 'todo'}}">
+        <button class="btn btn-outline btn-mini" data-ch="{{ch.key}}" data-judge="ok" bindtap="onJudge">我看得到图</button>
+        <button class="btn btn-outline btn-mini" data-ch="{{ch.key}}" data-judge="fail" bindtap="onJudge">看不到图</button>
+      </view>
+    </view>
+
+    <view class="tiny status-line">本页仅用于排查，发布前可从 app.json 的 pages 里摘掉</view>
+  </block>
+</view>

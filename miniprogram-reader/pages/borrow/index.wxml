@@ -48,9 +48,9 @@
     <view class="tiny" wx:if="{{item.renewCount > 0}}">已续借 {{item.renewCount}} / {{item.renewMaxCount}} 次</view>
 
     <view class="actions">
+      <!-- 取书码只在待取书(0)给：取完书状态机才走到借阅中(1)，此时码已失效 -->
       <button wx:if="{{item.status === 0}}" class="btn btn-outline btn-mini" data-borrow-no="{{item.borrowNo}}" bindtap="goPickupCode">取书码</button>
       <block wx:if="{{item.status === 1}}">
-        <button class="btn btn-outline btn-mini" data-borrow-no="{{item.borrowNo}}" bindtap="goPickupCode">取书码</button>
         <button class="btn btn-outline btn-mini" data-borrow-no="{{item.borrowNo}}" bindtap="onRenew">续借</button>
         <button class="btn btn-primary btn-mini" data-borrow-no="{{item.borrowNo}}" bindtap="onReturn">申请归还</button>
       </block>

@@ -1,5 +1,5 @@
 const request = require('../../utils/request')
-const { resolveUrl } = require('../../utils/config')
+const cover = require('../../utils/cover')
 
 const PAGE_SIZE = 12 // 3 列布局，12 本正好 4 排
 const CHUNK = 3
@@ -34,10 +34,17 @@ function stateOf(book) {
   return { stateText: '可借 ' + available, stateClass: 'st-ok' }
 }
 
+/** 排内条目补上渲染地址。封面只留在 rows 里——list 与 rows 各存一份的话，
+ *  setData 序列化时同一张图会被写两遍。书库网格走 CSS 背景图（B 通道），
+ *  用直连地址即可，零数据量、无翻页上限；详情/头像才走 base64。 */
+function withCover(item) {
+  return Object.assign({}, item, { cover: cover.bgSrc(item.coverUrl) })
+}
+
 function toRows(list) {
   const rows = []
   for (let i = 0; i < list.length; i += CHUNK) {
-    rows.push({ key: 'r' + i / CHUNK, items: list.slice(i, i + CHUNK) })
+    rows.push({ key: 'r' + i / CHUNK, items: list.slice(i, i + CHUNK).map(withCover) })
   }
   return rows
 }
@@ -181,17 +188,17 @@ Page({
       const items = (res.list || []).map((b) => {
         const state = stateOf(b)
         return Object.assign({}, b, {
-          cover: resolveUrl(b.coverUrl),
           displayTitle: displayTitle(b.title),
           stateText: state.stateText,
           stateClass: state.stateClass,
         })
       })
       const list = page === 1 ? items : this.data.list.concat(items)
+      const rows = toRows(list)
       const total = res.total || 0
       this.setData({
         list,
-        rows: toRows(list),
+        rows,
         total,
         countText: total ? (this.data.catSelName ? '共 ' + total + ' 种 · ' + this.data.catSelName : '共 ' + total + ' 种馆藏') : '',
         firstLoad: false,
