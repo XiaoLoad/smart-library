@@ -42,7 +42,7 @@ Page({
   data: {
     conversations: [],
     currentConv: null,
-    messages: [], // {id, role, content, shown, html, pending, thinking, thinkingOpen, toolEvents}
+    messages: [], // {id, role, content, shown, html, segments, pending, thinking, thinkingOpen, toolEvents}
     input: '',
     streaming: false,
     drawerOpen: false,
@@ -151,6 +151,7 @@ Page({
         shown: '',
         pending: false,
         html: m.role === 'assistant' ? markdown.toHtml(m.content) : '',
+        segments: m.role === 'assistant' ? markdown.toSegments(m.content) : [],
         thinking: '',
         thinkingOpen: false,
         toolEvents: [],
@@ -195,6 +196,7 @@ Page({
       content: '',
       shown: '',
       html: '',
+      segments: [],
       thinking: '',
       thinkingOpen: false,
       toolEvents: [],
@@ -361,6 +363,7 @@ Page({
     this._revealTimer = null
     this.setData({
       ['messages[' + this._streamIdx + '].html']: msg.html,
+      ['messages[' + this._streamIdx + '].segments']: msg.segments,
       ['messages[' + this._streamIdx + '].shown']: msg.content,
       ['messages[' + this._streamIdx + '].pending']: false,
     })
@@ -398,6 +401,7 @@ Page({
       // 残留 start 工具卡 → end（停止旋转）
       msg.toolEvents.forEach((t) => { if (t.phase === 'start') t.phase = 'end' })
       msg.html = markdown.toHtml(msg.content)
+      msg.segments = markdown.toSegments(msg.content)
       msg._done = true
     }
     this.setData({ streaming: false })

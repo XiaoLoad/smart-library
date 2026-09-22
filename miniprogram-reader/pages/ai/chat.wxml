@@ -100,8 +100,28 @@
             </view>
           </view>
 
-          <!-- 正文：流式时逐字显示 shown + 光标；结束切富文本 -->
-          <rich-text wx:if="{{!item.pending && item.html}}" nodes="{{item.html}}"></rich-text>
+          <!-- 正文：流式时逐字显示 shown + 光标；结束切片段渲染（表格片段可卡片内横滑） -->
+          <block wx:if="{{!item.pending && item.segments.length}}">
+            <block wx:for="{{item.segments}}" wx:for-item="seg" wx:key="index">
+              <rich-text wx:if="{{seg.type === 'rich'}}" nodes="{{seg.html}}"></rich-text>
+              <scroll-view wx:else scroll-x="true" class="table-scroll">
+                <view class="grid-table">
+                  <view class="grid-row grid-head">
+                    <view wx:for="{{seg.table.headers}}" wx:for-item="h" wx:key="index" class="grid-cell">{{h}}</view>
+                  </view>
+                  <view
+                    wx:for="{{seg.table.rows}}"
+                    wx:for-item="row"
+                    wx:for-index="ri"
+                    wx:key="index"
+                    class="grid-row {{ri % 2 === 1 ? 'odd' : ''}}"
+                  >
+                    <view wx:for="{{row}}" wx:for-item="c" wx:key="index" class="grid-cell">{{c}}</view>
+                  </view>
+                </view>
+              </scroll-view>
+            </block>
+          </block>
           <text wx:elif="{{!item.pending && item.content}}" user-select>{{item.content}}</text>
           <text wx:else user-select>{{item.shown}}</text>
           <text wx:if="{{item.pending}}" class="typing">▍</text>
