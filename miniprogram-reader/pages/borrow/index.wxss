@@ -1,0 +1,46 @@
+/* —— 页头 —— */
+.page-header { margin-bottom: 32rpx; }
+.page-title { font-size: 56rpx; font-weight: 600; letter-spacing: 4rpx; margin-top: 8rpx; }
+
+/* —— 额度 · 纸面数字 —— */
+.quota-line { display: flex; align-items: baseline; gap: 16rpx; margin-top: 6rpx; }
+.quota-num { font-size: 72rpx; font-weight: 600; line-height: 1.1; }
+.quota-unit { font-size: 26rpx; color: var(--text-3); }
+.warn { color: var(--danger); }
+
+/* —— 分段 · 下划线 —— */
+.segments {
+  white-space: nowrap;
+  border-bottom: 1rpx solid var(--border);
+  margin-bottom: 28rpx;
+}
+.seg {
+  display: inline-block;
+  padding: 14rpx 26rpx 18rpx;
+  font-size: 27rpx;
+  color: var(--text-2);
+  position: relative;
+}
+.seg-active { color: var(--primary); font-weight: 600; }
+.seg-active::after {
+  content: '';
+  position: absolute;
+  left: 26rpx;
+  right: 26rpx;
+  bottom: 0;
+  height: 3rpx;
+  background: var(--primary);
+}
+
+/* —— 借阅记录 —— */
+.rec-title { font-size: 32rpx; font-weight: 600; }
+.no-line { letter-spacing: 1rpx; margin: 6rpx 0; }
+.record .tiny { margin-top: 4rpx; }
+.actions {
+  display: flex;
+  gap: 16rpx;
+  margin-top: 24rpx;
+  padding-top: 24rpx;
+  border-top: 1rpx solid var(--bg-muted);
+  justify-content: flex-end;
+}

@@ -1,0 +1,51 @@
+<view class="page" wx:if="{{quota}}">
+  <view class="page-header">
+    <text class="eyebrow">QUOTA</text>
+    <view class="page-title serif">借阅额度</view>
+  </view>
+
+  <!-- 主额度 · Editorial 大数 -->
+  <view class="card stat-card">
+    <text class="eyebrow">REMAINING</text>
+    <view class="stat-line">
+      <text class="stat-value serif">{{quota.remaining}}</text>
+      <text class="stat-unit">本可借</text>
+    </view>
+    <view class="hr"></view>
+    <view class="row-between">
+      <text class="tiny">状态</text>
+      <view class="badge {{quota.canBorrow ? 'badge-green' : 'badge-red'}}">
+        {{quota.canBorrow ? '正常' : '已达上限'}}
+      </view>
+    </view>
+  </view>
+
+  <!-- 明细 · 细线三栏 -->
+  <view class="card">
+    <text class="eyebrow">DETAILS</text>
+    <view class="section-title serif">额度明细</view>
+    <view class="stat-grid">
+      <view class="stat-cell">
+        <view class="grid-num serif">{{quota.used}}</view>
+        <view class="tiny">当前借阅</view>
+      </view>
+      <view class="stat-cell">
+        <view class="grid-num serif">{{quota.maxBooks}}</view>
+        <view class="tiny">借阅上限</view>
+      </view>
+      <view class="stat-cell">
+        <view class="grid-num serif {{quota.overdueCount > 0 ? 'danger' : ''}}">{{quota.overdueCount}}</view>
+        <view class="tiny">逾期本数</view>
+      </view>
+    </view>
+  </view>
+
+  <view class="card">
+    <text class="eyebrow">NOTES</text>
+    <view class="section-title serif">温馨提示</view>
+    <view class="tip-row"><text class="tip-no serif">一</text><text class="tiny">额度用完后需归还图书才能继续借阅</text></view>
+    <view class="tip-row"><text class="tip-no serif">二</text><text class="tiny">逾期将产生罚款，详见「罚款记录」</text></view>
+    <view class="tip-row"><text class="tip-no serif">三</text><text class="tiny">具体借期与续借规则以图书馆公告为准</text></view>
+  </view>
+</view>
+<view wx:elif="{{loading}}" class="tiny" style="text-align:center;padding:80rpx;">加载中…</view>

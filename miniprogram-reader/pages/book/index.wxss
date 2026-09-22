@@ -1,0 +1,60 @@
+/* —— 页头 · Editorial —— */
+.page-header { margin-bottom: 32rpx; }
+.page-title {
+  font-size: 56rpx;
+  font-weight: 600;
+  letter-spacing: 4rpx;
+  line-height: 1.3;
+  margin-top: 8rpx;
+}
+
+/* —— 检索条 —— */
+.searchbar {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+  background: var(--bg-elevated);
+  border: 1rpx solid var(--border);
+  border-radius: 6rpx;
+  padding: 18rpx 24rpx;
+  margin-bottom: 28rpx;
+}
+.search-input { flex: 1; font-size: 27rpx; }
+.ph { color: var(--text-3); }
+.filter-btn {
+  display: flex;
+  align-items: center;
+  gap: 4rpx;
+  color: var(--text-2);
+  font-size: 26rpx;
+  padding-left: 20rpx;
+  border-left: 1rpx solid var(--border);
+}
+
+/* —— 书目条目 · 细线分隔的白面 —— */
+.book-item {
+  display: flex;
+  gap: 24rpx;
+  background: var(--bg-elevated);
+  border: 1rpx solid var(--border);
+  border-radius: 8rpx;
+  padding: 26rpx;
+  margin-bottom: 20rpx;
+}
+.cover {
+  width: 116rpx;
+  height: 158rpx;
+  border-radius: 4rpx;
+  background: var(--bg-subtle);
+  flex-shrink: 0;
+}
+.cover-blank {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1rpx solid var(--border);
+}
+.info { height: 158rpx; display: flex; flex-direction: column; justify-content: space-between; }
+.book-title { font-size: 33rpx; font-weight: 600; }
+.meta { gap: 16rpx; flex-wrap: wrap; }
+.status-line { text-align: center; padding: 28rpx 0; }

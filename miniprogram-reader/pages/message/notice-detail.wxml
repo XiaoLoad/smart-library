@@ -1,0 +1,9 @@
+<view class="page" wx:if="{{item}}">
+  <view class="article">
+    <text class="eyebrow">NOTICE</text>
+    <view class="title serif">{{item.title}}</view>
+    <view class="tiny meta">{{item.publisherName}} 发布于 {{timeText}}</view>
+    <view class="hr"></view>
+    <text class="content" user-select>{{item.content}}</text>
+  </view>
+</view>

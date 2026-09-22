@@ -1,0 +1,20 @@
+/* —— 名片 —— */
+.profile-card { display: flex; align-items: center; gap: 28rpx; padding: 36rpx 30rpx; }
+.avatar {
+  width: 112rpx;
+  height: 112rpx;
+  border-radius: 50%;
+  background: var(--bg-subtle);
+  flex-shrink: 0;
+}
+.avatar-blank {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1rpx solid var(--border);
+}
+.name-row { display: flex; align-items: center; gap: 16rpx; margin-top: 4rpx; }
+.name { font-size: 36rpx; font-weight: 600; }
+
+.logout { margin-top: 40rpx; border: 1rpx solid var(--border-strong); border-radius: 6rpx; }
+.footer { text-align: center; margin-top: 32rpx; }

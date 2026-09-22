@@ -1,0 +1,7 @@
+<view class="empty">
+  <view class="empty-mark">
+    <app-icon name="{{icon}}" size="64" color="#c9c1b6" />
+  </view>
+  <view class="empty-text">{{text}}</view>
+  <slot />
+</view>

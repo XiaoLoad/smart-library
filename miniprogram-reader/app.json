@@ -1,0 +1,65 @@
+{
+  "pages": [
+    "pages/book/index",
+    "pages/borrow/index",
+    "pages/message/index",
+    "pages/mine/index",
+    "pages/auth/login",
+    "pages/book/detail",
+    "pages/borrow/pickup-code",
+    "pages/fine/index",
+    "pages/message/notice-detail",
+    "pages/mine/quota",
+    "pages/mine/profile",
+    "pages/mine/password",
+    "pages/ai/chat"
+  ],
+  "window": {
+    "navigationBarTitleText": "智慧图书馆",
+    "navigationBarBackgroundColor": "#faf8f5",
+    "navigationBarTextStyle": "black",
+    "backgroundColor": "#faf8f5",
+    "backgroundTextStyle": "dark"
+  },
+  "tabBar": {
+    "color": "#9c958d",
+    "selectedColor": "#3a5a6b",
+    "backgroundColor": "#faf8f5",
+    "borderStyle": "white",
+    "list": [
+      {
+        "pagePath": "pages/book/index",
+        "text": "书库",
+        "iconPath": "assets/tab/book.png",
+        "selectedIconPath": "assets/tab/book-active.png"
+      },
+      {
+        "pagePath": "pages/borrow/index",
+        "text": "借阅",
+        "iconPath": "assets/tab/scroll.png",
+        "selectedIconPath": "assets/tab/scroll-active.png"
+      },
+      {
+        "pagePath": "pages/ai/chat",
+        "text": "AI 助手",
+        "iconPath": "assets/tab/ai.png",
+        "selectedIconPath": "assets/tab/ai.png"
+      },
+      {
+        "pagePath": "pages/message/index",
+        "text": "消息",
+        "iconPath": "assets/tab/bell.png",
+        "selectedIconPath": "assets/tab/bell-active.png"
+      },
+      {
+        "pagePath": "pages/mine/index",
+        "text": "我的",
+        "iconPath": "assets/tab/user.png",
+        "selectedIconPath": "assets/tab/user-active.png"
+      }
+    ]
+  },
+  "style": "v2",
+  "sitemapLocation": "sitemap.json",
+  "lazyCodeLoading": "requiredComponents"
+}

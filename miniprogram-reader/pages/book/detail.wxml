@@ -1,0 +1,50 @@
+<view wx:if="{{book}}" class="page detail-page">
+  <!-- 书影 -->
+  <view class="book-head">
+    <image wx:if="{{cover}}" class="big-cover" src="{{cover}}" mode="aspectFill" />
+    <view wx:else class="big-cover cover-blank">
+      <app-icon name="book-open" size="64" color="#c9c1b6" />
+    </view>
+    <view class="flex-1">
+      <text class="eyebrow">BOOK</text>
+      <view class="title serif">{{book.title}}</view>
+      <view class="muted author">{{book.author}}</view>
+      <view class="tiny">{{book.publisher || '—'}}</view>
+      <view class="row meta">
+        <view class="badge {{book.availableCount > 0 ? 'badge-green' : 'badge-red'}}">
+          {{book.availableCount > 0 ? '可借 ' + book.availableCount : '已借完'}}
+        </view>
+        <text class="tiny">馆藏 {{book.totalCount}}</text>
+      </view>
+    </view>
+  </view>
+
+  <view class="card">
+    <text class="eyebrow">DETAILS</text>
+    <view class="section-title serif">图书信息</view>
+    <view class="kv"><text class="k">ISBN</text><text>{{book.isbn}}</text></view>
+    <view class="kv"><text class="k">位置</text><text>{{book.location || '—'}}</text></view>
+    <view class="kv"><text class="k">定价</text><text>{{priceText}}</text></view>
+    <view class="kv"><text class="k">出版</text><text>{{pubDateText}}</text></view>
+    <view class="kv"><text class="k">状态</text><text>{{book.status === 1 ? '在架' : '下架'}}</text></view>
+  </view>
+
+  <view class="card" wx:if="{{book.description}}">
+    <text class="eyebrow">SYNOPSIS</text>
+    <view class="section-title serif">内容简介</view>
+    <text class="desc" user-select>{{book.description}}</text>
+  </view>
+
+  <view class="footer-bar">
+    <view wx:if="{{blockReason}}" class="block-reason tiny">{{blockReason}}</view>
+    <button
+      class="btn btn-primary btn-block action"
+      disabled="{{!canBorrow || borrowing}}"
+      loading="{{borrowing}}"
+      bindtap="onBorrow"
+    >
+      {{borrowing ? '提交中…' : (canBorrow ? '立即借阅' : '暂不可借')}}
+    </button>
+  </view>
+</view>
+<view wx:elif="{{loading}}" class="tiny" style="text-align:center;padding:80rpx;">加载中…</view>

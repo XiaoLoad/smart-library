@@ -1,0 +1,6 @@
+{
+  "navigationBarTitleText": "图书详情",
+  "usingComponents": {
+    "app-icon": "/components/app-icon/app-icon"
+  }
+}

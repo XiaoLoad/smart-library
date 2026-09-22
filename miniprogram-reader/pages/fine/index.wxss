@@ -1,0 +1,33 @@
+/* —— 页头 —— */
+.page-header { margin-bottom: 28rpx; }
+.page-title { font-size: 56rpx; font-weight: 600; letter-spacing: 4rpx; margin-top: 8rpx; }
+
+/* —— 分段 · 下划线 —— */
+.tabs {
+  display: flex;
+  border-bottom: 1rpx solid var(--border);
+  margin-bottom: 28rpx;
+}
+.tab {
+  flex: 1;
+  text-align: center;
+  padding: 14rpx 0 18rpx;
+  font-size: 27rpx;
+  color: var(--text-2);
+  position: relative;
+}
+.tab-active { color: var(--primary); font-weight: 600; }
+.tab-active::after {
+  content: '';
+  position: absolute;
+  left: 30%;
+  right: 30%;
+  bottom: 0;
+  height: 3rpx;
+  background: var(--primary);
+}
+
+/* —— 罚款条目 —— */
+.fine-title { font-size: 32rpx; font-weight: 600; }
+.amount { font-size: 48rpx; font-weight: 600; color: var(--danger); line-height: 1.2; }
+.pay-tip { text-align: right; margin-top: 12rpx; }

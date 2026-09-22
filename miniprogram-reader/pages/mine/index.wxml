@@ -1,0 +1,57 @@
+<view class="page" wx:if="{{user}}">
+  <!-- 名片 -->
+  <view class="card profile-card">
+    <image wx:if="{{avatar}}" class="avatar" src="{{avatar}}" mode="aspectFill" />
+    <view wx:else class="avatar avatar-blank">
+      <app-icon name="user" size="48" color="#c9c1b6" />
+    </view>
+    <view class="flex-1">
+      <text class="eyebrow">READER</text>
+      <view class="name-row">
+        <text class="name serif">{{user.realName}}</text>
+        <view class="badge badge-blue">{{user.roleName}}</view>
+      </view>
+      <view class="tiny">{{user.username}}</view>
+    </view>
+  </view>
+
+  <view class="cells">
+    <view class="cell" data-url="/pages/mine/quota" bindtap="go">
+      <app-icon name="chart" size="34" color="#6b6560" />
+      <text class="cell-label">借阅额度</text>
+      <app-icon name="chevron-right" size="26" color="#9c958d" />
+    </view>
+    <view class="cell" data-url="/pages/fine/index" bindtap="go">
+      <app-icon name="coin" size="34" color="#6b6560" />
+      <text class="cell-label">罚款记录</text>
+      <app-icon name="chevron-right" size="26" color="#9c958d" />
+    </view>
+    <view class="cell" data-url="/pages/mine/profile" bindtap="go">
+      <app-icon name="id-card" size="34" color="#6b6560" />
+      <text class="cell-label">个人档案</text>
+      <app-icon name="chevron-right" size="26" color="#9c958d" />
+    </view>
+    <view class="cell" data-url="/pages/mine/password" bindtap="go">
+      <app-icon name="lock" size="34" color="#6b6560" />
+      <text class="cell-label">修改密码</text>
+      <app-icon name="chevron-right" size="26" color="#9c958d" />
+    </view>
+  </view>
+
+  <view class="cells">
+    <view class="cell" bindtap="goAi">
+      <app-icon name="sparkle" size="34" color="#6b6560" />
+      <text class="cell-label">AI 助手</text>
+      <app-icon name="chevron-right" size="26" color="#9c958d" />
+    </view>
+    <view class="cell" bindtap="onWechatTap">
+      <app-icon name="wechat" size="34" color="#6b6560" />
+      <text class="cell-label">微信登录</text>
+      <text class="tiny" style="margin-right:16rpx;">{{wechatBound ? '已绑定' : '未绑定'}}</text>
+      <app-icon name="chevron-right" size="26" color="#9c958d" />
+    </view>
+  </view>
+
+  <button class="btn btn-danger-quiet btn-block logout" bindtap="onLogout">退出登录</button>
+  <view class="tiny footer eyebrow">SMART LIBRARY READER · V1.0</view>
+</view>

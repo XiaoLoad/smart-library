@@ -1,0 +1,6 @@
+{
+  "navigationBarTitleText": "AI 助手",
+  "usingComponents": {
+    "app-icon": "/components/app-icon/app-icon"
+  }
+}

@@ -1,0 +1,68 @@
+<view class="page">
+  <view class="page-header">
+    <text class="eyebrow">MY LOANS</text>
+    <view class="page-title serif">我的借阅</view>
+  </view>
+
+  <!-- 额度 · Editorial 数字 -->
+  <view class="card quota-card" wx:if="{{quota}}">
+    <view class="row-between">
+      <view>
+        <text class="eyebrow">CURRENT LOAN</text>
+        <view class="quota-line">
+          <text class="quota-num serif">{{quota.used}}</text>
+          <text class="quota-unit">/ {{quota.maxBooks}} 本</text>
+        </view>
+      </view>
+      <view class="badge {{quota.canBorrow ? 'badge-green' : 'badge-red'}}">
+        {{quota.canBorrow ? '可借 ' + quota.remaining + ' 本' : '已达借阅上限'}}
+      </view>
+    </view>
+    <view class="hr"></view>
+    <view class="tiny">
+      当前借阅 {{quota.used}} 本<text wx:if="{{quota.overdueCount > 0}}" class="warn"> · 逾期 {{quota.overdueCount}} 本</text>
+    </view>
+  </view>
+
+  <!-- 状态 · 下划线式分段 -->
+  <scroll-view scroll-x class="segments">
+    <view
+      wx:for="{{segments}}"
+      wx:key="value"
+      class="seg {{current === item.value ? 'seg-active' : ''}}"
+      data-value="{{item.value}}"
+      bindtap="onSegment"
+    >{{item.label}}</view>
+  </scroll-view>
+
+  <view class="card record fade-in" wx:for="{{list}}" wx:key="id">
+    <view class="row-between">
+      <view class="flex-1 ellipsis rec-title serif">《{{item.bookTitle}}》</view>
+      <status-tag status="{{item.status}}" type="borrow" />
+    </view>
+    <view class="tiny no-line">{{item.borrowNo}}</view>
+    <view class="tiny" wx:if="{{item.status === 0}}">申请于 {{item.applyText}} · 取书截止 {{item.pickupText}}</view>
+    <view class="tiny" wx:elif="{{item.status === 1 || item.status === 5}}">借出 {{item.borrowText}} · 应还 {{item.dueText}}</view>
+    <view class="tiny" wx:elif="{{item.status === 3}}">借出 {{item.borrowText}} · 应还 {{item.dueText}}（已逾期）</view>
+    <view class="tiny" wx:else>借出 {{item.borrowText}} · 归还 {{item.returnText}}</view>
+    <view class="tiny" wx:if="{{item.renewCount > 0}}">已续借 {{item.renewCount}} / {{item.renewMaxCount}} 次</view>
+
+    <view class="actions">
+      <button wx:if="{{item.status === 0}}" class="btn btn-outline btn-mini" data-borrow-no="{{item.borrowNo}}" bindtap="goPickupCode">取书码</button>
+      <block wx:if="{{item.status === 1}}">
+        <button class="btn btn-outline btn-mini" data-borrow-no="{{item.borrowNo}}" bindtap="goPickupCode">取书码</button>
+        <button class="btn btn-outline btn-mini" data-borrow-no="{{item.borrowNo}}" bindtap="onRenew">续借</button>
+        <button class="btn btn-primary btn-mini" data-borrow-no="{{item.borrowNo}}" bindtap="onReturn">申请归还</button>
+      </block>
+      <block wx:if="{{item.status === 3}}">
+        <button class="btn btn-primary btn-mini" data-borrow-no="{{item.borrowNo}}" bindtap="onReturn">申请归还</button>
+        <button class="btn btn-danger-quiet btn-mini" bindtap="goFine">缴纳罚款</button>
+      </block>
+      <button wx:if="{{item.status === 5}}" class="btn btn-outline btn-mini" disabled>等待确认</button>
+    </view>
+  </view>
+
+  <empty-state wx:if="{{!firstLoad && !loading && !list.length}}" text="暂无借阅记录" icon="scroll" />
+  <view wx:if="{{loading && !firstLoad}}" class="tiny" style="text-align:center;padding:24rpx;">加载中…</view>
+  <view wx:if="{{finished && list.length}}" class="tiny eyebrow" style="text-align:center;padding:24rpx;">— END —</view>
+</view>

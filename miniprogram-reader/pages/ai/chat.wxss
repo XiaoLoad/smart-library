@@ -1,0 +1,129 @@
+.chat-page {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--bg);
+}
+
+/* —— 顶栏 · 细线 —— */
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+  padding: 18rpx 28rpx;
+  background: var(--bg-elevated);
+  border-bottom: 1rpx solid var(--border);
+}
+.topbar-btn { display: flex; align-items: center; }
+.topbar-title { text-align: center; font-size: 32rpx; font-weight: 600; }
+
+/* —— 消息区 —— */
+.msgs { flex: 1; padding: 28rpx; box-sizing: border-box; }
+.load-earlier { text-align: center; padding: 12rpx 0 24rpx; color: var(--primary); }
+.msg-row { display: flex; margin-bottom: 28rpx; }
+.msg-row-user { justify-content: flex-end; }
+.bubble {
+  max-width: 80%;
+  padding: 22rpx 26rpx;
+  border-radius: 8rpx;
+  font-size: 28rpx;
+  line-height: 1.8;
+  word-break: break-word;
+}
+.bubble-user { background: var(--primary); color: var(--inverse); }
+.bubble-ai {
+  background: var(--bg-elevated);
+  border: 1rpx solid var(--border);
+}
+.typing { color: var(--primary); }
+
+/* —— 思维链 · 纸面脚注风 —— */
+.thinking {
+  border-left: 3rpx solid var(--border-strong);
+  padding: 8rpx 0 8rpx 18rpx;
+  margin-bottom: 18rpx;
+}
+.thinking-body {
+  font-size: 24rpx;
+  color: var(--text-2);
+  margin-top: 4rpx;
+  white-space: pre-wrap;
+}
+
+/* —— 工具调用 · 细线标签行 —— */
+.tools { margin-bottom: 16rpx; }
+.tool-chip {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+  border: 1rpx solid var(--border);
+  background: var(--bg-subtle);
+  border-radius: 4rpx;
+  padding: 8rpx 16rpx;
+  font-size: 23rpx;
+  margin-bottom: 10rpx;
+  color: var(--text-2);
+}
+.tool-name { color: var(--text); }
+.tool-detail { color: var(--text-3); }
+
+/* —— 输入区 —— */
+.input-bar {
+  display: flex;
+  align-items: center;
+  gap: 18rpx;
+  padding: 18rpx 28rpx calc(18rpx + env(safe-area-inset-bottom));
+  background: var(--bg-elevated);
+  border-top: 1rpx solid var(--border);
+}
+.chat-input {
+  flex: 1;
+  background: var(--bg);
+  border: 1rpx solid var(--border);
+  border-radius: 6rpx;
+  height: 72rpx;
+  padding: 0 26rpx;
+  font-size: 28rpx;
+}
+.ph { color: var(--text-3); }
+
+/* —— 会话抽屉 —— */
+.drawer-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(44, 40, 37, 0.35);
+  z-index: 10;
+}
+.drawer {
+  position: fixed;
+  left: -540rpx;
+  top: 0;
+  bottom: 0;
+  width: 520rpx;
+  background: var(--bg-elevated);
+  z-index: 11;
+  transition: left 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  display: flex;
+  flex-direction: column;
+  border-right: 1rpx solid var(--border);
+}
+.drawer-open { left: 0; }
+.drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 30rpx 28rpx;
+  border-bottom: 1rpx solid var(--border);
+}
+.drawer-title { font-size: 32rpx; font-weight: 600; }
+.link { color: var(--primary); font-size: 26rpx; }
+.drawer-list { flex: 1; }
+.conv-item {
+  display: flex;
+  align-items: center;
+  padding: 26rpx 28rpx;
+  border-bottom: 1rpx solid var(--bg-muted);
+}
+.conv-active { background: var(--primary-light); }
+.conv-title { font-size: 27rpx; }
+.conv-del { padding: 8rpx 12rpx; display: flex; align-items: center; }

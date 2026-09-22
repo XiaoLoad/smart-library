@@ -1,0 +1,20 @@
+/* —— 文章排版 · 纸面直排（不套卡片） —— */
+.article {
+  background: var(--bg-elevated);
+  border: 1rpx solid var(--border);
+  border-radius: 8rpx;
+  padding: 44rpx 36rpx;
+}
+.title {
+  font-size: 44rpx;
+  font-weight: 600;
+  line-height: 1.45;
+  margin-top: 10rpx;
+}
+.meta { margin-top: 12rpx; }
+.content {
+  font-size: 29rpx;
+  line-height: 1.95;
+  color: var(--text);
+  white-space: pre-wrap;
+}
