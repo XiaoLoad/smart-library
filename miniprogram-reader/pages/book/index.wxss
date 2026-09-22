@@ -1,4 +1,7 @@
-/* —— 页头 · Editorial —— */
+/* —— 页面容器 · 三列网格比默认多留两侧余量 —— */
+.page { padding: 32rpx 36rpx 80rpx; }
+
+/* —— 页头 · Editorial（保留完整三行，不做压缩） —— */
 .page-header { margin-bottom: 32rpx; }
 .page-title {
   font-size: 56rpx;
@@ -8,53 +11,156 @@
   margin-top: 8rpx;
 }
 
-/* —— 检索条 —— */
+/* —— 检索条 · 分类按钮内嵌在右端 —— */
 .searchbar {
   display: flex;
   align-items: center;
   gap: 16rpx;
+  height: 80rpx;
+  box-sizing: border-box;
+  padding: 0 24rpx;
   background: var(--bg-elevated);
   border: 1rpx solid var(--border);
   border-radius: 6rpx;
-  padding: 18rpx 24rpx;
-  margin-bottom: 28rpx;
+  margin-bottom: 36rpx;
 }
-.search-input { flex: 1; font-size: 27rpx; }
+.search-input { flex: 1; min-width: 0; height: 100%; font-size: 26rpx; }
 .ph { color: var(--text-3); }
+.search-clear { flex-shrink: 0; padding: 8rpx 4rpx; }
 .filter-btn {
   display: flex;
   align-items: center;
-  gap: 4rpx;
-  color: var(--text-2);
-  font-size: 26rpx;
-  padding-left: 20rpx;
-  border-left: 1rpx solid var(--border);
-}
-
-/* —— 书目条目 · 细线分隔的白面 —— */
-.book-item {
-  display: flex;
-  gap: 24rpx;
-  background: var(--bg-elevated);
-  border: 1rpx solid var(--border);
-  border-radius: 8rpx;
-  padding: 26rpx;
-  margin-bottom: 20rpx;
-}
-.cover {
-  width: 116rpx;
-  height: 158rpx;
-  border-radius: 4rpx;
-  background: var(--bg-subtle);
+  gap: 2rpx;
   flex-shrink: 0;
+  max-width: 260rpx;
+  height: 44rpx;
+  padding-left: 22rpx;
+  border-left: 1rpx solid var(--border);
+  color: var(--primary);
+  font-size: 26rpx;
+  font-weight: 500;
 }
-.cover-blank {
+.filter-label { max-width: 190rpx; }
+
+/* —— 书目 · 每排三本立在一条架线上，书名/位置/状态作架签挂在台板下 —— */
+.shelf-row { position: relative; margin-top: 36rpx; }
+.shelf-row + .shelf-row { margin-top: 44rpx; }
+.grid { display: flex; flex-wrap: wrap; column-gap: 30rpx; }
+/* 栏宽 = (678 - 60) / 3 = 206rpx；封面高 287rpx 恰为 206 ÷ 0.7177（中图法封面原比例）
+   类名不要用 .cell —— app.wxss 里的 .cell 是「单元格列表」样式（flex 横排 + 下边框），
+   重名会把整格掰成横排、封面被挤没。改名前先跟 app.wxss 的全局类过一遍。 */
+.shelf-cell { width: calc((100% - 60rpx) / 3); box-sizing: border-box; }
+.shelf-cell-hover { opacity: 0.65; }
+
+.cover {
+  position: relative;
+  height: 287rpx;
+  box-sizing: border-box;
+  border: 1rpx solid var(--border);
+  background: var(--bg-subtle);
+  overflow: hidden;
+}
+/* 无封面时的「内封」兜底，被上层真实封面盖住，封面缺图或加载失败才露出来 */
+.cover-inner {
+  position: absolute;
+  top: 10rpx;
+  right: 10rpx;
+  bottom: 10rpx;
+  left: 10rpx;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 18rpx 14rpx;
+  border: 1rpx solid var(--border-strong);
+  background: var(--bg-subtle);
+}
+.cover-inner-title { font-size: 24rpx; line-height: 1.4; color: var(--text); }
+.cover-seal { align-self: flex-end; width: 22rpx; height: 22rpx; background: var(--danger); }
+.cover-img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+
+.shelf-line { position: absolute; left: 0; right: 0; top: 287rpx; height: 1rpx; background: var(--border-strong); }
+.shelf-edge { position: absolute; left: 0; right: 0; top: 288rpx; height: 8rpx; background: var(--bg-muted); }
+
+.book-title { font-size: 24rpx; font-weight: 500; line-height: 1.5; margin-top: 20rpx; color: var(--text); }
+.book-loc { font-size: 22rpx; line-height: 1.5; color: var(--text-3); }
+.book-state { font-size: 22rpx; line-height: 1.5; }
+.st-ok { color: var(--success); }
+.st-warn { color: var(--warning); }
+.st-danger { color: var(--danger); }
+.st-gray { color: var(--text-3); }
+
+.status-line { text-align: center; padding: 48rpx 0; }
+
+/* —— 分类树抽屉 —— */
+.cat-mask {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 90;
+  background: rgba(44, 40, 37, 0.38);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.24s cubic-bezier(0.16, 1, 0.3, 1), visibility 0.24s;
+}
+.cat-mask.show { opacity: 1; visibility: visible; }
+
+.cat-sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 91;
+  height: 72vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-elevated);
+  border-radius: 24rpx 24rpx 0 0;
+  transform: translateY(100%);
+  visibility: hidden;
+  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), visibility 0.28s;
+}
+.cat-sheet.show { transform: translateY(0); visibility: visible; }
+
+.cat-grip { display: flex; align-items: center; justify-content: center; height: 40rpx; }
+.cat-grip-bar { width: 72rpx; height: 8rpx; border-radius: 4rpx; background: var(--border-strong); }
+.cat-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 92rpx;
+  padding: 0 36rpx;
+}
+.cat-title { font-size: 32rpx; font-weight: 600; }
+.cat-reset { font-size: 26rpx; font-weight: 500; color: var(--primary); }
+.cat-divider { height: 1rpx; background: var(--border); }
+.cat-tree { flex: 1; min-height: 0; }
+.cat-tail { height: 40rpx; }
+
+.node {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 84rpx;
+  padding-right: 36rpx;
+}
+.node-hover { background: var(--bg-subtle); }
+.node-guide { position: absolute; top: 0; bottom: 0; width: 1rpx; background: var(--border); }
+.node-chevron {
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 1rpx solid var(--border);
+  width: 32rpx;
+  flex-shrink: 0;
+  margin-right: 12rpx;
 }
-.info { height: 158rpx; display: flex; flex-direction: column; justify-content: space-between; }
-.book-title { font-size: 33rpx; font-weight: 600; }
-.meta { gap: 16rpx; flex-wrap: wrap; }
-.status-line { text-align: center; padding: 28rpx 0; }
+.node-name { flex: 1; min-width: 0; font-size: 26rpx; color: var(--text); }
+.node-count { flex-shrink: 0; margin-left: 16rpx; font-size: 22rpx; color: var(--text-3); }
+.node.is-off .node-name,
+.node.is-off .node-count { color: var(--text-3); }
+.node.is-on { background: var(--primary-light); }
+.node.is-on .node-name { color: var(--primary); font-weight: 500; }
+.node.is-on .node-count { color: var(--primary); }
+.node-bar { position: absolute; left: 0; top: 0; bottom: 0; width: 6rpx; background: var(--primary); }
