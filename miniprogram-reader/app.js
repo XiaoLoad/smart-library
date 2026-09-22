@@ -1,6 +1,7 @@
 // 智慧图书借阅管理系统 · 读者端小程序（原生）
 const auth = require('./utils/auth')
 const request = require('./utils/request')
+const badge = require('./utils/badge')
 
 App({
   globalData: {
@@ -11,6 +12,11 @@ App({
     const user = auth.getUser()
     if (user) this.globalData.user = user
     this.silentCheck()
+  },
+
+  // 前台恢复时对齐未读角标；未登录由 badge 内部自行跳过，不发请求
+  onShow() {
+    badge.refresh()
   },
 
   // 静默验活：token 失效时 request.js 会自动清理并跳登录页

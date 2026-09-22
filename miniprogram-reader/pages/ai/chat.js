@@ -2,6 +2,7 @@ const request = require('../../utils/request')
 const sse = require('../../utils/sse')
 const markdown = require('../../utils/markdown')
 const auth = require('../../utils/auth')
+const badge = require('../../utils/badge')
 
 const PAGE_SIZE = 20
 
@@ -229,6 +230,7 @@ Page({
     if (body && body.code === 401) {
       this.failStream(new Error('登录已过期，请重新登录'))
       auth.clear()
+      badge.dismiss()
       setTimeout(() => wx.reLaunch({ url: '/pages/auth/login' }), 800)
       return
     }

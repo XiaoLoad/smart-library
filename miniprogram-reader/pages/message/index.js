@@ -1,4 +1,5 @@
 const request = require('../../utils/request')
+const badge = require('../../utils/badge')
 const { fmtDateTime } = require('../../utils/datetime')
 
 const PAGE_SIZE = 10
@@ -58,19 +59,12 @@ Page({
     }
   },
 
-  async refreshUnread() {
-    try {
-      const res = await request.get('/notification/unread-count', undefined, { silent: true })
-      const unread = res.count || 0
-      this.setData({ unread })
-      if (unread > 0) {
-        wx.setTabBarBadge({ index: 3, text: String(unread > 99 ? '99+' : unread) })
-      } else {
-        wx.removeTabBarBadge({ index: 3 })
-      }
-    } catch (e) {
-      /* 静默 */
-    }
+  // 未读角标由 utils/badge 统一维护，这里只把数量同步给页头
+  refreshUnread() {
+    return badge.refresh().then((n) => {
+      this.setData({ unread: n })
+      return n
+    })
   },
 
   async onNoticeTap(e) {

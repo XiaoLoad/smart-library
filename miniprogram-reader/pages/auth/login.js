@@ -1,5 +1,6 @@
 const request = require('../../utils/request')
 const auth = require('../../utils/auth')
+const badge = require('../../utils/badge')
 
 function wxLogin() {
   return new Promise((resolve, reject) => {
@@ -36,6 +37,7 @@ Page({
       if (remember) auth.rememberUsername(username)
       else auth.forgetUsername()
       await this.maybeBindWechat()
+      badge.refresh()
       wx.switchTab({ url: '/pages/book/index' })
     } catch (e) {
       /* 错误提示已由 request 统一处理 */
@@ -83,6 +85,7 @@ Page({
       const res = await request.post('/auth/wechat-login', { code })
       auth.saveToken(res.token)
       auth.saveUser(res.user)
+      badge.refresh()
       wx.switchTab({ url: '/pages/book/index' })
     } catch (e) {
       /* 未绑定等业务错误 toast 已由 request 处理 */
