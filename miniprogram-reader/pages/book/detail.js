@@ -1,6 +1,6 @@
 const request = require('../../utils/request')
 const cover = require('../../utils/cover')
-const { fmtDate, fmtMoney } = require('../../utils/datetime')
+const { fmtDate } = require('../../utils/datetime')
 
 Page({
   data: {
@@ -11,6 +11,11 @@ Page({
     borrowing: false,
     blockReason: '',
     canBorrow: false,
+    coverChar: '',
+    descHead: '',
+    descRest: '',
+    priceNum: '',
+    stockTicks: [],
   },
 
   onLoad(options) {
@@ -26,13 +31,17 @@ Page({
   async load() {
     try {
       const book = await request.get('/book/' + this.bookId)
-      this.setData({
-        book,
-        cover: cover.coverSrc(book.coverUrl),
-        pubDateText: fmtDate(book.publishDate),
-        priceText: fmtMoney(book.price),
-        loading: false,
-      })
+      this.setData(
+        Object.assign(
+          {
+            book,
+            cover: cover.coverSrc(book.coverUrl),
+            pubDateText: fmtDate(book.publishDate),
+            loading: false,
+          },
+          this.plateFields(book)
+        )
+      )
       wx.setNavigationBarTitle({ title: book.title || '图书详情' })
       this.fillCover(book.coverUrl)
     } catch (e) {
@@ -48,12 +57,33 @@ Page({
         request.get('/book/' + this.bookId, undefined, { silent: true }),
         request.get('/borrow/quota', undefined, { silent: true }),
       ])
-      this.setData({ book, quota, cover: cover.coverSrc(book.coverUrl) })
+      this.setData(
+        Object.assign(
+          { book, quota, cover: cover.coverSrc(book.coverUrl) },
+          this.plateFields(book)
+        )
+      )
       this.fillCover(book.coverUrl)
     } catch (e) {
       /* 静默：不把已渲染的详情打回空态 */
     }
     this.syncBorrowState()
+  },
+
+  /** 藏书票派生数据：无封面时的首字、简介首字下沉、定价、库存刻度片 */
+  plateFields(book) {
+    const total = book.totalCount || 0
+    const cells = Math.min(total, 10)
+    const lit = total ? Math.round(((book.availableCount || 0) / total) * cells) : 0
+    const desc = book.description || ''
+    const isCjk = /^[\u4e00-\u9fa5]/.test(desc)
+    return {
+      coverChar: (book.title || '').charAt(0),
+      descHead: isCjk ? desc.charAt(0) : '',
+      descRest: isCjk ? desc.slice(1) : desc,
+      priceNum: Number(book.price || 0).toFixed(2),
+      stockTicks: Array.from({ length: cells }, (_, i) => ({ i, on: i < lit })),
+    }
   },
 
   /** 封面按需编码：编码回来后就地替换 */
