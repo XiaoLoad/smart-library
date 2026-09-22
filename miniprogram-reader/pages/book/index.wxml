@@ -64,8 +64,8 @@
 
 <!-- 分类树抽屉：父节点即筛选，箭头单独负责展开收起 -->
 <view class="cat-mask {{catOpen ? 'show' : ''}}" catchtap="closeCat" catchtouchmove="noop" />
-<view class="cat-sheet {{catOpen ? 'show' : ''}}">
-  <view class="cat-grip"><view class="cat-grip-bar"></view></view>
+<view class="cat-sheet {{catOpen ? 'show' : ''}} {{catDragging ? 'dragging' : ''}}" style="height:{{catHeight}}vh">
+  <view class="cat-grip" catchtouchstart="onCatGripStart" catchtouchmove="onCatGripMove" catchtouchend="onCatGripEnd" catchtouchcancel="onCatGripEnd"><view class="cat-grip-bar"></view></view>
   <view class="cat-head">
     <view class="cat-title serif">分类</view>
     <view class="cat-reset" catchtap="onCatReset">全部图书</view>

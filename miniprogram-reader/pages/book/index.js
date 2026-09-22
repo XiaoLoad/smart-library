@@ -87,9 +87,18 @@ Page({
     expandedIds: {},
     catSelId: 0,
     catSelName: '',
+
+    catHeight: 72,
+    catDragging: false,
   },
 
   onLoad() {
+    try {
+      const info = (wx.getWindowInfo ? wx.getWindowInfo() : wx.getSystemInfoSync()) || {}
+      this._winH = info.windowHeight || 0
+    } catch (e) {
+      this._winH = 0
+    }
     this.loadCategories()
     this.reload()
   },
@@ -115,10 +124,47 @@ Page({
   async openCat() {
     if (!this.data.catLoaded) await this.loadCategories()
     if (!this.data.catLoaded) return
-    this.setData({ catOpen: true })
+    this.setData({ catOpen: true, catHeight: 72 })
   },
   closeCat() {
     this.setData({ catOpen: false })
+  },
+
+  /* 拖动条手势：底部锚定，向上拉高（展开）、向下拉低（关闭）。
+     几何量 px→vh 用 onLoad 缓存的窗口高换算；松手按落点高度就近吸附。 */
+  onCatGripStart(e) {
+    if (!this.data.catOpen) return
+    const t = e.touches[0]
+    if (!t) return
+    this._grip = { startY: t.clientY, startH: this.data.catHeight, curH: this.data.catHeight }
+    this.setData({ catDragging: true })
+  },
+  onCatGripMove(e) {
+    const g = this._grip
+    if (!g) return
+    const t = e.touches[0]
+    if (!t) return
+    const dy = t.clientY - g.startY // px，正值向下
+    const winH = this._winH || 700
+    let h = g.startH - (dy / winH) * 100
+    if (h < 20) h = 20
+    else if (h > 100) h = 100
+    g.curH = h
+    this.setData({ catHeight: h })
+  },
+  onCatGripEnd() {
+    const g = this._grip
+    if (!g) return
+    this._grip = null
+    const h = g.curH
+    this.setData({ catDragging: false })
+    if (h < 45) {
+      this.closeCat() // 拉到足够低 → 关闭
+    } else if (h >= 84) {
+      this.setData({ catHeight: 92 }) // 展开态
+    } else {
+      this.setData({ catHeight: 72 }) // 回落到默认折叠态
+    }
   },
   onCatToggle(e) {
     const id = e.currentTarget.dataset.id
