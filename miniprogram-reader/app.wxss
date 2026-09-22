@@ -26,6 +26,8 @@ page {
   /* —— 线 —— */
   --border: #e8e3dc;
   --border-strong: #d4cdc2;
+  /* —— 底部导航总高（栏体 112rpx，安全区另加）—— 各页避让统一引用此变量 —— */
+  --tabbar-h: 112rpx;
 
   background: var(--bg);
   color: var(--text);
@@ -47,7 +49,7 @@ page {
 .flex-1 { flex: 1; min-width: 0; }
 .ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.page { padding: 36rpx 28rpx 64rpx; }
+.page { padding: 36rpx 28rpx calc(var(--tabbar-h) + env(safe-area-inset-bottom)); }
 
 /* —— 卡片 · 细边框无重阴影 —— */
 .card {

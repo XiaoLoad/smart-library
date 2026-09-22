@@ -102,6 +102,11 @@ Page({
     this.loadCategories()
     this.reload()
   },
+  onShow() {
+    if (typeof this.getTabBar === 'function' && this.getTabBar()) {
+      this.getTabBar().setData({ selected: 0 })
+    }
+  },
   onPullDownRefresh() {
     this.reload().finally(() => wx.stopPullDownRefresh())
   },

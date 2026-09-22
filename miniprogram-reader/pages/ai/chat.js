@@ -79,6 +79,9 @@ Page({
   },
   // 作为 tabBar 页常驻：每次进入补齐会话（登录后首切场景）
   onShow() {
+    if (typeof this.getTabBar === 'function' && this.getTabBar()) {
+      this.getTabBar().setData({ selected: 2 })
+    }
     if (!this.data.currentConv) this.loadConversations(true)
   },
   onUnload() {

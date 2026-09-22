@@ -19,6 +19,7 @@ function paint(count) {
   } else {
     wx.removeTabBarBadge({ index: TAB_INDEX, fail() {} })
   }
+  syncCustomBar(n)
   return n
 }
 
@@ -27,6 +28,17 @@ function dismiss() {
   shown = null
   inflight = null
   wx.removeTabBarBadge({ index: TAB_INDEX, fail() {} })
+  syncCustomBar(0)
+}
+
+// 自定义 tabBar 下 wx.setTabBarBadge 失效，改由 custom-tab-bar 组件自绘角标
+function syncCustomBar(n) {
+  try {
+    const pages = getCurrentPages()
+    const cur = pages[pages.length - 1]
+    const bar = cur && typeof cur.getTabBar === 'function' && cur.getTabBar()
+    if (bar && bar.setData) bar.setData({ unread: n })
+  } catch (e) {}
 }
 
 // 拉一次未读数并刷新角标，resolve 当前未读数（失败时给上一次的值）
