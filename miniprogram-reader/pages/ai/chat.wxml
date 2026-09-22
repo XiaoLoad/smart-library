@@ -21,56 +21,98 @@
     </scroll-view>
   </view>
 
-  <!-- 顶栏 -->
+  <!-- 顶栏（固定，不随对话滚动） -->
   <view class="topbar">
     <view class="topbar-btn" bindtap="toggleDrawer">
       <app-icon name="menu" size="32" color="#3a5a6b" />
     </view>
-    <view class="flex-1 ellipsis topbar-title serif">{{currentConv.titleText || 'AI 助手'}}</view>
+    <view class="flex-1 ellipsis topbar-title serif">{{currentConv.titleText || '馆员 AI'}}</view>
     <view class="topbar-btn" bindtap="createConversation">
       <app-icon name="plus" size="32" color="#3a5a6b" />
     </view>
   </view>
 
-  <!-- 消息区 -->
+  <!-- 消息区（仅此处滚动；顶栏/输入条固定） -->
   <scroll-view scroll-y class="msgs" scroll-into-view="{{scrollInto}}" scroll-with-animation>
+    <view class="msgs-inner">
     <view wx:if="{{hasMoreHistory}}" class="tiny load-earlier" bindtap="loadEarlier">
       {{loadingHistory ? '加载中…' : '加载更早消息'}}
     </view>
 
     <view wx:for="{{messages}}" wx:key="id" id="msg-{{item.id}}">
-      <!-- 用户 -->
+      <!-- 用户：靠右 -->
       <view wx:if="{{item.role === 'user'}}" class="msg-row msg-row-user">
         <view class="bubble bubble-user"><text user-select>{{item.content}}</text></view>
       </view>
-      <!-- AI -->
+      <!-- AI：靠左，批注边距线 + 馆员 AI 小标 -->
       <view wx:else class="msg-row">
         <view class="bubble bubble-ai">
+          <text class="ai-label">馆员 AI</text>
+
+          <!-- 深度思考（折叠可展开） -->
           <view wx:if="{{item.thinking}}" class="thinking" data-id="{{item.id}}" bindtap="toggleThinking">
             <text class="eyebrow">THOUGHT</text>
             <view class="thinking-body">{{item.thinkingOpen ? item.thinking : '深度思考已折叠，点击展开'}}</view>
           </view>
+
+          <!-- 工具调用链 -->
           <view wx:if="{{item.toolEvents.length}}" class="tools">
-            <view wx:for="{{item.toolEvents}}" wx:for-item="tool" wx:key="index" class="tool-chip">
-              <app-icon
-                name="{{tool.phase === 'start' ? 'clock' : tool.phase === 'error' ? 'x-circle' : 'check-circle'}}"
-                size="24"
-                color="{{tool.phase === 'start' ? '#c4904a' : tool.phase === 'error' ? '#a85a4a' : '#7a9270'}}"
-              />
-              <text class="tool-name">{{tool.name}}</text>
-              <text wx:if="{{tool.detail}}" class="tool-detail">· {{tool.detail}}</text>
+            <view wx:if="{{item.toolEvents.length >= 2}}" class="tool-chain-head">
+              <text class="chain-dot" />
+              <text>本次调用了 {{item.toolEvents.length}} 个工具</text>
+            </view>
+            <view
+              wx:for="{{item.toolEvents}}"
+              wx:for-item="tool"
+              wx:for-index="ti"
+              wx:key="index"
+              class="tool-card {{tool.phase}}"
+            >
+              <view class="tool-head">
+                <view class="tool-icon-wrap">
+                  <app-icon
+                    class="tool-icon"
+                    name="{{tool.phase === 'start' ? 'clock' : (tool.phase === 'error' ? 'x-circle' : 'check-circle')}}"
+                    size="22"
+                    color="{{tool.phase === 'start' ? '#c4904a' : (tool.phase === 'error' ? '#a85a4a' : '#7a9270')}}"
+                  />
+                </view>
+                <view class="tool-body">
+                  <view class="tool-title-row">
+                    <text class="tool-seq">{{ti + 1}}</text>
+                    <text class="tool-name">{{tool.label}}</text>
+                  </view>
+                  <text wx:if="{{tool.detail}}" class="tool-detail">{{tool.detail}}</text>
+                </view>
+                <view
+                  wx:if="{{tool.phase === 'end' && tool.data}}"
+                  class="tool-toggle {{tool.expanded ? 'on' : ''}}"
+                  data-id="{{item.id}}"
+                  data-ti="{{ti}}"
+                  bindtap="toggleToolData"
+                >
+                  <app-icon class="tool-chev" name="chevron-down" size="20" color="#9c958d" />
+                </view>
+              </view>
+              <view wx:if="{{tool.expanded && tool.data}}" class="tool-data">
+                <text user-select class="tool-data-json">{{tool.data}}</text>
+              </view>
             </view>
           </view>
-          <rich-text wx:if="{{item.html}}" nodes="{{item.html}}"></rich-text>
-          <text wx:elif="{{item.content}}" user-select>{{item.content}}</text>
+
+          <!-- 正文：流式时逐字显示 shown + 光标；结束切富文本 -->
+          <rich-text wx:if="{{!item.pending && item.html}}" nodes="{{item.html}}"></rich-text>
+          <text wx:elif="{{!item.pending && item.content}}" user-select>{{item.content}}</text>
+          <text wx:else user-select>{{item.shown}}</text>
           <text wx:if="{{item.pending}}" class="typing">▍</text>
         </view>
       </view>
     </view>
     <view id="msg-bottom-{{scrollTick}}" style="height:2rpx;"></view>
+    </view>
   </scroll-view>
 
-  <!-- 输入区 -->
+  <!-- 输入区（固定底部，圆角书写条） -->
   <view class="input-bar">
     <input
       class="chat-input"
@@ -78,12 +120,24 @@
       bindinput="onInput"
       bindconfirm="send"
       confirm-type="send"
-      placeholder="{{streaming ? 'AI 正在回复…' : '问问 AI 助手…'}}"
+      placeholder="{{streaming ? '馆员 AI 正在回复…' : '问问馆员 AI…'}}"
       placeholder-class="ph"
       disabled="{{streaming}}"
       adjust-position
     />
-    <button wx:if="{{streaming}}" class="btn btn-danger-quiet btn-mini" bindtap="stop">停止</button>
-    <button wx:else class="btn btn-primary btn-mini" bindtap="send">发送</button>
+    <view
+      wx:if="{{streaming}}"
+      class="send-btn stop"
+      bindtap="stop"
+    >
+      <app-icon name="close" size="30" color="#faf8f5" />
+    </view>
+    <view
+      wx:else
+      class="send-btn {{input ? '' : 'disabled'}}"
+      bindtap="send"
+    >
+      <app-icon name="arrow-up" size="34" color="#faf8f5" />
+    </view>
   </view>
 </view>

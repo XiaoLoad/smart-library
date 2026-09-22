@@ -43,6 +43,7 @@ const ICONS = {
   clock: () => `<circle cx="12" cy="12" r="8"/><path d="M12 7.5V12l3.2 2"/>`,
   'check-circle': () => `<circle cx="12" cy="12" r="8"/><path d="M8.2 12.2 11 15l5.2-5.6"/>`,
   'x-circle': () => `<circle cx="12" cy="12" r="8"/><path d="M9.2 9.2 14.8 14.8M14.8 9.2 9.2 14.8"/>`,
+  'arrow-up': () => `<path d="M12 19V5M6 11l6-6 6 6"/>`,
   seal: (c) =>
     `<rect x="4.5" y="4.5" width="15" height="15" rx="1.5" stroke-width="1.2"/><path d="M8 9h8M8 12h8M8 15h8" opacity=".35"/>`,
 }
