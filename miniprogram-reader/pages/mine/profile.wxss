@@ -1,0 +1,12 @@
+.page-header { margin-bottom: 32rpx; }
+.page-title { font-size: 56rpx; font-weight: 600; letter-spacing: 4rpx; margin-top: 8rpx; }
+
+.kv {
+  display: flex;
+  padding: 14rpx 0;
+  font-size: 27rpx;
+  border-bottom: 1rpx solid var(--bg-muted);
+}
+.kv:last-child { border-bottom: none; }
+.kv .k { width: 130rpx; color: var(--text-3); flex-shrink: 0; letter-spacing: 2rpx; }
+.ph { color: var(--text-3); }

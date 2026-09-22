@@ -1,0 +1,51 @@
+<view class="page">
+  <!-- Editorial 页头 -->
+  <view class="page-header">
+    <text class="eyebrow">COLLECTION</text>
+    <view class="page-title serif">馆藏图书</view>
+    <view class="tiny" wx:if="{{total}}">共 {{total}} 种馆藏</view>
+  </view>
+
+  <!-- 检索 -->
+  <view class="searchbar">
+    <app-icon name="search" size="28" color="#9c958d" />
+    <input
+      class="search-input"
+      placeholder="搜索书名 / 作者 / ISBN"
+      placeholder-class="ph"
+      value="{{keyword}}"
+      bindinput="onKeyword"
+      confirm-type="search"
+    />
+    <picker range="{{categories}}" range-key="label" value="{{categoryIndex}}" bindchange="onCategoryChange">
+      <view class="filter-btn">
+        分类
+        <app-icon name="chevron-down" size="22" color="#6b6560" />
+      </view>
+    </picker>
+  </view>
+
+  <view wx:if="{{firstLoad && loading}}" class="tiny status-line">正在整理书架…</view>
+
+  <view class="book-item fade-in" wx:for="{{list}}" wx:key="id" data-id="{{item.id}}" bindtap="goDetail">
+    <image wx:if="{{item.cover}}" class="cover" src="{{item.cover}}" mode="aspectFill" lazy-load />
+    <view wx:else class="cover cover-blank">
+      <app-icon name="book-open" size="48" color="#c9c1b6" />
+    </view>
+    <view class="flex-1 info">
+      <view class="book-title serif ellipsis">{{item.title}}</view>
+      <view class="tiny ellipsis">{{item.author}} · {{item.publisher || '—'}}</view>
+      <view class="row meta">
+        <view class="badge {{item.availableCount > 0 ? 'badge-green' : 'badge-red'}}">
+          {{item.availableCount > 0 ? '可借 ' + item.availableCount : '已借完'}}
+        </view>
+        <text class="tiny">馆藏 {{item.totalCount}}</text>
+        <text wx:if="{{item.status === 0}}" class="badge badge-gray">已下架</text>
+      </view>
+    </view>
+  </view>
+
+  <empty-state wx:if="{{!firstLoad && !loading && !list.length}}" text="没有找到相关图书" icon="search" />
+  <view wx:if="{{loading && !firstLoad}}" class="tiny status-line">加载中…</view>
+  <view wx:if="{{finished && list.length}}" class="tiny status-line eyebrow">— END OF COLLECTION —</view>
+</view>

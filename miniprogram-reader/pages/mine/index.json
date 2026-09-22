@@ -1,0 +1,6 @@
+{
+  "navigationBarTitleText": "我的",
+  "usingComponents": {
+    "app-icon": "/components/app-icon/app-icon"
+  }
+}

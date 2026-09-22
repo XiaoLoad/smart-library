@@ -1,0 +1,63 @@
+<view class="page">
+  <view class="page-header">
+    <text class="eyebrow">INBOX</text>
+    <view class="page-title serif">消息</view>
+  </view>
+
+  <!-- 下划线式分段 -->
+  <view class="tabs">
+    <view class="tab {{tab === 'notice' ? 'tab-active' : ''}}" data-tab="notice" bindtap="onTab">
+      通知<text wx:if="{{unread > 0}}" class="unread-count">{{unread}}</text>
+    </view>
+    <view class="tab {{tab === 'announce' ? 'tab-active' : ''}}" data-tab="announce" bindtap="onTab">公告</view>
+  </view>
+
+  <!-- 通知 -->
+  <block wx:if="{{tab === 'notice'}}">
+    <view class="row-between readall-bar" wx:if="{{notices.length}}">
+      <text class="tiny">共 {{notices.length}} 条</text>
+      <text class="link" bindtap="onReadAll">全部标记已读</text>
+    </view>
+    <view
+      class="card notice {{item.isRead ? '' : 'notice-unread'}}"
+      wx:for="{{notices}}"
+      wx:key="id"
+      data-index="{{index}}"
+      bindtap="onNoticeTap"
+    >
+      <view class="row-between">
+        <view class="row notice-head">
+          <view class="badge {{item.type === 2 ? 'badge-red' : item.type === 3 ? 'badge-orange' : item.type === 4 ? 'badge-blue' : 'badge-gray'}}">{{item.typeText}}</view>
+          <text class="notice-title ellipsis">{{item.title}}</text>
+          <text wx:if="{{!item.isRead}}" class="dot"></text>
+        </view>
+      </view>
+      <view class="muted notice-content">{{item.content}}</view>
+      <view class="tiny">{{item.timeText}}</view>
+    </view>
+    <empty-state wx:if="{{!firstLoad && !loading && !notices.length}}" text="暂无通知" icon="bell" />
+  </block>
+
+  <!-- 公告 -->
+  <block wx:else>
+    <view
+      class="card announce fade-in"
+      wx:for="{{items}}"
+      wx:key="id"
+      data-id="{{item.id}}"
+      bindtap="goAnnounce"
+    >
+      <view class="row-between">
+        <view class="flex-1 ellipsis announce-title serif">
+          <text wx:if="{{item.top}}" class="badge badge-red badge-inline">置顶</text>
+          {{item.title}}
+        </view>
+        <app-icon name="chevron-right" size="26" color="#9c958d" />
+      </view>
+      <view class="tiny">{{item.publisherName}} · {{item.timeText}}</view>
+    </view>
+    <empty-state wx:if="{{!firstLoad && !loading && !items.length}}" text="暂无公告" icon="scroll" />
+    <view wx:if="{{loading && !firstLoad}}" class="tiny" style="text-align:center;padding:24rpx;">加载中…</view>
+    <view wx:if="{{finished && items.length}}" class="tiny eyebrow" style="text-align:center;padding:24rpx;">— END —</view>
+  </block>
+</view>

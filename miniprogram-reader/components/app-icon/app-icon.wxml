@@ -1,0 +1,1 @@
+<image class="app-icon" src="{{src}}" style="width:{{px}}px;height:{{px}}px;" mode="aspectFit" />

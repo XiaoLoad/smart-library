@@ -9,7 +9,7 @@ server:
 
 spring:
   datasource:
-    url: jdbc:mysql://localhost:3306/library_db?useUnicode=true&characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    url: jdbc:mysql://localhost:3306/library_db?useUnicode=true&characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&zeroDateTimeBehavior=CONVERT_TO_NULL
     username: root
     password: REPLACE_WITH_YOUR_DB_PASSWORD
     driver-class-name: com.mysql.cj.jdbc.Driver
@@ -53,6 +53,11 @@ app:
 jwt:
   secret: REPLACE_WITH_YOUR_JWT_SECRET
   expire-ms: 604800000
+
+# 微信小程序登录（code2session）
+wechat:
+  appid: touristappid        # ← 替换为小程序 AppID
+  secret: REPLACE_WITH_YOUR_WECHAT_SECRET  # ← 小程序后台获取，生产建议用环境变量注入
 
 logging:
   level:

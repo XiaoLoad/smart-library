@@ -1,0 +1,6 @@
+{
+  "navigationBarTitleText": "取书码",
+  "usingComponents": {
+    "app-icon": "/components/app-icon/app-icon"
+  }
+}

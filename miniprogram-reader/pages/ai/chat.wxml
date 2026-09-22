@@ -1,0 +1,89 @@
+<view class="chat-page">
+  <!-- 会话抽屉 -->
+  <view class="drawer-mask" wx:if="{{drawerOpen}}" bindtap="toggleDrawer"></view>
+  <view class="drawer {{drawerOpen ? 'drawer-open' : ''}}">
+    <view class="drawer-header">
+      <text class="drawer-title serif">会话</text>
+      <text class="link" bindtap="createConversation">＋ 新建</text>
+    </view>
+    <scroll-view scroll-y class="drawer-list">
+      <view
+        wx:for="{{conversations}}"
+        wx:key="id"
+        class="conv-item {{currentConv && currentConv.id === item.id ? 'conv-active' : ''}}"
+      >
+        <view class="flex-1 ellipsis conv-title" data-id="{{item.id}}" bindtap="onSelectConv">{{item.titleText}}</view>
+        <view class="conv-del" data-id="{{item.id}}" catchtap="onDeleteConv">
+          <app-icon name="close" size="24" color="#9c958d" />
+        </view>
+      </view>
+      <view wx:if="{{!conversations.length}}" class="tiny" style="padding:32rpx;text-align:center;">暂无会话</view>
+    </scroll-view>
+  </view>
+
+  <!-- 顶栏 -->
+  <view class="topbar">
+    <view class="topbar-btn" bindtap="toggleDrawer">
+      <app-icon name="menu" size="32" color="#3a5a6b" />
+    </view>
+    <view class="flex-1 ellipsis topbar-title serif">{{currentConv.titleText || 'AI 助手'}}</view>
+    <view class="topbar-btn" bindtap="createConversation">
+      <app-icon name="plus" size="32" color="#3a5a6b" />
+    </view>
+  </view>
+
+  <!-- 消息区 -->
+  <scroll-view scroll-y class="msgs" scroll-into-view="{{scrollInto}}" scroll-with-animation>
+    <view wx:if="{{hasMoreHistory}}" class="tiny load-earlier" bindtap="loadEarlier">
+      {{loadingHistory ? '加载中…' : '加载更早消息'}}
+    </view>
+
+    <view wx:for="{{messages}}" wx:key="id" id="msg-{{item.id}}">
+      <!-- 用户 -->
+      <view wx:if="{{item.role === 'user'}}" class="msg-row msg-row-user">
+        <view class="bubble bubble-user"><text user-select>{{item.content}}</text></view>
+      </view>
+      <!-- AI -->
+      <view wx:else class="msg-row">
+        <view class="bubble bubble-ai">
+          <view wx:if="{{item.thinking}}" class="thinking" data-id="{{item.id}}" bindtap="toggleThinking">
+            <text class="eyebrow">THOUGHT</text>
+            <view class="thinking-body">{{item.thinkingOpen ? item.thinking : '深度思考已折叠，点击展开'}}</view>
+          </view>
+          <view wx:if="{{item.toolEvents.length}}" class="tools">
+            <view wx:for="{{item.toolEvents}}" wx:for-item="tool" wx:key="index" class="tool-chip">
+              <app-icon
+                name="{{tool.phase === 'start' ? 'clock' : tool.phase === 'error' ? 'x-circle' : 'check-circle'}}"
+                size="24"
+                color="{{tool.phase === 'start' ? '#c4904a' : tool.phase === 'error' ? '#a85a4a' : '#7a9270'}}"
+              />
+              <text class="tool-name">{{tool.name}}</text>
+              <text wx:if="{{tool.detail}}" class="tool-detail">· {{tool.detail}}</text>
+            </view>
+          </view>
+          <rich-text wx:if="{{item.html}}" nodes="{{item.html}}"></rich-text>
+          <text wx:elif="{{item.content}}" user-select>{{item.content}}</text>
+          <text wx:if="{{item.pending}}" class="typing">▍</text>
+        </view>
+      </view>
+    </view>
+    <view id="msg-bottom-{{scrollTick}}" style="height:2rpx;"></view>
+  </scroll-view>
+
+  <!-- 输入区 -->
+  <view class="input-bar">
+    <input
+      class="chat-input"
+      value="{{input}}"
+      bindinput="onInput"
+      bindconfirm="send"
+      confirm-type="send"
+      placeholder="{{streaming ? 'AI 正在回复…' : '问问 AI 助手…'}}"
+      placeholder-class="ph"
+      disabled="{{streaming}}"
+      adjust-position
+    />
+    <button wx:if="{{streaming}}" class="btn btn-danger-quiet btn-mini" bindtap="stop">停止</button>
+    <button wx:else class="btn btn-primary btn-mini" bindtap="send">发送</button>
+  </view>
+</view>

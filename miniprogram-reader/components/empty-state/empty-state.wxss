@@ -1,0 +1,21 @@
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 120rpx 0 80rpx;
+}
+.empty-mark {
+  width: 128rpx;
+  height: 128rpx;
+  border: 1rpx solid var(--border);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 28rpx;
+}
+.empty-text {
+  color: var(--text-3);
+  font-size: 26rpx;
+  letter-spacing: 2rpx;
+}
