@@ -8,11 +8,26 @@
 .quota-unit { font-size: 26rpx; color: var(--text-3); }
 .warn { color: var(--danger); }
 
+/* —— 状态坞 · 滑过额度卡后吸附在视口顶部 ——
+   与书库页的检索坞同构：负外边距拉成通栏（本页左右内边距是 28rpx）、背景填页面同色。
+   底部 28rpx 走 margin 而不是 padding，这样吸附时坞的底边正好落在分段那条下划线上，
+   投影贴着线走；不吸附时的观感与改动前一致。 */
+.dock {
+  position: sticky;
+  top: 0;
+  z-index: 60; /* 高于记录卡、低于分类遮罩(90) */
+  margin: 0 -28rpx 28rpx;
+  padding: 12rpx 28rpx 0;
+  background: var(--bg);
+}
+/* 吸附中只补一道极浅投影——发丝线由 .segments 自带的下划线充当 */
+.dock.stuck { box-shadow: 0 12rpx 18rpx -16rpx rgba(44, 40, 37, 0.3); }
+
 /* —— 分段 · 下划线 —— */
 .segments {
   white-space: nowrap;
   border-bottom: 1rpx solid var(--border);
-  margin-bottom: 28rpx;
+  margin-bottom: 0; /* 与下方记录卡的间距交给 .dock */
 }
 .seg {
   display: inline-block;

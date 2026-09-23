@@ -22,6 +22,26 @@ Page({
     loading: false,
     finished: false,
     firstLoad: true,
+    dockStuck: false, // 状态坞是否已吸附在顶部
+  },
+
+  /* 状态坞的吸附阈值同书库页：量一次坞的页面偏移量，之后逐帧只做比较。
+     坞在额度卡下面，位置比书库页低，所以必须实测而不是写死一个数。 */
+  onReady() {
+    wx.createSelectorQuery()
+      .select('.dock')
+      .boundingClientRect()
+      .selectViewport()
+      .scrollOffset()
+      .exec((res) => {
+        const rect = res && res[0]
+        const vp = res && res[1]
+        if (rect) this._dockTop = rect.top + ((vp && vp.scrollTop) || 0)
+      })
+  },
+  onPageScroll(e) {
+    const stuck = e.scrollTop >= (this._dockTop === undefined ? 200 : this._dockTop)
+    if (stuck !== this.data.dockStuck) this.setData({ dockStuck: stuck })
   },
 
   onLoad() {
@@ -46,11 +66,12 @@ Page({
   async loadQuota(fresh) {
     if (!fresh) {
       const stale = cache.read('borrow:quota')
-      if (stale) this.setData({ quota: stale })
+      if (stale) this.setData({ quota: stale }, () => this.measureDock())
     }
     try {
       const quota = await request.get('/borrow/quota', undefined, { silent: true })
-      this.setData({ quota })
+      // 额度卡在坞的上方，它到货会把坞往下推——落屏后重新量一次吸附阈值
+      this.setData({ quota }, () => this.measureDock())
       cache.write('borrow:quota', quota)
     } catch (e) {
       /* 静默 */

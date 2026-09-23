@@ -2,7 +2,7 @@
 .page { padding: 32rpx 36rpx calc(var(--tabbar-h) + env(safe-area-inset-bottom)); }
 
 /* —— 页头 · Editorial（保留完整三行，不做压缩） —— */
-.page-header { margin-bottom: 32rpx; }
+.page-header { margin-bottom: 20rpx; } /* 20 + .dock 的 12rpx 顶部内边距 = 原来的 32rpx */
 .page-title {
   font-size: 56rpx;
   font-weight: 600;
@@ -10,6 +10,23 @@
   line-height: 1.3;
   margin-top: 8rpx;
 }
+
+/* —— 检索坞 · 滑过页头后吸附在视口顶部 ——
+   负外边距把坞拉成通栏（页面左右各 36rpx 的内边距由坞自己补回来），背景填页面同色，
+   吸附时滑上来的书架从它底下穿过，不会从文字旁边露出来。
+   坞的内边距是把原有间距折进来的：顶部 12rpx 由 .page-header 的 margin 32→20 补足，
+   底部 20+16 仍是原来 .searchbar 的 36rpx，所以不吸附时的观感与改动前完全一致。 */
+.dock {
+  position: sticky;
+  top: 0;
+  z-index: 60; /* 高于书架、低于分类遮罩(90) */
+  margin: 0 -36rpx 16rpx;
+  padding: 12rpx 36rpx 20rpx;
+  background: var(--bg);
+}
+/* 吸附中：补一条发丝线 + 一道极浅投影，做出「贴上去」的层次。
+   走 box-shadow 而不是 border——切进切出时高度不变，不会把下方书架推一下。 */
+.dock.stuck { box-shadow: 0 1rpx 0 var(--border), 0 12rpx 18rpx -16rpx rgba(44, 40, 37, 0.3); }
 
 /* —— 检索条 · 分类按钮内嵌在右端 —— */
 .searchbar {
@@ -22,7 +39,7 @@
   background: var(--bg-elevated);
   border: 1rpx solid var(--border);
   border-radius: 6rpx;
-  margin-bottom: 36rpx;
+  margin-bottom: 0; /* 与下方书架的间距交给 .dock 的内外边距 */
 }
 .search-input { flex: 1; min-width: 0; height: 100%; font-size: 26rpx; }
 .ph { color: var(--text-3); }
