@@ -293,3 +293,212 @@
 .conv-active { background: var(--primary-light); }
 .conv-title { font-size: 27rpx; }
 .conv-del { padding: 8rpx 12rpx; display: flex; align-items: center; }
+
+/* —— 目录定位条 · 在流细条（面板展开把对话推下去，绝不遮挡） —— */
+.navstrip {
+  flex: 0 0 auto;
+  background: var(--bg-elevated);
+  border-bottom: 1rpx solid var(--border);
+  padding: 0 28rpx;
+}
+.ns-head {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+  padding: 8rpx 0;
+}
+/* 「目录 ⌄」独立热区：只有它开合面板，tick 区点击不再冒泡误触 */
+.ns-toggle {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  flex-shrink: 0;
+  padding: 10rpx 16rpx 10rpx 0;
+}
+.ns-toggle:active { opacity: 0.55; }
+.ns-cap {
+  font-size: 24rpx;
+  letter-spacing: 4rpx;
+  color: var(--text-3);
+  flex-shrink: 0; /* 禁止被 tick 区挤压换行 */
+  white-space: nowrap;
+}
+.ns-caret {
+  flex-shrink: 0;
+  transition: transform 0.2s ease;
+}
+.ns-caret.open { transform: rotate(180deg); }
+/* tick 区：上限约容纳 4 枚 tick，第 5 轮起固定宽度、内部左右滑（当前轮由 scroll-into-view 自动滚入视野） */
+.ns-ticks {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 330rpx;
+  margin-left: auto;
+  white-space: nowrap;
+}
+.ns-ticks-in {
+  display: flex;
+  align-items: center;
+  gap: 6rpx; /* 间距主要由 tick 自身热区内边距提供 */
+  padding: 4rpx 2rpx;
+}
+/* 弹性占位：替代 justify-content:flex-end——溢出时占位收缩为 0，
+   保证溢出只发生在右侧、任何 tick 都可滚动到达（flex-end 溢出会让左侧数字不可达） */
+.ns-spacer {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.ns-tick {
+  font-family: 'Songti SC', 'STSong', 'SimSun', serif;
+  font-size: 26rpx;
+  line-height: 1.3;
+  color: var(--text-3);
+  padding: 12rpx 14rpx 14rpx; /* 扩大触控热区，防误触相邻元素 */
+  min-width: 44rpx;
+  text-align: center;
+  box-sizing: content-box;
+  border-bottom: 3rpx solid transparent;
+  flex-shrink: 0;
+}
+.ns-tick.cur {
+  color: var(--secondary);
+  border-bottom-color: var(--secondary);
+  font-weight: 600;
+}
+
+/* 目录面板：外层 view 做展开/收起过渡（高度+淡入，各端一致）；
+   内层 scroll-view 固定限高内滚，不参与过渡，内容位置在展开期间保持稳定 */
+.tocp {
+  border-top: 1rpx dashed transparent;
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition:
+    max-height 0.32s cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 0.24s ease,
+    border-color 0.2s ease;
+}
+.tocp.open {
+  border-top-color: var(--border);
+  max-height: 40vh;
+  opacity: 1;
+}
+.tocp-scroll {
+  max-height: 40vh;
+  padding: 8rpx 0 16rpx;
+  box-sizing: border-box;
+}
+.toc-row {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  padding: 16rpx 4rpx;
+}
+.toc-row:active { opacity: 0.6; }
+.toc-no {
+  font-family: 'Songti SC', 'STSong', 'SimSun', serif;
+  font-size: 26rpx;
+  color: var(--primary);
+  flex-shrink: 0;
+}
+.toc-ex {
+  font-size: 26rpx;
+  color: var(--text-2);
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.toc-lead {
+  flex: 1;
+  height: 1rpx;
+  border-bottom: 1rpx dotted var(--border-strong);
+  min-width: 20rpx;
+}
+.toc-time { font-size: 22rpx; color: var(--text-3); flex-shrink: 0; }
+.toc-row.cur .toc-no { color: var(--secondary); font-weight: 600; }
+.toc-row.cur .toc-ex { color: var(--text); }
+
+/* —— 轮次眉标（用户消息上方：№ · 时间 问） —— */
+.rnd {
+  display: flex;
+  justify-content: flex-end;
+  align-items: baseline;
+  gap: 10rpx;
+  padding: 0 6rpx 8rpx;
+}
+.rnd-no {
+  font-family: 'Songti SC', 'STSong', 'SimSun', serif;
+  font-size: 24rpx;
+  color: var(--secondary);
+  font-weight: 600;
+}
+.rnd-time { font-size: 22rpx; color: var(--text-3); }
+
+/* —— 跨天日期戳：细线夹注 —— */
+.day-sep {
+  display: flex;
+  align-items: center;
+  gap: 20rpx;
+  margin: 28rpx 0 22rpx;
+}
+.day-line { flex: 1; height: 1rpx; background: var(--border); }
+.day-txt {
+  font-size: 22rpx;
+  letter-spacing: 2rpx;
+  color: var(--text-3);
+}
+
+/* —— 空态 · 藏书票 —— */
+.msgs-inner.is-empty { justify-content: center; }
+.exlib { width: 82%; margin: 0 auto; }
+.exlib-frame {
+  background: var(--bg-elevated);
+  border: 1rpx solid var(--border-strong);
+  border-radius: 6rpx;
+  padding: 8rpx;
+}
+.exlib-core {
+  border: 1rpx solid var(--secondary);
+  border-radius: 4rpx;
+  padding: 52rpx 40rpx 40rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.exlib-spark {
+  width: 76rpx;
+  height: 76rpx;
+  border-radius: 50%;
+  border: 1rpx solid var(--secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 26rpx;
+}
+.spark-txt { color: var(--secondary); font-size: 30rpx; }
+.exlib-title {
+  font-size: 34rpx;
+  letter-spacing: 10rpx;
+  text-indent: 10rpx; /* 抵消末字字距，视觉居中 */
+  color: var(--text);
+  margin-bottom: 14rpx;
+}
+.exlib-sub { font-size: 24rpx; color: var(--text-3); margin-bottom: 40rpx; }
+.exlib-toc { width: 100%; margin-bottom: 36rpx; }
+.exlib-row {
+  display: flex;
+  align-items: center;
+  gap: 14rpx;
+  padding: 18rpx 4rpx;
+}
+.exlib-row:active { opacity: 0.55; }
+.er-txt { font-size: 26rpx; color: var(--text-2); flex-shrink: 0; }
+.er-dots {
+  flex: 1;
+  height: 1rpx;
+  border-bottom: 1rpx dotted var(--border-strong);
+  min-width: 16rpx;
+}
+.er-go { font-size: 26rpx; color: var(--secondary); flex-shrink: 0; }
+.exlib-foot { font-size: 20rpx; letter-spacing: 4rpx; color: var(--text-3); }
