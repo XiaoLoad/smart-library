@@ -47,7 +47,12 @@ Component({
     },
     onTap(e) {
       const idx = Number(e.currentTarget.dataset.index)
-      if (idx === this.data.selected) return
+      // 重按已选中的 tab：本页回到顶部（微信平台惯例，不新增任何视觉元素）。
+      // 页面级滚动的页直接生效；像 AI 助手那样内部滚动的页是一次空操作，无害。
+      if (idx === this.data.selected) {
+        wx.pageScrollTo({ scrollTop: 0, duration: 320 })
+        return
+      }
       wx.switchTab({ url: this.data.list[idx].pagePath })
     },
   },
