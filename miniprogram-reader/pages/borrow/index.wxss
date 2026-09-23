@@ -9,13 +9,12 @@
 .warn { color: var(--danger); }
 
 /* —— 状态坞 · 滑过额度卡后吸附在视口顶部 ——
-   与书库页的检索坞同构：负外边距拉成通栏（本页左右内边距是 28rpx）、背景填页面同色。
-   底部 28rpx 走 margin 而不是 padding，这样吸附时坞的底边正好落在分段那条下划线上，
-   投影贴着线走；不吸附时的观感与改动前一致。 */
+   与书库页的检索坞同构：负外边距拉成通栏（本页左右内边距是 28rpx）、背景填页面同色，
+   列表从它底下滚过去时靠背景盖住。 */
 .dock {
   position: sticky;
   top: 0;
-  z-index: 60; /* 高于记录卡、低于分类遮罩(90) */
+  z-index: 60;
   margin: 0 -28rpx 28rpx;
   padding: 12rpx 28rpx 0;
   background: var(--bg);
@@ -45,6 +44,16 @@
   bottom: 0;
   height: 3rpx;
   background: var(--primary);
+}
+
+/* —— 分段的六屏 ——
+   swiper 不自带滚动：高度由 JS 量当前屏内容的真实高度设给它（内联 style 覆盖下面
+   的兜底值），内容多高 swiper 就多高，超出屏幕的部分由页面往下滚。height 过渡让
+   切段/翻页时的高度变化与滑动的 260ms 同节奏。兜底值只在量到前顶一两帧。 */
+.panes {
+  width: 100%;
+  height: calc(100vh - 620rpx - env(safe-area-inset-bottom));
+  transition: height 260ms ease-out;
 }
 
 /* —— 借阅记录 —— */
