@@ -32,18 +32,110 @@
     </view>
   </view>
 
-  <!-- 消息区（仅此处滚动；顶栏/输入条固定） -->
-  <scroll-view scroll-y class="msgs" scroll-into-view="{{scrollInto}}" scroll-with-animation>
-    <view class="msgs-inner">
+  <!-- 目录定位条（轮次 ≥3 才出现；面板原位展开把对话推下去，不遮挡） -->
+  <view class="navstrip" wx:if="{{navRounds.length >= 3}}">
+    <view class="ns-head">
+      <!-- 独立热区：仅「目录」开合面板，避免点 tick 误触展开 -->
+      <view class="ns-toggle" bindtap="onToggleToc">
+        <text class="ns-cap serif">目录</text>
+        <app-icon class="ns-caret {{tocOpen ? 'open' : ''}}" name="chevron-down" size="20" color="#9c958d" />
+      </view>
+      <scroll-view
+        class="ns-ticks"
+        scroll-x
+        enhanced
+        show-scrollbar="{{false}}"
+        scroll-into-view="tick-{{navCurrent}}"
+        scroll-with-animation
+      >
+        <view class="ns-ticks-in">
+          <!-- 弹性占位：tick 少时撑开把数字推到右侧；tick 多时收缩为 0，溢出全在右侧、全部可达 -->
+          <view class="ns-spacer"></view>
+          <text
+            wx:for="{{navRounds}}"
+            wx:key="msgId"
+            id="tick-{{index}}"
+            class="ns-tick {{index === navCurrent ? 'cur' : ''}}"
+            data-idx="{{index}}"
+            bindtap="onNavJump"
+          >{{item.no}}</text>
+        </view>
+      </scroll-view>
+    </view>
+    <!-- 外层 view 负责展开/收起过渡（普通 view 过渡各端一致）；内层 scroll-view 固定限高内滚，
+         锚点瞬时定位不带滚动动画，避免展开时内容先上跳再下落 -->
+    <view class="tocp {{tocOpen ? 'open' : ''}}">
+      <scroll-view class="tocp-scroll" scroll-y scroll-into-view="{{tocAnchor}}">
+        <view
+          wx:for="{{navRounds}}"
+          wx:key="msgId"
+          id="tocrow-{{index}}"
+          class="toc-row {{index === navCurrent ? 'cur' : ''}}"
+          data-idx="{{index}}"
+          bindtap="onNavJump"
+        >
+          <text class="toc-no">№{{item.no}}</text>
+          <text class="toc-ex">{{item.excerpt}}</text>
+          <view class="toc-lead"></view>
+          <text class="toc-time">{{item.time}}</text>
+        </view>
+      </scroll-view>
+    </view>
+  </view>
+
+  <!-- 消息区（仅此处滚动；顶栏/输入条固定；bindscroll 驱动当前轮高亮跟随） -->
+  <scroll-view scroll-y class="msgs" scroll-into-view="{{scrollInto}}" scroll-with-animation bindscroll="onMsgsScroll">
+    <view class="msgs-inner {{!messages.length && !loadingHistory ? 'is-empty' : ''}}">
     <view wx:if="{{hasMoreHistory}}" class="tiny load-earlier" bindtap="loadEarlier">
       {{loadingHistory ? '加载中…' : '加载更早消息'}}
     </view>
 
-    <view wx:for="{{messages}}" wx:key="id" id="msg-{{item.id}}">
-      <!-- 用户：靠右 -->
-      <view wx:if="{{item.role === 'user'}}" class="msg-row msg-row-user">
-        <view class="bubble bubble-user"><text user-select>{{item.content}}</text></view>
+    <!-- 空态 · 藏书票：无消息且不在加载中 -->
+    <view wx:if="{{!messages.length && !loadingHistory}}" class="exlib">
+      <view class="exlib-frame">
+        <view class="exlib-core">
+          <view class="exlib-spark"><text class="spark-txt">✦</text></view>
+          <text class="exlib-title serif">新的谈话</text>
+          <text class="exlib-sub">这一页还没有字迹，从任何一句开始</text>
+          <view class="exlib-toc">
+            <view class="exlib-row" data-q="我有哪些书快到期了？" bindtap="onSuggest">
+              <text class="er-txt">我有哪些书快到期了？</text>
+              <view class="er-dots"></view>
+              <text class="er-go">→</text>
+            </view>
+            <view class="exlib-row" data-q="当前的借阅额度是多少？" bindtap="onSuggest">
+              <text class="er-txt">当前的借阅额度是多少？</text>
+              <view class="er-dots"></view>
+              <text class="er-go">→</text>
+            </view>
+            <view class="exlib-row" data-q="逾期罚款怎么算？" bindtap="onSuggest">
+              <text class="er-txt">逾期罚款怎么算？</text>
+              <view class="er-dots"></view>
+              <text class="er-go">→</text>
+            </view>
+          </view>
+          <text class="exlib-foot">EX LIBRIS · 馆员 AI</text>
+        </view>
       </view>
+    </view>
+
+    <view wx:for="{{messages}}" wx:key="id" id="msg-{{item.id}}">
+      <!-- 跨天日期戳：细线夹注 -->
+      <view wx:if="{{item.dayLabel}}" class="day-sep">
+        <view class="day-line"></view>
+        <text class="day-txt serif">{{item.dayLabel}}</text>
+        <view class="day-line"></view>
+      </view>
+      <!-- 用户：轮次眉标 + 靠右 -->
+      <block wx:if="{{item.role === 'user'}}">
+        <view wx:if="{{item.roundNo}}" class="rnd">
+          <text class="rnd-no">№{{item.roundNo}}</text>
+          <text wx:if="{{item.timeText}}" class="rnd-time">{{item.timeText}} 问</text>
+        </view>
+        <view class="msg-row msg-row-user">
+          <view class="bubble bubble-user"><text user-select>{{item.content}}</text></view>
+        </view>
+      </block>
       <!-- AI：靠左，批注边距线 + 馆员 AI 小标 -->
       <view wx:else class="msg-row">
         <view class="bubble bubble-ai">

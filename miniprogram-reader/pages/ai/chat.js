@@ -38,6 +38,43 @@ const formatJson = (dataJson) => {
   }
 }
 
+// 本地时刻（刚发出的消息用发送时刻，不等回源才显示；历史消息用后端 createTime 切片）
+const pad2 = (n) => (n < 10 ? '0' + n : '' + n)
+const nowStamp = () => {
+  const d = new Date()
+  return {
+    date: d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()),
+    time: pad2(d.getHours()) + ':' + pad2(d.getMinutes()),
+  }
+}
+
+// 轮次与日期装饰：一条用户消息为一轮（№01…），跨天插入日期戳；
+// 同时产出目录定位条数据（每轮 {msgId, no, time, excerpt}）
+const decorateMeta = (messages) => {
+  const rounds = []
+  let lastDate = ''
+  messages.forEach((m) => {
+    const raw = m.createTime || ''
+    const date = m.dateText || (raw ? String(raw).slice(0, 10) : '')
+    const time = m.timeText || (raw ? String(raw).slice(11, 16) : '')
+    m.timeText = time
+    m.dayLabel = date && date !== lastDate ? date : ''
+    if (m.dayLabel) lastDate = date
+    if (m.role === 'user') {
+      m.roundNo = rounds.length + 1
+      rounds.push({
+        msgId: m.id,
+        no: m.roundNo,
+        time,
+        excerpt: String(m.content || '').replace(/\s+/g, ' ').slice(0, 18) || '—',
+      })
+    } else {
+      m.roundNo = 0
+    }
+  })
+  return rounds
+}
+
 Page({
   data: {
     conversations: [],
@@ -51,9 +88,14 @@ Page({
     loadingHistory: false,
     scrollInto: '',
     scrollTick: 0,
+    navRounds: [], // 目录定位条：每轮用户消息 {msgId, no, time, excerpt}
+    navCurrent: 0, // 当前轮索引（默认最后一轮）
+    tocOpen: false, // 目录面板展开
+    tocAnchor: '', // 面板打开后滚动锚点（渲染完成后再设，确保长列表定位生效）
   },
 
   onLoad() {
+    this._anchorsDirty = true // 轮次锚点偏移需（重）测量，首个滚动事件前就绪
     this.loadConversations(true)
   },
 
@@ -103,21 +145,34 @@ Page({
   },
 
   // ===== 会话 =====
-  async loadConversations(autoSelect) {
+  async fetchConversations() {
     try {
       const res = await request.get('/ai/conversation/list', undefined, { silent: true })
-      const conversations = (res.list || []).map((c) => ({
-        ...c,
-        titleText: c.title || '新会话',
-      }))
-      this.setData({ conversations })
-      if (autoSelect) {
-        if (conversations.length) this.selectConv(conversations[0].id)
-        else this.createConversation()
-      }
+      return (res.list || []).map((c) => ({ ...c, titleText: c.title || '新会话' }))
     } catch (e) {
-      /* toast 已处理 */
+      return null
     }
+  },
+
+  async loadConversations(autoSelect) {
+    const conversations = await this.fetchConversations()
+    if (!conversations) return
+    this.setData({ conversations })
+    if (autoSelect) {
+      if (conversations.length) this.selectConv(conversations[0].id)
+      else this.createConversation()
+    }
+  },
+
+  // 首条消息后服务端会按首条用户消息自动生成会话标题，回源同步（顶栏 + 抽屉列表）
+  async syncConvTitle() {
+    const conversations = await this.fetchConversations()
+    if (!conversations) return
+    const patch = { conversations }
+    const cur = this.data.currentConv
+    const found = cur && conversations.find((c) => c.id === cur.id)
+    if (found && found.titleText !== cur.titleText) patch.currentConv = found
+    this.setData(patch)
   },
 
   async createConversation() {
@@ -196,10 +251,22 @@ Page({
       // 后端 ORDER BY id DESC（最新在上），显示需转成正序（最旧在上、最新在下），与 Web 端 chat.vue 对齐
       const ordered = items.reverse()
       const messages = beforeId ? ordered.concat(this.data.messages) : ordered
-      this.setData({
+      const rounds = decorateMeta(messages)
+      const patch = {
         messages,
         hasMoreHistory: items.length >= PAGE_SIZE,
-      })
+        navRounds: rounds,
+      }
+      if (reset) {
+        patch.navCurrent = rounds.length - 1
+      } else {
+        // 向上翻页后轮次整体前移，按 msgId 找回原选中轮
+        const keep = this.data.navRounds[this.data.navCurrent]
+        const ki = keep ? rounds.findIndex((r) => r.msgId === keep.msgId) : -1
+        patch.navCurrent = ki >= 0 ? ki : rounds.length - 1
+      }
+      this.setData(patch)
+      this._anchorsDirty = true // 消息集变化，轮次锚点偏移失效
       if (reset) this.scrollToBottom()
     } catch (e) {
       /* toast 已处理 */
@@ -209,6 +276,64 @@ Page({
   },
   loadEarlier() {
     this.loadHistory(false)
+  },
+
+  // ===== 目录定位条：tick 点击直接跳；目录按钮展开面板（面板把对话推下去，不遮挡） =====
+  onToggleToc() {
+    const open = !this.data.tocOpen
+    // 面板常驻渲染（靠 .open 类做展开动画），元素已在 DOM，锚点一次设置即可生效
+    this.setData({
+      tocOpen: open,
+      tocAnchor: open ? 'tocrow-' + this.data.navCurrent : '',
+    })
+  },
+  onNavJump(e) {
+    const idx = Number(e.currentTarget.dataset.idx)
+    const r = this.data.navRounds[idx]
+    if (!r) return
+    this.setData({ navCurrent: idx, tocOpen: false, scrollInto: 'msg-' + r.msgId })
+  },
+  onSuggest(e) {
+    const q = e.currentTarget.dataset.q
+    if (!q || this.data.streaming) return
+    this.setData({ input: q })
+    this.send()
+  },
+
+  // ===== 滚动跟随（scrollspy）：以「顶部已越过的最近一轮」为当前轮，驱动 tick 高亮 =====
+  onMsgsScroll(e) {
+    const st = e.detail.scrollTop || 0
+    this._msgsTop = st
+    if (this._anchorsDirty && !this._measuring) this.measureAnchors()
+    const now = Date.now()
+    if (now - (this._lastSpy || 0) < 80) return // 节流
+    this._lastSpy = now
+    const arr = this._anchors
+    if (!arr || !arr.length) return
+    const bias = 60 // 视口顶部下方 60px 内仍算上一轮
+    let cur = 0
+    for (let i = 0; i < arr.length; i++) {
+      if (arr[i] <= st + bias) cur = i
+      else break
+    }
+    if (cur !== this.data.navCurrent) this.setData({ navCurrent: cur })
+  },
+
+  // 量各轮眉标（.rnd）在滚动内容中的偏移；消息增删后由 _anchorsDirty 触发重测
+  measureAnchors() {
+    this._measuring = true
+    wx.createSelectorQuery()
+      .selectAll('.rnd')
+      .boundingClientRect()
+      .select('.msgs')
+      .boundingClientRect()
+      .exec((res) => {
+        this._measuring = false
+        this._anchorsDirty = false
+        if (!res || !res[0] || !res[1]) return
+        const base = res[1].top
+        this._anchors = res[0].map((r) => r.top - base + (this._msgsTop || 0))
+      })
   },
 
   // ===== 发送 & 流式渲染 =====
@@ -235,9 +360,12 @@ Page({
       if (!conv) return
     }
 
-    const userMsg = { id: 'u' + Date.now(), role: 'user', content }
+    const st = nowStamp()
+    const userMsg = { id: 'u' + Date.now(), role: 'user', content, dateText: st.date, timeText: st.time }
     this._streamMsg = {
       id: 'a' + Date.now(),
+      dateText: st.date,
+      timeText: st.time,
       role: 'assistant',
       content: '',
       shown: '',
@@ -251,14 +379,20 @@ Page({
     }
     this._streamIdx = this.data.messages.length + 1
     this._streamFailed = false
+    const messages = this.data.messages.concat([userMsg, this._streamMsg])
+    const rounds = decorateMeta(messages)
     const tick = (this.data.scrollTick || 0) + 1
     this.setData({
-      messages: this.data.messages.concat([userMsg, this._streamMsg]),
+      messages,
       input: '',
       streaming: true,
       scrollTick: tick,
       scrollInto: 'msg-bottom-' + tick,
+      navRounds: rounds,
+      navCurrent: rounds.length - 1,
+      tocOpen: false,
     })
+    this._anchorsDirty = true // 新一轮消息入列，锚点偏移失效
 
     this.streamTask = sse.streamPost({
       url: '/ai/chat',
@@ -416,7 +550,12 @@ Page({
     this._streamMsg = null
     // 回源拉最新消息，同步服务端持久化的 id 与消毒后的正文；
     // 失败/手动停止时不回源，否则会把前端已渲染的内容与提示一起冲掉
-    if (!this._streamFailed) setTimeout(() => this.loadHistory(true), 200)
+    if (!this._streamFailed) {
+      setTimeout(() => {
+        this.loadHistory(true)
+        this.syncConvTitle()
+      }, 200)
+    }
   },
 
   scheduleFlush() {
