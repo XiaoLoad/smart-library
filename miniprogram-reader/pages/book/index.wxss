@@ -166,8 +166,8 @@
 .cat-title { font-size: 32rpx; font-weight: 600; }
 .cat-reset { font-size: 26rpx; font-weight: 500; color: var(--primary); }
 .cat-divider { height: 1rpx; background: var(--border); }
-/* overscroll-behavior: contain 兜住「树滚到尽头后滚动链传给页面」这一路：
-   上面 .cat-sheet 的 catchtouchmove 拦的是 JS 事件冒泡，滚动链是浏览器层面的，两回事。 */
+/* 树侧兜底：即便某个渲染层仍把滚动链外溢一层，到这里也截断。
+   （根治靠 index.wxml 里的 page-meta，不是靠这一条。） */
 .cat-tree { flex: 1; min-height: 0; overscroll-behavior: contain; }
 .cat-tail { height: 40rpx; }
 

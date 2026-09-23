@@ -1,3 +1,11 @@
+<!-- 抽屉打开时锁住页面根节点（相当于 H5 的 body { overflow: hidden }）。
+     滚动穿透只能在根节点这一层根治：树内容不满一屏、或树已滑到尽头时，
+     手势在 scroll-view 里无处可去，只能顺着滚动链交给页面——锁住根节点后，
+     页面这一层根本没有可滚动的余地，手势就只剩「落在树自己身上」这一种去向。
+     不要退回去用 catchtouchmove 拦：挂在 .cat-sheet 这类 scroll-view 的祖先上，
+     会连树的手势一起截获（滑一段就停，这是上一版的真实故障）。 -->
+<page-meta page-style="{{catOpen ? 'overflow:hidden' : ''}}" />
+
 <view class="page">
   <!-- Editorial 页头 -->
   <view class="page-header">
@@ -69,12 +77,9 @@
 
 <!-- 分类树抽屉：父节点即筛选，箭头单独负责展开收起 -->
 <view class="cat-mask {{catOpen ? 'show' : ''}}" catchtap="closeCat" catchtouchmove="noop" />
-<!-- catchtouchmove 必须挂在弹层最外层：抽屉里只有 .cat-tree 是 scroll-view，
-     其余区域（拖动条以外的手柄/标题行/分隔线，以及树内容不满或滚到尽头时的拖动）
-     touchmove 会一路冒泡到页面根节点，被页面的滚动手势识别器接走，底层书库页就跟着滚了。
-     拦在这里之后，scroll-view 自身的滚动不受影响——它是浏览器原生的滚动，
-     不依赖这条 JS 事件链，所以树照样能滚。 -->
-<view class="cat-sheet {{catOpen ? 'show' : ''}} {{catDragging ? 'dragging' : ''}}" style="height:{{catHeight}}vh" catchtouchmove="noop">
+<!-- 抽屉内一律不挂 catchtouchmove：scroll-view 的手势不能被 JS 层截获。
+     「底层不跟着滚」由上面的 page-meta 负责。 -->
+<view class="cat-sheet {{catOpen ? 'show' : ''}} {{catDragging ? 'dragging' : ''}}" style="height:{{catHeight}}vh">
   <view class="cat-grip" catchtouchstart="onCatGripStart" catchtouchmove="onCatGripMove" catchtouchend="onCatGripEnd" catchtouchcancel="onCatGripEnd"><view class="cat-grip-bar"></view></view>
   <view class="cat-head">
     <view class="cat-title serif">分类</view>
