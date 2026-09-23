@@ -169,7 +169,12 @@
 /* 树侧兜底：即便某个渲染层仍把滚动链外溢一层，到这里也截断。
    （根治靠 index.wxml 里的 page-meta，不是靠这一条。） */
 .cat-tree { flex: 1; min-height: 0; overscroll-behavior: contain; }
-.cat-tail { height: 40rpx; }
+/* 树尾留白 = 底部导航栏高度 + 安全区 + 40rpx 呼吸量。
+   自定义 tabBar 由框架渲染在页面容器层级（见 custom-tab-bar/index.wxss），抽屉的 z-index
+   再高也盖不住它，所以抽屉最下面这一截永远被导航栏压着。把这截高度补在内容末尾，
+   滑到底时最后一个分类正好停在导航栏上沿；不补的话「其实已经滑到底、只是被挡住」，
+   手感上就是滑不动。 */
+.cat-tail { height: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 40rpx); }
 
 .node {
   position: relative;
