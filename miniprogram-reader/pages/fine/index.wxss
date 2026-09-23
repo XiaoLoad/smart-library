@@ -2,11 +2,24 @@
 .page-header { margin-bottom: 28rpx; }
 .page-title { font-size: 56rpx; font-weight: 600; letter-spacing: 4rpx; margin-top: 8rpx; }
 
+/* —— 分段坞 · 滑过页头后吸附在视口顶部 ——
+   负外边距拉成通栏、背景填页面同色，列表从它底下滚过去时靠背景盖住。 */
+.dock {
+  position: sticky;
+  top: 0;
+  z-index: 60;
+  margin: 0 -28rpx 28rpx;
+  padding: 0 28rpx;
+  background: var(--bg);
+}
+/* 吸附中只补一道极浅投影——发丝线由 .tabs 自带的下划线充当 */
+.dock.stuck { box-shadow: 0 12rpx 18rpx -16rpx rgba(44, 40, 37, 0.3); }
+
 /* —— 分段 · 下划线 —— */
 .tabs {
   display: flex;
   border-bottom: 1rpx solid var(--border);
-  margin-bottom: 28rpx;
+  margin-bottom: 0; /* 与下方列表的间距交给 .dock */
 }
 .tab {
   flex: 1;
@@ -25,6 +38,16 @@
   bottom: 0;
   height: 3rpx;
   background: var(--primary);
+}
+
+/* —— 分段的三屏 ——
+   swiper 不自带滚动：高度由 JS 量当前屏内容的真实高度设给它（内联 style 覆盖下面
+   的兜底值），内容多高 swiper 就多高，超出屏幕的部分由页面往下滚。height 过渡让
+   切段时的高度变化与滑动的 260ms 同节奏。兜底值只在量到前顶一两帧。 */
+.panes {
+  width: 100%;
+  height: calc(100vh - 420rpx);
+  transition: height 260ms ease-out;
 }
 
 /* —— 罚款条目 —— */

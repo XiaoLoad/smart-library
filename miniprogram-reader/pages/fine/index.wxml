@@ -4,42 +4,58 @@
     <view class="page-title serif">罚款记录</view>
   </view>
 
-  <!-- 下划线式分段 -->
-  <view class="tabs">
-    <view
-      wx:for="{{tabs}}"
-      wx:key="value"
-      class="tab {{current === item.value ? 'tab-active' : ''}}"
-      data-value="{{item.value}}"
-      bindtap="onTab"
-    >{{item.label}}</view>
+  <!-- 分段坞：滑过页头后吸附在视口顶部 -->
+  <view class="dock {{dockStuck ? 'stuck' : ''}}">
+    <view class="tabs">
+      <view
+        wx:for="{{tabs}}"
+        wx:key="value"
+        class="tab {{current === index ? 'tab-active' : ''}}"
+        data-value="{{item.value}}"
+        bindtap="onTab"
+      >{{item.label}}</view>
+    </view>
   </view>
 
-  <!-- 列表还空着时先立骨架；切到「未缴/已缴」且有记录时才走 empty-state -->
-  <skeleton wx:if="{{loading && !list.length}}" variant="card" count="3" />
+  <!-- 一个分段一屏：swiper 只管左右滑切段。高度由 JS 按当前屏内容的真实高度设定
+       （不低于坞以下的可视区），列表不自带滚动——纵向滑动与下拉刷新都是页面级手势。 -->
+  <swiper
+    class="panes"
+    style="{{swiperH ? 'height:' + swiperH + 'px' : ''}}"
+    current="{{current}}"
+    duration="260"
+    bindchange="onSwiperChange"
+  >
+    <swiper-item wx:for="{{panes}}" wx:for-item="pane" wx:for-index="pi" wx:key="key">
+      <view class="pane">
+        <!-- 列表还空着时先立骨架；切到「未缴/已缴」且有记录时才走 empty-state -->
+        <skeleton wx:if="{{loading && !pane.list.length}}" variant="card" count="3" />
 
-  <view class="card fine-card fade-in" wx:for="{{list}}" wx:key="id">
-    <view class="row-between">
-      <view class="flex-1 ellipsis fine-title serif">《{{item.bookTitle}}》</view>
-      <status-tag status="{{item.status}}" type="fine" />
-    </view>
-    <view class="tiny">借阅单号 {{item.borrowNo}} · 逾期 {{item.daysOverdue}} 天</view>
-    <view class="tiny" wx:if="{{item.reason}}">原因：{{item.reason}}</view>
-    <view class="hr"></view>
-    <view class="row-between amount-row">
-      <view class="amount serif">{{item.amountText}}</view>
-      <block wx:if="{{item.status === 0}}">
-        <button
-          class="btn btn-primary btn-mini"
-          loading="{{payingId === item.id}}"
-          data-id="{{item.id}}"
-          bindtap="onPay"
-        >模拟缴费</button>
-      </block>
-      <text wx:else class="tiny">已缴于 {{item.paidText}}</text>
-    </view>
-    <view class="pay-tip tiny" wx:if="{{item.status === 0}}">演示环境为模拟缴费，不产生真实扣款</view>
-  </view>
+        <view class="card fine-card fade-in" wx:for="{{pane.list}}" wx:key="id">
+          <view class="row-between">
+            <view class="flex-1 ellipsis fine-title serif">《{{item.bookTitle}}》</view>
+            <status-tag status="{{item.status}}" type="fine" />
+          </view>
+          <view class="tiny">借阅单号 {{item.borrowNo}} · 逾期 {{item.daysOverdue}} 天</view>
+          <view class="tiny" wx:if="{{item.reason}}">原因：{{item.reason}}</view>
+          <view class="hr"></view>
+          <view class="row-between amount-row">
+            <view class="amount serif">{{item.amountText}}</view>
+            <block wx:if="{{item.status === 0}}">
+              <button
+                class="btn btn-primary btn-mini"
+                loading="{{payingId === item.id}}"
+                data-id="{{item.id}}"
+                bindtap="onPay"
+              >模拟缴费</button>
+            </block>
+            <text wx:else class="tiny">已缴于 {{item.paidText}}</text>
+          </view>
+          <view class="pay-tip tiny" wx:if="{{item.status === 0}}">演示环境为模拟缴费，不产生真实扣款</view>
+        </view>
 
-  <empty-state wx:if="{{!loading && !list.length}}" text="暂无罚款记录" icon="coin" />
+        <empty-state wx:if="{{!loading && !pane.list.length}}" text="暂无罚款记录" icon="coin" />
+      </view>
+    </swiper-item>
+  </swiper>
 </view>
