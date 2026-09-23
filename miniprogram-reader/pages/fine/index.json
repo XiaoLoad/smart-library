@@ -1,5 +1,6 @@
 {
   "navigationBarTitleText": "罚款记录",
+  "enablePullDownRefresh": true,
   "usingComponents": {
     "empty-state": "/components/empty-state/empty-state",
     "skeleton": "/components/skeleton/skeleton",
