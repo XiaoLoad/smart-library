@@ -1,0 +1,56 @@
+/* ===== 骨架屏 · 灰块 =====
+ * 组件样式默认隔离，app.wxss 里的全局类在组件内不生效，故这里的排版类自成一套；
+ * 只有颜色借 page 上的 CSS 变量（自定义属性会穿过组件边界继承）。
+ * 尺寸对齐真实版式：封面 287rpx、栏宽 (100% - 60rpx) / 3、卡片与 app.wxss 的 .card 同规格，
+ * 数据落位时高度不跳。 */
+.sk { width: 100%; }
+
+.sk-block,
+.sk-line,
+.sk-pill {
+  background: linear-gradient(90deg, var(--bg-muted) 25%, var(--bg-subtle) 37%, var(--bg-muted) 63%);
+  background-size: 400% 100%;
+  border-radius: 4rpx;
+  animation: sk-sweep 1.6s ease-in-out infinite;
+}
+@keyframes sk-sweep {
+  from { background-position: 100% 0; }
+  to { background-position: 0 0; }
+}
+
+/* —— 书库 —— */
+.sk-grid { display: flex; flex-wrap: wrap; column-gap: 30rpx; }
+.sk-cell { width: calc((100% - 60rpx) / 3); box-sizing: border-box; }
+.sk-cover { height: 287rpx; }
+.sk-title { height: 20rpx; width: 84%; margin-top: 20rpx; }
+.sk-sub { height: 18rpx; width: 52%; margin-top: 14rpx; }
+.sk-shelf-row { position: relative; margin-top: 36rpx; }
+.sk-shelf-row + .sk-shelf-row { margin-top: 44rpx; }
+.sk-shelf-line { position: absolute; left: 0; right: 0; top: 287rpx; height: 1rpx; background: var(--border-strong); }
+.sk-shelf-edge { position: absolute; left: 0; right: 0; top: 288rpx; height: 8rpx; background: var(--bg-muted); }
+
+/* —— 记录卡 / 通知 / 公告 —— */
+.sk-card {
+  background: var(--bg-elevated);
+  border: 1rpx solid var(--border);
+  border-radius: 8rpx;
+  padding: 32rpx;
+  margin-bottom: 24rpx;
+}
+.sk-notice { padding: 26rpx 28rpx; }
+.sk-head { display: flex; align-items: center; gap: 16rpx; margin-bottom: 8rpx; }
+.sk-pill { width: 76rpx; height: 32rpx; flex-shrink: 0; }
+.sk-divider { height: 1rpx; background: var(--border); margin: 24rpx 0; }
+
+/* 行高与宽度：基础行在下，修饰类在上，避免被基础行的 height 反压 */
+.sk-line { height: 20rpx; margin-top: 14rpx; }
+.sk-h1 { height: 28rpx; width: 46%; margin-top: 0; }
+.sk-h2 { height: 26rpx; flex: 1; margin-top: 0; }
+.sk-sm { height: 16rpx; }
+.sk-w90 { width: 90%; }
+.sk-w80 { width: 80%; }
+.sk-w70 { width: 70%; }
+.sk-w60 { width: 60%; }
+.sk-w40 { width: 40%; }
+.sk-w30 { width: 30%; }
+.sk-right { margin-left: auto; margin-top: 0; }

@@ -1,8 +1,12 @@
 const request = require('../../utils/request')
 const cover = require('../../utils/cover')
+const cache = require('../../utils/cache')
 
 const PAGE_SIZE = 12 // 3 列布局，12 本正好 4 排
 const CHUNK = 3
+const STAGGER_ROW = 80 // 排与排之间的错峰（毫秒）
+const STAGGER_CELL = 60 // 同一排内三本之间的错峰，书像被逐本摆上架
+const ROW_LEAD = 120 // 首屏让页头与检索条先落位，书目再起
 
 /**
  * 书名只留正题：3 列窄栏一行放得下约 9 字，而全库书名平均 18.6 字、59% 超过 12 字，
@@ -41,10 +45,20 @@ function withCover(item) {
   return Object.assign({}, item, { cover: cover.bgSrc(item.coverUrl) })
 }
 
-function toRows(list) {
+/** 切排并挂上入场错峰：from 为本批之前已渲染的排数，新到的一批都从 0 起算，
+ *  这样翻页时不会因为排号变大而干等。 */
+function toRows(list, from) {
+  const lead = from ? 0 : ROW_LEAD
   const rows = []
   for (let i = 0; i < list.length; i += CHUNK) {
-    rows.push({ key: 'r' + i / CHUNK, items: list.slice(i, i + CHUNK).map(withCover) })
+    const idx = i / CHUNK
+    rows.push({
+      key: 'r' + idx,
+      delay: lead + Math.max(0, idx - from) * STAGGER_ROW,
+      items: list
+        .slice(i, i + CHUNK)
+        .map((item, c) => Object.assign(withCover(item), { d: c * STAGGER_CELL })),
+    })
   }
   return rows
 }
@@ -108,7 +122,7 @@ Page({
     }
   },
   onPullDownRefresh() {
-    this.reload().finally(() => wx.stopPullDownRefresh())
+    this.reload(true).finally(() => wx.stopPullDownRefresh())
   },
   onReachBottom() {
     this.loadMore()
@@ -217,17 +231,37 @@ Page({
   },
 
   /* —— 书目 —— */
-  reload() {
+  /** 列表上屏的唯一出口：书本、排、总数、计数文案一起落地，中间态不会被渲染出去。
+   *  from 为这批之前已渲染的排数——缓存回填时是 0，翻页时是当前排数（新排从 0 起算错峰）。 */
+  applyList(list, total, from) {
+    this.setData({
+      list,
+      rows: toRows(list, from),
+      total,
+      countText: total ? (this.data.catSelName ? '共 ' + total + ' 种 · ' + this.data.catSelName : '共 ' + total + ' 种馆藏') : '',
+      firstLoad: false,
+      finished: list.length >= total,
+    })
+  },
+
+  // fresh：跳过缓存直连网络，用于下拉刷新（用户已经明确在等新数据了）
+  reload(fresh) {
     this.setData({ page: 1, finished: false, list: [], rows: [] })
-    return this.load()
+    return this.load(fresh)
   },
   loadMore() {
     if (this.data.finished || this.data.loading) return
     this.setData({ page: this.data.page + 1 })
     this.load()
   },
-  async load() {
+  async load(fresh) {
     const { keyword, catSelId, page } = this.data
+    // 缓存键跟着筛选条件走：换分类/换关键词后，看到的就是那一屏的旧数据
+    const cacheKey = 'book:' + keyword + ':' + catSelId
+    if (page === 1 && !fresh) {
+      const stale = cache.read(cacheKey)
+      if (stale) this.applyList(stale.items, stale.total, 0)
+    }
     this.setData({ loading: true })
     try {
       const res = await request.get('/book/list', {
@@ -244,18 +278,12 @@ Page({
           stateClass: state.stateClass,
         })
       })
-      const list = page === 1 ? items : this.data.list.concat(items)
-      const rows = toRows(list)
       const total = res.total || 0
-      this.setData({
-        list,
-        rows,
-        total,
-        countText: total ? (this.data.catSelName ? '共 ' + total + ' 种 · ' + this.data.catSelName : '共 ' + total + ' 种馆藏') : '',
-        firstLoad: false,
-        finished: list.length >= total,
-      })
+      const list = page === 1 ? items : this.data.list.concat(items)
+      if (page === 1) cache.write(cacheKey, { items, total })
+      this.applyList(list, total, page === 1 ? 0 : this.data.rows.length)
     } catch (e) {
+      // 旧数据还铺在屏上时不必再动它；空屏才收掉骨架，让 empty-state 接管
       this.setData({ firstLoad: false })
     } finally {
       this.setData({ loading: false })
