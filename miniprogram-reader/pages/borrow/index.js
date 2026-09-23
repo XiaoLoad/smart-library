@@ -1,4 +1,5 @@
 const request = require('../../utils/request')
+const cache = require('../../utils/cache')
 const { fmtDateTime } = require('../../utils/datetime')
 
 const PAGE_SIZE = 10
@@ -35,16 +36,22 @@ Page({
     if (!this.data.firstLoad) this.reload(true)
   },
   onPullDownRefresh() {
-    Promise.all([this.reload(), this.loadQuota()]).finally(() => wx.stopPullDownRefresh())
+    Promise.all([this.reload(true), this.loadQuota(true)]).finally(() => wx.stopPullDownRefresh())
   },
   onReachBottom() {
     this.loadMore()
   },
 
-  async loadQuota() {
+  // fresh：跳过缓存直连网络，用于下拉刷新
+  async loadQuota(fresh) {
+    if (!fresh) {
+      const stale = cache.read('borrow:quota')
+      if (stale) this.setData({ quota: stale })
+    }
     try {
       const quota = await request.get('/borrow/quota', undefined, { silent: true })
       this.setData({ quota })
+      cache.write('borrow:quota', quota)
     } catch (e) {
       /* 静默 */
     }
@@ -71,6 +78,13 @@ Page({
   },
   async load(silent) {
     const { current, page } = this.data
+    // 缓存键跟着分段走：切到「逾期」看到的就是逾期那一屏的旧数据
+    const cacheKey = 'borrow:' + current
+    // silent（onShow 就地刷新、下拉刷新）：屏上本来就有数据，不必再用缓存铺一遍
+    if (page === 1 && !silent) {
+      const stale = cache.read(cacheKey)
+      if (stale) this.setData({ list: stale.items, firstLoad: false, finished: stale.items.length >= stale.total })
+    }
     if (!silent) this.setData({ loading: true })
     try {
       const res = await request.get('/borrow/list', {
@@ -86,12 +100,10 @@ Page({
         pickupText: fmtDateTime(b.pickupDeadline),
         returnText: fmtDateTime(b.returnTime),
       }))
+      const total = res.total || 0
       const list = page === 1 ? items : this.data.list.concat(items)
-      this.setData({
-        list,
-        firstLoad: false,
-        finished: list.length >= (res.total || 0),
-      })
+      if (page === 1) cache.write(cacheKey, { items, total })
+      this.setData({ list, firstLoad: false, finished: list.length >= total })
     } catch (e) {
       this.setData({ firstLoad: false })
     } finally {
