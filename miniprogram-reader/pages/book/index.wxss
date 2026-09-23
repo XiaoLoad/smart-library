@@ -42,6 +42,21 @@
 }
 .filter-label { max-width: 190rpx; }
 
+/* —— 入场 · 首屏「页头 → 检索条 → 书目」依次落位 ——
+   只用 opacity/transform（合成层动画），不动布局属性，滚动与首屏渲染都不掉帧。
+   缓动统一走 cubic-bezier(0.16, 1, 0.3, 1)：起手快、收尾极缓，落位时是「停下」而不是「刹住」。 */
+@keyframes bk-rise {
+  from { opacity: 0; transform: translateY(24rpx); }
+  to { opacity: 1; transform: translateY(0); }
+}
+/* 架线由左端推导而出，与封面同批落位，像书架被一格格搭起来 */
+@keyframes bk-draw {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+.page-header { animation: bk-rise 0.52s cubic-bezier(0.16, 1, 0.3, 1) both; }
+.searchbar { animation: bk-rise 0.52s cubic-bezier(0.16, 1, 0.3, 1) 70ms both; }
+
 /* —— 书目 · 每排三本立在一条架线上，书名/位置/状态作架签挂在台板下 —— */
 .shelf-row { position: relative; margin-top: 36rpx; }
 .shelf-row + .shelf-row { margin-top: 44rpx; }
@@ -51,6 +66,19 @@
    重名会把整格掰成横排、封面被挤没。改名前先跟 app.wxss 的全局类过一遍。 */
 .shelf-cell { width: calc((100% - 60rpx) / 3); box-sizing: border-box; }
 .shelf-cell-hover { opacity: 0.65; }
+
+/* —— 进场 · 每批书目到货时逐排错峰升起（错峰量由 index.js 算好写在行内 animation-delay）——
+   只让动画守着「入场」这一件事，任何一排都不会被长期隐藏——之前用相交观察器把屏外的排
+   藏起来等它进视口，回调一旦没到，排就在眼前空着，这是内容页不能接受的。
+   填充模式用 backwards 而非 both：等待期沿用起始帧（错峰时格子是隐着的），动画结束后样式
+   交还给普通声明，.shelf-cell-hover 的按下变淡才不会被动画的 forwards 终态压住。 */
+.shelf-cell { animation: bk-rise 0.56s cubic-bezier(0.16, 1, 0.3, 1) backwards; }
+/* 架线比同排的书晚 150ms（延时写在行内），由左端推导而出，像书架被一格格搭起来 */
+.shelf-line,
+.shelf-edge {
+  animation: bk-draw 0.5s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+  transform-origin: left center;
+}
 
 .cover {
   position: relative;

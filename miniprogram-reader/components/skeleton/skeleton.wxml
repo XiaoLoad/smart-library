@@ -1,0 +1,48 @@
+<view class="sk">
+  <!-- 书库 · 三列封面立在架线上，架签在台板下方 -->
+  <block wx:if="{{variant === 'shelf'}}">
+    <view class="sk-shelf-row" wx:for="{{shelfRows}}" wx:for-item="row" wx:key="key">
+      <view class="sk-grid">
+        <view class="sk-cell" wx:for="{{row.items}}" wx:key="*this">
+          <view class="sk-block sk-cover"></view>
+          <view class="sk-line sk-title"></view>
+          <view class="sk-line sk-sub"></view>
+        </view>
+      </view>
+      <view class="sk-shelf-line"></view>
+      <view class="sk-shelf-edge"></view>
+    </view>
+  </block>
+
+  <!-- 借阅 / 罚款记录卡 -->
+  <block wx:elif="{{variant === 'card'}}">
+    <view class="sk-card" wx:for="{{items}}" wx:key="*this">
+      <view class="sk-line sk-h1"></view>
+      <view class="sk-line sk-w80"></view>
+      <view class="sk-line sk-w60"></view>
+      <view class="sk-divider"></view>
+      <view class="sk-line sk-w40 sk-right"></view>
+    </view>
+  </block>
+
+  <!-- 通知 · 徽章 + 标题 + 正文 + 时间 -->
+  <block wx:elif="{{variant === 'notice'}}">
+    <view class="sk-card sk-notice" wx:for="{{items}}" wx:key="*this">
+      <view class="sk-head">
+        <view class="sk-pill"></view>
+        <view class="sk-line sk-h2"></view>
+      </view>
+      <view class="sk-line sk-w90"></view>
+      <view class="sk-line sk-w70"></view>
+      <view class="sk-line sk-sm sk-w30"></view>
+    </view>
+  </block>
+
+  <!-- 公告 · 单行标题 + 署名 -->
+  <block wx:else>
+    <view class="sk-card" wx:for="{{items}}" wx:key="*this">
+      <view class="sk-line sk-h1"></view>
+      <view class="sk-line sk-sm sk-w40"></view>
+    </view>
+  </block>
+</view>

@@ -26,13 +26,17 @@
     </view>
   </view>
 
-  <view wx:if="{{firstLoad && loading}}" class="tiny status-line">正在整理书架…</view>
+  <!-- 书架还没摆上书（首屏、或换了筛选条件）时先立一块骨架，与真实三列版式同构 -->
+  <skeleton wx:if="{{loading && !list.length}}" variant="shelf" count="4" />
 
-  <!-- 书目 · 三列封面立在架线上，架签在台板下方 -->
-  <view class="shelf-row fade-in" wx:for="{{rows}}" wx:for-item="row" wx:key="key">
+  <!-- 书目 · 三列封面立在架线上，架签在台板下方。
+       入场在「这一批数据到货」时触发：排之间按 row.delay 错峰，同一排内三本再按 book.d
+       错峰，书架像被逐本陈列出来。翻页时新排一到就入场，正好是用户滑到底的那一刻。 -->
+  <view class="shelf-row" wx:for="{{rows}}" wx:for-item="row" wx:key="key">
     <view class="grid">
       <view
         class="shelf-cell"
+        style="animation-delay:{{row.delay + book.d}}ms"
         wx:for="{{row.items}}"
         wx:for-item="book"
         wx:key="id"
@@ -53,12 +57,13 @@
         <view class="book-state {{book.stateClass}}">{{book.stateText}}</view>
       </view>
     </view>
-    <view class="shelf-line"></view>
-    <view class="shelf-edge"></view>
+    <view class="shelf-line" style="animation-delay:{{row.delay + 150}}ms"></view>
+    <view class="shelf-edge" style="animation-delay:{{row.delay + 150}}ms"></view>
   </view>
 
   <empty-state wx:if="{{!firstLoad && !loading && !list.length}}" text="没有找到相关图书" icon="search" />
-  <view wx:if="{{loading && !firstLoad}}" class="tiny status-line">加载中…</view>
+  <!-- 翻页时的等待：架上有书才在底部提示，空屏那一路交给上面的骨架 -->
+  <view wx:if="{{loading && list.length}}" class="tiny status-line">加载中…</view>
   <view wx:if="{{finished && list.length}}" class="tiny status-line eyebrow">— END OF COLLECTION —</view>
 </view>
 
