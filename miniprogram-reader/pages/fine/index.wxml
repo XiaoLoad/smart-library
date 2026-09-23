@@ -15,6 +15,9 @@
     >{{item.label}}</view>
   </view>
 
+  <!-- 列表还空着时先立骨架；切到「未缴/已缴」且有记录时才走 empty-state -->
+  <skeleton wx:if="{{loading && !list.length}}" variant="card" count="3" />
+
   <view class="card fine-card fade-in" wx:for="{{list}}" wx:key="id">
     <view class="row-between">
       <view class="flex-1 ellipsis fine-title serif">《{{item.bookTitle}}》</view>

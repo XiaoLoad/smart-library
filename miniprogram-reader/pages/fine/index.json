@@ -2,6 +2,7 @@
   "navigationBarTitleText": "罚款记录",
   "usingComponents": {
     "empty-state": "/components/empty-state/empty-state",
+    "skeleton": "/components/skeleton/skeleton",
     "status-tag": "/components/status-tag/status-tag",
     "app-icon": "/components/app-icon/app-icon"
   }
