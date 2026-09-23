@@ -94,6 +94,7 @@ Page({
     loading: false,
     finished: false,
     firstLoad: true,
+    dockStuck: false, // 检索坞是否已吸附在顶部
 
     catOpen: false,
     catLoaded: false,
@@ -104,6 +105,28 @@ Page({
 
     catHeight: 72,
     catDragging: false,
+  },
+
+  /* 检索坞什么时候算「吸附」：坞顶贴到视口上沿那一刻，也就是它本身的页面偏移量。
+     量的是偏移量，而不是逐帧取矩形——onPageScroll 是逐帧回调，除了状态翻转不 setData。 */
+  measureDock() {
+    wx.createSelectorQuery()
+      .select('.dock')
+      .boundingClientRect()
+      .selectViewport()
+      .scrollOffset()
+      .exec((res) => {
+        const rect = res && res[0]
+        const vp = res && res[1]
+        if (rect) this._dockTop = rect.top + ((vp && vp.scrollTop) || 0)
+      })
+  },
+  onReady() {
+    this.measureDock()
+  },
+  onPageScroll(e) {
+    const stuck = e.scrollTop >= (this._dockTop === undefined ? 120 : this._dockTop)
+    if (stuck !== this.data.dockStuck) this.setData({ dockStuck: stuck })
   },
 
   onLoad() {
@@ -234,14 +257,18 @@ Page({
   /** 列表上屏的唯一出口：书本、排、总数、计数文案一起落地，中间态不会被渲染出去。
    *  from 为这批之前已渲染的排数——缓存回填时是 0，翻页时是当前排数（新排从 0 起算错峰）。 */
   applyList(list, total, from) {
-    this.setData({
-      list,
-      rows: toRows(list, from),
-      total,
-      countText: total ? (this.data.catSelName ? '共 ' + total + ' 种 · ' + this.data.catSelName : '共 ' + total + ' 种馆藏') : '',
-      firstLoad: false,
-      finished: list.length >= total,
-    })
+    this.setData(
+      {
+        list,
+        rows: toRows(list, from),
+        total,
+        countText: total ? (this.data.catSelName ? '共 ' + total + ' 种 · ' + this.data.catSelName : '共 ' + total + ' 种馆藏') : '',
+        firstLoad: false,
+        finished: list.length >= total,
+      },
+      // 计数文案在坞的上方，这批数据到货后坞会被往下推——落屏后重新量一次吸附阈值
+      () => this.measureDock()
+    )
   },
 
   // fresh：跳过缓存直连网络，用于下拉刷新（用户已经明确在等新数据了）

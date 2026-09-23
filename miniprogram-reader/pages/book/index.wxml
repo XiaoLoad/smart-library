@@ -14,23 +14,26 @@
     <view class="tiny" wx:if="{{countText}}">{{countText}}</view>
   </view>
 
-  <!-- 检索 + 分类入口 -->
-  <view class="searchbar">
-    <app-icon name="search" size="28" color="#9c958d" />
-    <input
-      class="search-input"
-      placeholder="搜索书名 / 作者 / ISBN"
-      placeholder-class="ph"
-      value="{{keyword}}"
-      bindinput="onKeyword"
-      confirm-type="search"
-    />
-    <view wx:if="{{keyword}}" class="search-clear" catchtap="onClearKeyword">
-      <app-icon name="close" size="26" color="#9c958d" />
-    </view>
-    <view class="filter-btn" catchtap="openCat">
-      <view class="filter-label ellipsis">{{catSelName || '分类'}}</view>
-      <app-icon name="chevron-down" size="22" color="#3a5a6b" />
+  <!-- 检索坞：滑过页头后吸附在视口顶部，成一条通栏工具条——滑到第几屏都能直接搜索、
+       改分类。未吸附时不加任何多余线条，静态观感与改动前一致。 -->
+  <view class="dock {{dockStuck ? 'stuck' : ''}}">
+    <view class="searchbar">
+      <app-icon name="search" size="28" color="#9c958d" />
+      <input
+        class="search-input"
+        placeholder="搜索书名 / 作者 / ISBN"
+        placeholder-class="ph"
+        value="{{keyword}}"
+        bindinput="onKeyword"
+        confirm-type="search"
+      />
+      <view wx:if="{{keyword}}" class="search-clear" catchtap="onClearKeyword">
+        <app-icon name="close" size="26" color="#9c958d" />
+      </view>
+      <view class="filter-btn" catchtap="openCat">
+        <view class="filter-label ellipsis">{{catSelName || '分类'}}</view>
+        <app-icon name="chevron-down" size="22" color="#3a5a6b" />
+      </view>
     </view>
   </view>
 

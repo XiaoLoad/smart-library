@@ -24,16 +24,18 @@
     </view>
   </view>
 
-  <!-- 状态 · 下划线式分段 -->
-  <scroll-view scroll-x class="segments">
-    <view
-      wx:for="{{segments}}"
-      wx:key="value"
-      class="seg {{current === item.value ? 'seg-active' : ''}}"
-      data-value="{{item.value}}"
-      bindtap="onSegment"
-    >{{item.label}}</view>
-  </scroll-view>
+  <!-- 状态坞：滑过额度卡后吸附在视口顶部，看第几条第记录都能直接换分段 -->
+  <view class="dock {{dockStuck ? 'stuck' : ''}}">
+    <scroll-view scroll-x class="segments">
+      <view
+        wx:for="{{segments}}"
+        wx:key="value"
+        class="seg {{current === item.value ? 'seg-active' : ''}}"
+        data-value="{{item.value}}"
+        bindtap="onSegment"
+      >{{item.label}}</view>
+    </scroll-view>
+  </view>
 
   <!-- 首屏或换分段后列表还空着时，先立三张与记录卡同规格的骨架 -->
   <skeleton wx:if="{{loading && !list.length}}" variant="card" count="3" />
