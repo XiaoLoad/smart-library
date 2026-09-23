@@ -277,6 +277,9 @@ public class AiService {
 
         SseEmitter emitter = new SseEmitter(SSE_TIMEOUT_MS);
 
+        // 本次回复实际执行完成的工具调用（按顺序记录工具名），随助手消息落库为摘要
+        java.util.List<String> toolCalls = new java.util.concurrent.CopyOnWriteArrayList<>();
+
         // 工具事件发射器：将工具调用过程通过 SSE 推送给前端
         // P2.10 结构化输出：end 阶段携带 data 字段（工具返回的精简 JSON 快照）
         BaseLibraryTools.ToolEventEmitter emitterCb = (toolName, phase, detail, data) -> {
@@ -286,6 +289,10 @@ public class AiService {
                 // 通知前端清空正文——工具调用过程由工具卡片承载，正文只保留最终回答
                 if ("start".equals(phase)) {
                     emitter.send(SseEmitter.event().name("reset").data("[RESET]"));
+                }
+                // end 阶段计入摘要（成功执行完的工具；error 阶段不计）
+                if ("end".equals(phase)) {
+                    toolCalls.add(toolName);
                 }
                 Map<String, Object> payload = new java.util.LinkedHashMap<>();
                 payload.put("name", toolName);
@@ -355,6 +362,16 @@ public class AiService {
                             aiMsg.setRole("assistant");
                             aiMsg.setContent(sanitized);
                             aiMsg.setCreateTime(LocalDateTime.now());
+                            // 工具调用摘要（JSON 数组、按调用顺序记录工具名），供前端徽章行持久展示
+                            if (!toolCalls.isEmpty()) {
+                                StringBuilder ts = new StringBuilder("[");
+                                for (int i = 0; i < toolCalls.size(); i++) {
+                                    if (i > 0) ts.append(',');
+                                    ts.append('"').append(toolCalls.get(i)).append('"');
+                                }
+                                ts.append(']');
+                                aiMsg.setToolSummary(ts.toString());
+                            }
                             messageMapper.insert(aiMsg);
                             evictMemory(conversationId);
                         }

@@ -7,6 +7,7 @@
         <result property="conversationId" column="conversation_id"/>
         <result property="role" column="role"/>
         <result property="content" column="content"/>
+        <result property="toolSummary" column="tool_summary"/>
         <result property="createTime" column="create_time"/>
     </resultMap>
 
@@ -32,8 +33,8 @@
     </select>
 
     <insert id="insert" parameterType="com.library.entity.AiMessage" useGeneratedKeys="true" keyProperty="id">
-        INSERT INTO ai_messages (conversation_id, role, content, create_time)
-        VALUES (#{conversationId}, #{role}, #{content}, #{createTime})
+        INSERT INTO ai_messages (conversation_id, role, content, tool_summary, create_time)
+        VALUES (#{conversationId}, #{role}, #{content}, #{toolSummary}, #{createTime})
     </insert>
 
     <delete id="deleteByConversationId">
