@@ -35,6 +35,9 @@
     >{{item.label}}</view>
   </scroll-view>
 
+  <!-- 首屏或换分段后列表还空着时，先立三张与记录卡同规格的骨架 -->
+  <skeleton wx:if="{{loading && !list.length}}" variant="card" count="3" />
+
   <view class="card record fade-in" wx:for="{{list}}" wx:key="id">
     <view class="row-between">
       <view class="flex-1 ellipsis rec-title serif">《{{item.bookTitle}}》</view>
@@ -63,6 +66,7 @@
   </view>
 
   <empty-state wx:if="{{!firstLoad && !loading && !list.length}}" text="暂无借阅记录" icon="scroll" />
-  <view wx:if="{{loading && !firstLoad}}" class="tiny" style="text-align:center;padding:24rpx;">加载中…</view>
+  <!-- 翻页 / 静默刷新时的等待：空屏那一路由上面的骨架接管 -->
+  <view wx:if="{{loading && list.length}}" class="tiny" style="text-align:center;padding:24rpx;">加载中…</view>
   <view wx:if="{{finished && list.length}}" class="tiny eyebrow" style="text-align:center;padding:24rpx;">— END —</view>
 </view>
