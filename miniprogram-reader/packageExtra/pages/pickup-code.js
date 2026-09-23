@@ -1,5 +1,7 @@
+// 分包内自带 utils/qrcode（底下是 55KB 的 qrcode-generator），跟着本页一起进分包，
+// 不让它拖累主包；主包的工具（request/datetime）分包可以直接引用。
 const request = require('../../utils/request')
-const qr = require('../../utils/qrcode')
+const qr = require('../utils/qrcode')
 const { fmtDateTime } = require('../../utils/datetime')
 
 // 非「待取书」时给一句说明代替二维码：码在这个状态下已经没有意义，

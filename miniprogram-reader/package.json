@@ -3,7 +3,6 @@
   "version": "1.0.0",
   "description": "智慧图书借阅管理系统 · 微信小程序读者端（原生）",
   "dependencies": {
-    "marked": "^4.3.0",
-    "qrcode-generator": "^1.4.4"
+    "marked": "^4.3.0"
   }
 }

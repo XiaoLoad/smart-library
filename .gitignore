@@ -75,7 +75,9 @@ backend/uploads/
 .wx-upload-key/
 # 开发者工具的个人设置与本地编译产物（miniprogram_npm/ 由「工具 → 构建 npm」再生，不入库）
 miniprogram-reader/node_modules/
+miniprogram-reader/packageExtra/node_modules/
 miniprogram-reader/miniprogram_npm/
+miniprogram-reader/packageExtra/miniprogram_npm/
 project.private.config.json
 
 # ===== 手工建库脚本镜像 =====
