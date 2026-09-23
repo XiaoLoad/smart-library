@@ -147,8 +147,8 @@
             <view class="thinking-body">{{item.thinkingOpen ? item.thinking : '深度思考已折叠，点击展开'}}</view>
           </view>
 
-          <!-- 工具调用链 -->
-          <view wx:if="{{item.toolEvents.length}}" class="tools">
+          <!-- 工具调用链（流式期间展示完整卡片；收拢为徽章后隐藏，见下方 .chips） -->
+          <view wx:if="{{item.toolEvents.length && !item.toolChips.length}}" class="tools">
             <view wx:if="{{item.toolEvents.length >= 2}}" class="tool-chain-head">
               <text class="chain-dot" />
               <text>本次调用了 {{item.toolEvents.length}} 个工具</text>
@@ -217,6 +217,27 @@
           <text wx:elif="{{!item.pending && item.content}}" user-select>{{item.content}}</text>
           <text wx:else user-select>{{item.shown}}</text>
           <text wx:if="{{item.pending}}" class="typing">▍</text>
+
+          <!-- 工具徽章行：回复生成完毕后，工具卡片收拢为一排徽章（金色圆点 + 中文名 ×次数） -->
+          <view wx:if="{{item.toolChips.length}}" class="chips">
+            <view
+              wx:for="{{item.toolChips}}"
+              wx:for-item="chip"
+              wx:key="name"
+              class="chip {{item.snapTool === chip.name ? 'on' : ''}}"
+              data-id="{{item.id}}"
+              data-name="{{chip.name}}"
+              bindtap="onChipTap"
+            >
+              <view class="chip-dot"></view>
+              <text class="chip-name">{{chip.label}}</text>
+              <text wx:if="{{chip.count > 1}}" class="chip-n">×{{chip.count}}</text>
+            </view>
+          </view>
+          <!-- 徽章快照抽屉：点徽章展开该工具最近一次返回的数据（历史徽章为纯标签，点开无动作） -->
+          <view wx:if="{{item.snapData}}" class="chip-snap">
+            <text user-select class="tool-data-json">{{item.snapData}}</text>
+          </view>
         </view>
       </view>
     </view>

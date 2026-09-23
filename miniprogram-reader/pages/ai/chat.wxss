@@ -212,6 +212,48 @@
 .tool-card.start .tool-icon { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* —— 工具徽章行：回复完成后工具卡片收拢为一排徽章（虚线页脚分隔，呼应手稿批注风） —— */
+.chips {
+  margin-top: 16rpx;
+  padding-top: 12rpx;
+  border-top: 1rpx dashed var(--border-strong);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10rpx;
+}
+.chip {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+  padding: 8rpx 18rpx;
+  background: var(--bg-subtle);
+  border: 1rpx solid var(--border);
+  border-radius: 24rpx;
+  transition: border-color 0.15s ease;
+}
+.chip:active { opacity: 0.65; }
+.chip.on { border-color: var(--secondary); background: var(--primary-light); }
+.chip-dot {
+  width: 10rpx;
+  height: 10rpx;
+  border-radius: 50%;
+  background: var(--secondary);
+  flex-shrink: 0;
+}
+.chip-name { font-size: 22rpx; color: var(--text-2); }
+.chip-n { font-size: 20rpx; color: var(--secondary); font-weight: 600; }
+
+/* 徽章快照抽屉：与工具卡数据抽屉同款纸面底 */
+.chip-snap {
+  margin-top: 10rpx;
+  padding: 14rpx 16rpx;
+  background: var(--bg-subtle);
+  border: 1rpx solid var(--border);
+  border-radius: 10rpx;
+  max-height: 300rpx;
+  overflow: auto;
+}
+
 /* —— 输入区 · 圆角书写条（固定底部） —— */
 .input-bar {
   flex: 0 0 auto;

@@ -38,6 +38,25 @@ const formatJson = (dataJson) => {
   }
 }
 
+// 工具调用摘要（后端落库的 toolSummary JSON 数组）→ 徽章数据：同名工具合并计数
+const parseToolChips = (summary) => {
+  let names
+  try {
+    names = JSON.parse(summary || '[]')
+  } catch (e) {
+    return []
+  }
+  if (!Array.isArray(names)) return []
+  const chips = []
+  names.forEach((name) => {
+    if (!name) return
+    const found = chips.find((c) => c.name === name)
+    if (found) found.count += 1
+    else chips.push({ name, label: toolLabel(name), count: 1 })
+  })
+  return chips
+}
+
 // 本地时刻（刚发出的消息用发送时刻，不等回源才显示；历史消息用后端 createTime 切片）
 const pad2 = (n) => (n < 10 ? '0' + n : '' + n)
 const nowStamp = () => {
@@ -247,6 +266,7 @@ Page({
         thinking: '',
         thinkingOpen: false,
         toolEvents: [],
+        toolChips: parseToolChips(m.toolSummary),
       }))
       // 后端 ORDER BY id DESC（最新在上），显示需转成正序（最旧在上、最新在下），与 Web 端 chat.vue 对齐
       const ordered = items.reverse()
@@ -374,6 +394,7 @@ Page({
       thinking: '',
       thinkingOpen: false,
       toolEvents: [],
+      toolChips: [], // 流式期间保持空（卡片展示），finalize 后由 toolEvents 收拢为徽章
       pending: true,
       _done: false,
     }
@@ -469,6 +490,8 @@ Page({
       const info = JSON.parse(raw)
       const events = msg.toolEvents
       const name = info.name || ''
+      // 工具执行完成即累计徽章计数（finalize 时一次性渲染，流式期间不展示）
+      if (info.phase === 'end') this.bumpToolChip(msg, name)
       if (info.phase === 'start') {
         events.push({
           name,
@@ -509,6 +532,15 @@ Page({
     }
   },
 
+  // 徽章计数：同名工具合并（仅内存累计，finalizeStream 才 setData 渲染）
+  bumpToolChip(msg, name) {
+    if (!name) return
+    const chips = msg.toolChips || (msg.toolChips = [])
+    const found = chips.find((c) => c.name === name)
+    if (found) found.count += 1
+    else chips.push({ name, label: toolLabel(name), count: 1 })
+  },
+
   toggleToolData(e) {
     const id = e.currentTarget.dataset.id
     const ti = Number(e.currentTarget.dataset.ti)
@@ -517,6 +549,36 @@ Page({
     const key = 'messages[' + idx + '].toolEvents[' + ti + '].expanded'
     const cur = this.data.messages[idx].toolEvents[ti].expanded
     this.setData({ [key]: !cur })
+  },
+
+  // 点徽章：展开该工具最近一次返回的快照（本轮流式数据）；再点收起。
+  // 历史消息的 toolEvents 已清空，徽章为纯标签，无快照可展开则静默返回
+  onChipTap(e) {
+    const id = e.currentTarget.dataset.id
+    const name = e.currentTarget.dataset.name
+    const idx = this.findMsgIndex(id)
+    if (idx < 0) return
+    const msg = this.data.messages[idx]
+    if (msg.snapTool === name) {
+      this.setData({
+        ['messages[' + idx + '].snapTool']: '',
+        ['messages[' + idx + '].snapData']: '',
+      })
+      return
+    }
+    let data = ''
+    const events = msg.toolEvents || []
+    for (let i = events.length - 1; i >= 0; i--) {
+      if (events[i].name === name && events[i].data) {
+        data = events[i].data
+        break
+      }
+    }
+    if (!data) return
+    this.setData({
+      ['messages[' + idx + '].snapTool']: name,
+      ['messages[' + idx + '].snapData']: data,
+    })
   },
 
   // ===== 打字机：shown 是已揭示的文本，按 ~24ms/2 字从 content 增长 =====
@@ -546,6 +608,8 @@ Page({
       ['messages[' + this._streamIdx + '].segments']: msg.segments,
       ['messages[' + this._streamIdx + '].shown']: msg.content,
       ['messages[' + this._streamIdx + '].pending']: false,
+      // 工具卡片收拢为徽章行（toolChips 一旦非空，wxml 即隐藏卡片改显徽章）
+      ['messages[' + this._streamIdx + '].toolChips']: msg.toolChips || [],
     })
     this._streamMsg = null
     // 回源拉最新消息，同步服务端持久化的 id 与消毒后的正文；
