@@ -121,7 +121,7 @@ Page({
     const rec = this.findRecord(e)
     if (!rec) return
     wx.navigateTo({
-      url: '/pages/borrow/pickup-code?borrowNo=' + rec.borrowNo,
+      url: '/packageExtra/pages/pickup-code?borrowNo=' + rec.borrowNo,
       success(res) {
         res.eventChannel.emit('record', rec)
       },

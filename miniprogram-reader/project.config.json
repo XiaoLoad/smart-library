@@ -16,8 +16,17 @@
     "compileWorklet": false,
     "uglifyFileName": false,
     "uploadWithSourceMap": true,
-    "packNpmManually": false,
-    "packNpmRelationList": [],
+    "packNpmManually": true,
+    "packNpmRelationList": [
+      {
+        "packageJsonPath": "./package.json",
+        "miniprogramNpmDistDir": "./"
+      },
+      {
+        "packageJsonPath": "./packageExtra/package.json",
+        "miniprogramNpmDistDir": "./packageExtra"
+      }
+    ],
     "minifyWXSS": true,
     "minifyWXML": true,
     "localPlugins": false,
@@ -35,6 +44,10 @@
     {
       "packageJsonPath": "./package.json",
       "miniprogramNpmDistDir": "./"
+    },
+    {
+      "packageJsonPath": "./packageExtra/package.json",
+      "miniprogramNpmDistDir": "./packageExtra"
     }
   ],
   "condition": {},

@@ -6,13 +6,18 @@
     "pages/mine/index",
     "pages/auth/login",
     "pages/book/detail",
-    "pages/borrow/pickup-code",
     "pages/fine/index",
     "pages/message/notice-detail",
     "pages/mine/quota",
     "pages/mine/profile",
     "pages/mine/password",
     "pages/ai/chat"
+  ],
+  "subPackages": [
+    {
+      "root": "packageExtra",
+      "pages": ["pages/pickup-code"]
+    }
   ],
   "window": {
     "navigationBarTitleText": "智慧图书馆",
