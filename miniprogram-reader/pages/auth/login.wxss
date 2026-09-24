@@ -1,32 +1,90 @@
-.login-page { min-height: 100vh; padding: 110rpx 56rpx 48rpx; box-sizing: border-box; }
+/* ===== 登录页 · 素笺扉页（Editorial 扉页式排版） =====
+ * 暖纸底 + 巨型水印「書」+ 编号下划线输入；
+ * 落款沿用 AI 空态的 EX LIBRIS 母题（✦ 用 --secondary 松绿）。
+ */
+.login-page {
+  position: relative;
+  min-height: 100vh;
+  padding: 76rpx 64rpx 48rpx;
+  box-sizing: border-box;
+  overflow: hidden; /* 裁切水印出血 */
+}
 
-/* —— 刊头 —— */
-.masthead { text-align: center; margin-bottom: 72rpx; }
+/* —— 水印「書」 —— */
+.mark {
+  position: absolute;
+  top: -90rpx;
+  right: -48rpx;
+  font-size: 460rpx;
+  line-height: 1;
+  font-weight: 600;
+  color: var(--bg-muted);
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.content { position: relative; z-index: 1; }
+
+/* —— 扉页刊头 —— */
+.masthead { margin-top: 20rpx; }
+.mast-row { display: flex; align-items: center; gap: 20rpx; }
 .seal {
-  width: 88rpx;
-  height: 88rpx;
-  margin: 0 auto 28rpx;
+  width: 52rpx;
+  height: 52rpx;
   background: var(--danger);
   color: var(--inverse);
-  font-size: 46rpx;
-  line-height: 88rpx;
+  font-size: 30rpx;
+  line-height: 52rpx;
   text-align: center;
   border-radius: 4rpx;
 }
-.wordmark { font-size: 64rpx; font-weight: 600; letter-spacing: 6rpx; margin-bottom: 14rpx; }
-
-/* —— 表单卡 —— */
-.form-card {
-  background: var(--bg-elevated);
-  border: 1rpx solid var(--border);
-  border-radius: 8rpx;
-  padding: 44rpx 36rpx;
+.headline {
+  margin-top: 40rpx;
+  font-size: 56rpx;
+  line-height: 1.68;
+  font-weight: 600;
+  letter-spacing: 2rpx;
+  color: var(--text);
 }
-.remember-row { margin-bottom: 32rpx; }
+.hl-line { display: block; }
+
+/* —— 细线 + 元信息 —— */
+.rule { height: 1rpx; background: var(--border-strong); margin-top: 32rpx; }
+.meta-row {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 12rpx;
+}
+.meta { font-size: 22rpx; letter-spacing: 4rpx; color: var(--text-3); }
+
+/* —— 编号下划线式表单 —— */
+.field { margin-top: 40rpx; }
+.field-label {
+  font-size: 22rpx;
+  letter-spacing: 4rpx;
+  color: var(--text-3);
+  margin-bottom: 2rpx;
+}
+.field-input {
+  height: 76rpx;
+  background: transparent;
+  border: none;
+  border-bottom: 1rpx solid var(--border-strong);
+  border-radius: 0;
+  padding: 0;
+  font-size: 30rpx;
+  width: 100%;
+  box-sizing: border-box;
+  color: var(--text);
+}
+.ph { color: var(--text-3); opacity: 0.7; }
+
+/* —— 记住账号 —— */
+.remember-row { margin-top: 36rpx; }
 .remember { gap: 14rpx; }
 .check-box {
-  width: 32rpx;
-  height: 32rpx;
+  width: 30rpx;
+  height: 30rpx;
   border: 1rpx solid var(--border-strong);
   border-radius: 4rpx;
   display: flex;
@@ -34,6 +92,63 @@
   justify-content: center;
 }
 .check-box.checked { background: var(--primary); border-color: var(--primary); }
-.login-btn { letter-spacing: 8rpx; }
-.ph { color: var(--text-3); }
-.tip { text-align: center; margin-top: 24rpx; letter-spacing: 1rpx; }
+
+/* —— 登录按钮 —— */
+.login-btn {
+  margin-top: 36rpx;
+  height: 92rpx;
+  font-size: 28rpx;
+  letter-spacing: 12rpx;
+  text-indent: 12rpx; /* 抵消末字字距，视觉居中 */
+}
+
+/* —— 或 · 分割 —— */
+.or-row {
+  display: flex;
+  align-items: center;
+  gap: 20rpx;
+  margin: 26rpx 0 12rpx;
+}
+.or-line { flex: 1; height: 1rpx; background: var(--border); }
+.or-txt { font-size: 22rpx; letter-spacing: 4rpx; text-indent: 4rpx; color: var(--text-3); }
+
+/* —— 微信一键登录 · 无框文字按钮 —— */
+.btn-wx {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10rpx;
+  height: 84rpx;
+  background: transparent;
+  font-size: 27rpx;
+  font-weight: 500;
+  color: var(--text-2);
+  line-height: 1;
+}
+.btn-wx::after { border: none; }
+.btn-wx[disabled] { background: transparent; color: var(--text-3); }
+.btn-wx:active { opacity: 0.6; }
+
+.tip { text-align: center; margin-top: 8rpx; letter-spacing: 1rpx; }
+
+/* —— 落款 —— */
+.foot-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12rpx;
+  margin-top: 44rpx;
+}
+.foot-star { font-size: 22rpx; color: var(--secondary); }
+.foot-txt { font-size: 22rpx; letter-spacing: 3rpx; color: var(--text-3); }
+
+/* —— 入场：错峰上浮 —— */
+.rise { animation: login-rise 0.5s cubic-bezier(0.16, 1, 0.3, 1) both; }
+.d1 { animation-delay: 0.06s; }
+.d2 { animation-delay: 0.12s; }
+.d3 { animation-delay: 0.18s; }
+.d4 { animation-delay: 0.24s; }
+@keyframes login-rise {
+  from { opacity: 0; transform: translateY(14rpx); }
+  to { opacity: 1; transform: translateY(0); }
+}
