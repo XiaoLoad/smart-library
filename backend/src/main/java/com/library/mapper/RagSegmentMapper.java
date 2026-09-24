@@ -21,6 +21,12 @@ public interface RagSegmentMapper {
      */
     List<RagSegment> selectAllEnabledWithEmbedding();
 
+    /**
+     * 某文档的全部片段（含 embedding，不看文档启用状态），
+     * 用于文档重新启用时按原向量加回内存索引，免重新切分与嵌入。
+     */
+    List<RagSegment> selectByDocumentIdWithEmbedding(@Param("documentId") Long documentId);
+
     int insert(RagSegment segment);
 
     int deleteByDocumentId(@Param("documentId") Long documentId);

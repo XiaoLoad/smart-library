@@ -108,16 +108,12 @@ public class RagController {
     }
 
     /**
-     * 启用 / 停用文档（停用后检索不再命中，片段保留）。
+     * 启用 / 停用文档（停用后立即不再被检索命中，片段保留；重新启用按原向量回填索引）。
      */
     @PutMapping("/documents/{id}/status")
     public Result<Void> updateStatus(@PathVariable Long id, @RequestParam Integer status) {
         requireAdmin();
-        RagDocument doc = documentMapper.selectById(id);
-        if (doc == null) {
-            throw new BusinessException(404, "文档不存在");
-        }
-        documentMapper.updateStatus(id, status != null && status == 1 ? 1 : 0);
+        ragIndexService.setDocumentStatus(id, status != null && status == 1 ? 1 : 0);
         return Result.success("状态已更新", null);
     }
 
