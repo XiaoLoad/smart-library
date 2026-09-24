@@ -388,6 +388,121 @@ public class LibraryConfigService {
         }
     }
 
+    // ==================== RAG 知识库配置 ====================
+
+    public static final String KEY_RAG_CONFIG = "rag_config";
+    /** 当前使用的本地中文 embedding 模型标识（启动校验用：与配置不符则强制重建索引） */
+    public static final String EMBEDDING_MODEL_NAME = "bge-small-zh-v15-q";
+    /** bge-small-zh-v1.5 隐藏层维度；实测 BgeSmallZhV15QuantizedEmbeddingModel.dimension() = 512 */
+    public static final int EMBEDDING_DIM = 512;
+
+    /**
+     * RAG 检索/切分参数（可在 Web 端在线调整，无需改代码重启）。
+     */
+    @Data
+    public static class RagConfig {
+        /** RAG 总开关 */
+        private Boolean enabled = true;
+        /** 检索返回片段数 */
+        private Integer maxResults = 3;
+        /** 相似度下限，低于该分数的片段不注入（防止硬塞不相关片段）。
+         *  实测：相关问句 0.79~0.84，无关问句也有 0.70~0.71，故取 0.72 */
+        private Double minScore = 0.72;
+        /** 切片字数 */
+        private Integer chunkSize = 400;
+        /** 切片重叠字数 */
+        private Integer chunkOverlap = 60;
+        /** 建索引所用 embedding 模型标识 */
+        private String embeddingModel = EMBEDDING_MODEL_NAME;
+        /** 向量维度 */
+        private Integer embeddingDim = EMBEDDING_DIM;
+    }
+
+    private volatile RagConfig cachedRagConfig;
+
+    /**
+     * RAG 配置。未配置或字段缺失时返回默认值（不落种子行，避免空值覆盖默认）。
+     */
+    public RagConfig getRagConfig() {
+        RagConfig cached = cachedRagConfig;
+        if (cached != null) {
+            return cached;
+        }
+        synchronized (this) {
+            if (cachedRagConfig != null) {
+                return cachedRagConfig;
+            }
+            RagConfig cfg = new RagConfig();
+            SystemSetting s = systemSettingMapper.selectByKey(KEY_RAG_CONFIG);
+            if (s != null && s.getSettingValue() != null && !s.getSettingValue().isBlank()) {
+                try {
+                    cfg = objectMapper.readValue(s.getSettingValue(), RagConfig.class);
+                } catch (Exception e) {
+                    log.warn("[配置] rag_config 解析失败，使用默认参数: {}", e.getMessage());
+                    cfg = new RagConfig();
+                }
+            }
+            normalize(cfg);
+            cachedRagConfig = cfg;
+            return cfg;
+        }
+    }
+
+    /**
+     * 保存 RAG 配置（保存后立即生效，新的检索请求按新参数执行）。
+     */
+    public synchronized void saveRagConfig(RagConfig cfg) {
+        try {
+            normalize(cfg);
+            systemSettingMapper.upsert(KEY_RAG_CONFIG, objectMapper.writeValueAsString(cfg));
+            cachedRagConfig = cfg;
+            log.info("[配置] RAG 参数已更新：enabled={} maxResults={} minScore={} chunkSize={} chunkOverlap={}",
+                    cfg.getEnabled(), cfg.getMaxResults(), cfg.getMinScore(), cfg.getChunkSize(), cfg.getChunkOverlap());
+        } catch (Exception e) {
+            throw new BusinessException(500, "保存 RAG 配置失败：" + e.getMessage());
+        }
+    }
+
+    /**
+     * 记录本次建索引实际使用的模型与维度（索引重建完成后调用）。
+     * 模型/维度与记录不符是「必须重建索引」的判据，因此重建后要回写。
+     */
+    public synchronized void updateRagEmbeddingInfo(String embeddingModel, int embeddingDim) {
+        RagConfig cfg = getRagConfig();
+        if (embeddingModel.equals(cfg.getEmbeddingModel()) && cfg.getEmbeddingDim() == embeddingDim) {
+            return;
+        }
+        cfg.setEmbeddingModel(embeddingModel);
+        cfg.setEmbeddingDim(embeddingDim);
+        saveRagConfig(cfg);
+    }
+
+    /** 缺省值兜底：键存在但值为 null / 非法时按默认值处理 */
+    private static void normalize(RagConfig cfg) {
+        RagConfig d = new RagConfig();
+        if (cfg.getEnabled() == null) {
+            cfg.setEnabled(d.getEnabled());
+        }
+        if (cfg.getMaxResults() == null || cfg.getMaxResults() < 1) {
+            cfg.setMaxResults(d.getMaxResults());
+        }
+        if (cfg.getMinScore() == null || cfg.getMinScore() < 0 || cfg.getMinScore() > 1) {
+            cfg.setMinScore(d.getMinScore());
+        }
+        if (cfg.getChunkSize() == null || cfg.getChunkSize() < 50) {
+            cfg.setChunkSize(d.getChunkSize());
+        }
+        if (cfg.getChunkOverlap() == null || cfg.getChunkOverlap() < 0) {
+            cfg.setChunkOverlap(d.getChunkOverlap());
+        }
+        if (cfg.getEmbeddingModel() == null || cfg.getEmbeddingModel().isBlank()) {
+            cfg.setEmbeddingModel(d.getEmbeddingModel());
+        }
+        if (cfg.getEmbeddingDim() == null || cfg.getEmbeddingDim() < 1) {
+            cfg.setEmbeddingDim(d.getEmbeddingDim());
+        }
+    }
+
     // ==================== AI 可调整 Prompt 段 ====================
 
     /**

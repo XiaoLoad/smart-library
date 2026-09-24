@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.library.mapper.RagSegmentMapper">
+
+    <resultMap id="segMap" type="com.library.entity.RagSegment">
+        <id property="id" column="id"/>
+        <result property="documentId" column="document_id"/>
+        <result property="seq" column="seq"/>
+        <result property="content" column="content"/>
+        <result property="createTime" column="create_time"/>
+    </resultMap>
+
+    <!-- 加载索引用：含 embedding 与所属文档标题/可见范围（拼 TextSegment metadata 需要） -->
+    <resultMap id="segWithEmbeddingMap" type="com.library.entity.RagSegment" extends="segMap">
+        <result property="embedding" column="embedding"/>
+        <result property="docTitle" column="doc_title"/>
+        <result property="docScope" column="doc_scope"/>
+    </resultMap>
+
+    <select id="listByDocumentId" resultMap="segMap">
+        SELECT id, document_id, seq, content, create_time
+        FROM rag_segments
+        WHERE document_id = #{documentId}
+        ORDER BY seq ASC
+    </select>
+
+    <select id="selectAllEnabledWithEmbedding" resultMap="segWithEmbeddingMap">
+        SELECT s.id, s.document_id, s.seq, s.content, s.embedding, s.create_time,
+               d.title AS doc_title, d.scope AS doc_scope
+        FROM rag_segments s
+        JOIN rag_documents d ON d.id = s.document_id
+        WHERE d.status = 1
+        ORDER BY s.document_id ASC, s.seq ASC
+    </select>
+
+    <insert id="insert" parameterType="com.library.entity.RagSegment" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO rag_segments (document_id, seq, content, embedding, create_time)
+        VALUES (#{documentId}, #{seq}, #{content}, #{embedding}, #{createTime})
+    </insert>
+
+    <delete id="deleteByDocumentId">
+        DELETE FROM rag_segments WHERE document_id = #{documentId}
+    </delete>
+
+    <delete id="deleteAll">
+        DELETE FROM rag_segments
+    </delete>
+
+    <select id="countByDocumentId" resultType="java.lang.Integer">
+        SELECT COUNT(*) FROM rag_segments WHERE document_id = #{documentId}
+    </select>
+
+</mapper>
