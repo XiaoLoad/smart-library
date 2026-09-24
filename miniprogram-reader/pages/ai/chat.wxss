@@ -254,6 +254,72 @@
   overflow: auto;
 }
 
+/* —— 参考资料行：知识库检索命中的来源（正文之前，虚线页脚分隔，与工具徽章同一套纸面药丸） —— */
+.refs {
+  margin-bottom: 14rpx;
+  padding-bottom: 12rpx;
+  border-bottom: 1rpx dashed var(--border-strong);
+}
+.refs-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10rpx;
+}
+.refs-label {
+  display: flex;
+  align-items: center;
+  gap: 6rpx;
+}
+.refs-icon { flex-shrink: 0; }
+.refs-txt { font-size: 22rpx; color: var(--text-3); }
+.ref-chip {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+  max-width: 380rpx;
+  padding: 6rpx 18rpx;
+  background: var(--bg-subtle);
+  border: 1rpx dashed var(--border-strong);
+  border-radius: 24rpx;
+  transition: border-color 0.15s ease;
+}
+.ref-chip:active { opacity: 0.65; }
+.ref-chip.on { border-style: solid; border-color: var(--secondary); background: var(--primary-light); }
+.ref-dot {
+  width: 10rpx;
+  height: 10rpx;
+  border-radius: 50%;
+  background: var(--secondary);
+  flex-shrink: 0;
+}
+.ref-title {
+  font-size: 22rpx;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ref-snap {
+  margin-top: 10rpx;
+  padding: 14rpx 16rpx;
+  background: var(--bg-subtle);
+  border: 1rpx solid var(--border);
+  border-radius: 10rpx;
+}
+.ref-snap-head {
+  display: block;
+  font-size: 20rpx;
+  color: var(--secondary);
+  margin-bottom: 8rpx;
+}
+.ref-snap-body {
+  font-size: 22rpx;
+  line-height: 1.7;
+  color: var(--text-2);
+  word-break: break-all;
+}
+
 /* —— 输入区 · 圆角书写条（固定底部） —— */
 .input-bar {
   flex: 0 0 auto;

@@ -192,6 +192,34 @@
             </view>
           </view>
 
+          <!-- 参考资料：本轮知识库检索命中的来源（SSE rag 事件在调用 LLM 前推送，故先于正文出现）；
+               后端不落库，历史消息无此块。点药丸展开该片段摘要 -->
+          <view wx:if="{{item.ragSources.length}}" class="refs">
+            <view class="refs-row">
+              <view class="refs-label">
+                <app-icon class="refs-icon" name="scroll" size="22" color="#9c958d" />
+                <text class="refs-txt">参考资料</text>
+              </view>
+              <view
+                wx:for="{{item.ragSources}}"
+                wx:for-item="ref"
+                wx:for-index="ri"
+                wx:key="index"
+                class="ref-chip {{item.ragOpen === ri ? 'on' : ''}}"
+                data-id="{{item.id}}"
+                data-ri="{{ri}}"
+                bindtap="onRefTap"
+              >
+                <view class="ref-dot"></view>
+                <text class="ref-title">{{ref.docTitle}}</text>
+              </view>
+            </view>
+            <view wx:if="{{item.refSnippet}}" class="ref-snap">
+              <text class="ref-snap-head">{{item.refTitle}} · 检索片段摘要</text>
+              <text user-select class="ref-snap-body">{{item.refSnippet}}</text>
+            </view>
+          </view>
+
           <!-- 正文：流式时逐字显示 shown + 光标；结束切片段渲染（表格片段可卡片内横滑） -->
           <block wx:if="{{!item.pending && item.segments.length}}">
             <block wx:for="{{item.segments}}" wx:for-item="seg" wx:key="index">
