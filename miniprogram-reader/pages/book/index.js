@@ -1,6 +1,6 @@
-const request = require('../../utils/request')
-const cover = require('../../utils/cover')
-const cache = require('../../utils/cache')
+const request = require('../../utils/core/request')
+const cover = require('../../utils/feature/cover')
+const cache = require('../../utils/core/cache')
 
 const PAGE_SIZE = 12 // 3 列布局，12 本正好 4 排
 const CHUNK = 3

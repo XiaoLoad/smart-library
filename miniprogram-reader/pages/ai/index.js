@@ -1,8 +1,8 @@
-const request = require('../../utils/request')
-const sse = require('../../utils/sse')
-const markdown = require('../../utils/markdown')
-const auth = require('../../utils/auth')
-const badge = require('../../utils/badge')
+const request = require('../../utils/core/request')
+const sse = require('../../utils/core/sse')
+const markdown = require('../../utils/feature/markdown')
+const auth = require('../../utils/core/auth')
+const badge = require('../../utils/feature/badge')
 
 const PAGE_SIZE = 20
 

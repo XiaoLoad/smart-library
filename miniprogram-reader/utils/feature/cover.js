@@ -8,8 +8,8 @@
  * 只有站内相对路径（/api/uploads/...）才走 base64——外链封面本身是 https，
  * 不在本通道服务范围内，也无需转换。
  */
-const { COVER_MODE, resolveUrl } = require('./config')
-const request = require('./request')
+const { COVER_MODE, resolveUrl } = require('../core/config')
+const request = require('../core/request')
 
 const USE_BASE64 = COVER_MODE === 'base64'
 

@@ -1,4 +1,4 @@
-const request = require('../../utils/request')
+const request = require('../../utils/core/request')
 
 Page({
   data: { oldPassword: '', newPassword: '', confirmPassword: '', saving: false },

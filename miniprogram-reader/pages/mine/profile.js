@@ -1,4 +1,4 @@
-const request = require('../../utils/request')
+const request = require('../../utils/core/request')
 
 Page({
   data: { form: { email: '', phone: '' }, user: null, saving: false, loading: true },

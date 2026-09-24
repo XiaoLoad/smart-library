@@ -1,4 +1,4 @@
-const { getIcon } = require('../utils/icons')
+const { getIcon } = require('../utils/feature/icons')
 
 const C_NORMAL = '#9c958d'
 const C_ACTIVE = '#3a5a6b'
@@ -7,7 +7,7 @@ const C_ACTIVE = '#3a5a6b'
 const TABS = [
   { route: 'pages/book/index', pagePath: '/pages/book/index', text: '书库', index: 0, icon: getIcon('book', C_NORMAL), activeIcon: getIcon('book', C_ACTIVE) },
   { route: 'pages/borrow/index', pagePath: '/pages/borrow/index', text: '借阅', index: 1, icon: getIcon('scroll', C_NORMAL), activeIcon: getIcon('scroll', C_ACTIVE) },
-  { route: 'pages/ai/chat', pagePath: '/pages/ai/chat', text: 'AI 助手', index: 2, icon: getIcon('sparkle', C_NORMAL), activeIcon: getIcon('sparkle', C_ACTIVE) },
+  { route: 'pages/ai/index', pagePath: '/pages/ai/index', text: 'AI 助手', index: 2, icon: getIcon('sparkle', C_NORMAL), activeIcon: getIcon('sparkle', C_ACTIVE) },
   { route: 'pages/message/index', pagePath: '/pages/message/index', text: '消息', index: 3, icon: getIcon('bell', C_NORMAL), activeIcon: getIcon('bell', C_ACTIVE) },
   { route: 'pages/mine/index', pagePath: '/pages/mine/index', text: '我的', index: 4, icon: getIcon('user', C_NORMAL), activeIcon: getIcon('user', C_ACTIVE) },
 ]

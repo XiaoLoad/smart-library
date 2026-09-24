@@ -53,7 +53,9 @@
   "condition": {},
   "simulatorPluginLibVersion": {},
   "packOptions": {
-    "ignore": [],
+    "ignore": [
+      { "type": "folder", "value": "node_modules" }
+    ],
     "include": []
   },
   "editorSetting": {}

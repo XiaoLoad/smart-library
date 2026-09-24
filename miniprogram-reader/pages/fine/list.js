@@ -1,6 +1,6 @@
-const request = require('../../utils/request')
-const { mockPay } = require('../../utils/mock-pay')
-const { fmtDateTime, fmtMoney } = require('../../utils/datetime')
+const request = require('../../utils/core/request')
+const { mockPay } = require('../../utils/feature/mock-pay')
+const { fmtDateTime, fmtMoney } = require('../../utils/feature/datetime')
 
 const TABS = [
   { value: -1, label: '全部' },

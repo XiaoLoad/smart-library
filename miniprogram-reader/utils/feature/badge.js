@@ -43,13 +43,13 @@ function syncCustomBar(n) {
 
 // 拉一次未读数并刷新角标，resolve 当前未读数（失败时给上一次的值）
 function refresh() {
-  const auth = require('./auth')
+  const auth = require('../core/auth')
   if (!auth.getToken()) {
     if (shown !== null) dismiss()
     return Promise.resolve(0)
   }
   if (inflight) return inflight
-  const request = require('./request')
+  const request = require('../core/request')
   inflight = request
     .get('/notification/unread-count', undefined, { silent: true })
     .then((res) => paint(Number(res && res.count) || 0))

@@ -21,7 +21,7 @@
       <text class="cell-label">借阅额度</text>
       <app-icon name="chevron-right" size="26" color="#9c958d" />
     </view>
-    <view class="cell" data-url="/pages/fine/index" bindtap="go">
+    <view class="cell" data-url="/pages/fine/list" bindtap="go">
       <app-icon name="coin" size="34" color="#6b6560" />
       <text class="cell-label">罚款记录</text>
       <app-icon name="chevron-right" size="26" color="#9c958d" />

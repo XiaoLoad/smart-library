@@ -1,6 +1,6 @@
-const request = require('../../utils/request')
-const auth = require('../../utils/auth')
-const badge = require('../../utils/badge')
+const request = require('../../utils/core/request')
+const auth = require('../../utils/core/auth')
+const badge = require('../../utils/feature/badge')
 
 function wxLogin() {
   return new Promise((resolve, reject) => {

@@ -1,5 +1,5 @@
-const request = require('../../utils/request')
-const { fmtDateTime } = require('../../utils/datetime')
+const request = require('../../utils/core/request')
+const { fmtDateTime } = require('../../utils/feature/datetime')
 
 Page({
   data: { item: null, timeText: '' },

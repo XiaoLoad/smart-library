@@ -1,5 +1,5 @@
 // 线性图标组件：<app-icon name="search" size="28" color="#9c958d"/>
-const { getIcon } = require('../../utils/icons')
+const { getIcon } = require('../../utils/feature/icons')
 
 const SCREEN_WIDTH = wx.getSystemInfoSync().windowWidth || 375
 
