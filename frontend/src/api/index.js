@@ -89,6 +89,29 @@ export const aiApi = {
   deleteConversation: (id) => service.delete(`/ai/conversation/${id}`),
 }
 
+// 知识库（RAG，仅管理员）
+export const ragApi = {
+  documents: (params) => get('/rag/documents', params),
+  // 上传 txt/md：只解析文本入库，不保留原文件；大文件解析较久，放宽超时
+  upload: (file, { title, scope } = {}) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    if (title) fd.append('title', title)
+    if (scope) fd.append('scope', scope)
+    return service.request({ method: 'post', url: '/rag/documents/upload', data: fd, timeout: 60000 })
+  },
+  createByText: (data) => post('/rag/documents/text', data),
+  updateStatus: (id, status) => service.put(`/rag/documents/${id}/status`, null, { params: { status } }),
+  deleteDocument: (id) => service.delete(`/rag/documents/${id}`),
+  // 重建含逐片向量化，单篇也可能上百片，放宽超时
+  reindex: (id) => post(`/rag/documents/${id}/reindex`, {}, { timeout: 120000 }),
+  rebuildAll: () => post('/rag/rebuild', {}, { timeout: 300000 }),
+  segments: (id) => get(`/rag/documents/${id}/segments`),
+  searchTest: (params) => post('/rag/search-test', null, { params }),
+  getConfig: () => get('/rag/config'),
+  saveConfig: (data) => post('/rag/config', data),
+}
+
 // 系统设置
 export const systemApi = {
   changePassword: (data) => post('/system/change-password', data),

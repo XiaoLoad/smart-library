@@ -80,5 +80,7 @@ const ICONS = {
   refresh: '<path d="M20 11a8 8 0 0 0-13.5-4.5L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 13.5 4.5L20 16"/><path d="M20 20v-4h-4"/>',
   // 收起 · 上箭头
   'chevron-up': '<path d="M6.75 14.5 12 9.25l5.25 5.25"/>',
+  // 知识库 · 档案盒
+  knowledge: '<path d="M4.5 8.4h15M6.2 8.4V6.5a1.4 1.4 0 0 1 1.4-1.4h8.8a1.4 1.4 0 0 1 1.4 1.4v1.9"/><rect x="5.5" y="8.4" width="13" height="10.7" rx="1.6"/><path d="M9.2 12.4h5.6M9.2 15.5h3.4"/>',
 }
 </script>

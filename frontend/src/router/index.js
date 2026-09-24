@@ -151,6 +151,21 @@ const routes = [
     ],
   },
   {
+    // 知识库（RAG）：人工上传规章文档，为 AI 助手提供检索依据，仅管理员可进
+    path: '/knowledge',
+    component: Layout,
+    redirect: '/knowledge/list',
+    meta: { hidden: true },
+    children: [
+      {
+        path: 'list',
+        name: 'KnowledgeList',
+        component: () => import('@/views/knowledge/index.vue'),
+        meta: { title: '知识库', roles: [3], keepAlive: true },
+      },
+    ],
+  },
+  {
     path: '/system',
     component: Layout,
     redirect: '/system/settings',
