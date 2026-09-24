@@ -92,17 +92,9 @@ public class RagIndexService {
             List<RagSegment> segments = segmentMapper.selectAllEnabledWithEmbedding();
             int dim = model().dimension();
             InMemoryEmbeddingStore<TextSegment> fresh = new InMemoryEmbeddingStore<>();
-            int skipped = 0;
-            for (RagSegment s : segments) {
-                if (s.getEmbedding() == null || s.getEmbedding().length != dim * Float.BYTES) {
-                    skipped++;
-                    continue;
-                }
-                fresh.add(String.valueOf(s.getId()),
-                        Embedding.from(toFloats(s.getEmbedding())),
-                        toSegment(s.getDocumentId(), s.getDocTitle(), s.getDocScope(), s.getContent()));
-            }
+            int added = addAll(fresh, segments, dim);
             store = fresh;
+            int skipped = segments.size() - added;
             log.info("[RAG] 内存索引加载完成：片段 {} 条，跳过维度不符 {} 条", fresh.size(), skipped);
 
             if (skipped > 0 || !embeddingSignatureMatches()) {
@@ -163,12 +155,39 @@ public class RagIndexService {
      */
     public synchronized int reindex(Long docId) {
         RagDocument doc = requireDocument(docId);
+        if (doc.getStatus() == null || doc.getStatus() != 1) {
+            throw new BusinessException(400, "文档已停用，请先启用后再重建索引");
+        }
         if (doc.getRawText() == null || doc.getRawText().isBlank()) {
             throw new BusinessException(400, "该文档未保存原文，无法重建索引，请删除后重新录入");
         }
         int count = indexDocument(doc);
         log.info("[RAG] 文档索引已重建：id={} 片段 {} 条", docId, count);
         return count;
+    }
+
+    /**
+     * 启用 / 停用文档，并同步内存索引（DB 片段一律保留，便于重新启用）。
+     * <p>
+     * 检索与检索测试只读内存索引、不查 {@code status}，所以状态变更必须同时改索引：
+     * 仅改 DB 的话，停用要到重启（启动加载带 {@code status = 1}）或全量重建后才生效。
+     * 启用时按库内已有向量回填，不重新切分与嵌入（若要换切分参数请重新启用后点重建）。
+     */
+    public synchronized void setDocumentStatus(Long docId, int status) {
+        RagDocument doc = requireDocument(docId);
+        int normalized = status == 1 ? 1 : 0;
+        documentMapper.updateStatus(docId, normalized);
+        InMemoryEmbeddingStore<TextSegment> current = store;
+        if (normalized == 0) {
+            if (current != null) {
+                current.removeAll(metadataKey("documentId").isEqualTo(String.valueOf(docId)));
+            }
+            log.info("[RAG] 文档已停用并移出内存索引：id={} title={}", docId, doc.getTitle());
+            return;
+        }
+        int added = current == null ? 0
+                : addAll(current, segmentMapper.selectByDocumentIdWithEmbedding(docId), model().dimension());
+        log.info("[RAG] 文档已启用并加回内存索引：id={} title={} 片段 {} 条", docId, doc.getTitle(), added);
     }
 
     /**
@@ -279,6 +298,25 @@ public class RagIndexService {
         }
         documentMapper.updateSegmentCount(doc.getId(), chunks.size());
         return chunks.size();
+    }
+
+    /**
+     * 把库内片段（含 embedding 字节）批量灌入内存索引；维度不符的跳过。
+     *
+     * @return 实际入索引的片段数
+     */
+    private int addAll(InMemoryEmbeddingStore<TextSegment> target, List<RagSegment> segments, int dim) {
+        int added = 0;
+        for (RagSegment s : segments) {
+            if (s.getEmbedding() == null || s.getEmbedding().length != dim * Float.BYTES) {
+                continue;
+            }
+            target.add(String.valueOf(s.getId()),
+                    Embedding.from(toFloats(s.getEmbedding())),
+                    toSegment(s.getDocumentId(), s.getDocTitle(), s.getDocScope(), s.getContent()));
+            added++;
+        }
+        return added;
     }
 
     /** TextSegment metadata：documentId/docTitle 供来源标注，scope 供检索层权限隔离 */
