@@ -10,9 +10,16 @@ import com.library.mapper.*;
 import com.library.security.CurrentUser;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.UserMessage;
+import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.memory.ChatMemory;
 import dev.langchain4j.memory.chat.MessageWindowChatMemory;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
+import dev.langchain4j.rag.DefaultRetrievalAugmentor;
+import dev.langchain4j.rag.RetrievalAugmentor;
+import dev.langchain4j.rag.content.Content;
+import dev.langchain4j.rag.content.retriever.ContentRetriever;
+import dev.langchain4j.rag.content.retriever.EmbeddingStoreContentRetriever;
+import dev.langchain4j.store.embedding.filter.Filter;
 import dev.langchain4j.service.AiServices;
 import dev.langchain4j.service.TokenStream;
 import org.slf4j.Logger;
@@ -35,6 +42,8 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+
+import static dev.langchain4j.store.embedding.filter.MetadataFilterBuilder.metadataKey;
 
 /**
  * AI 对话服务：基于 LangChain4j 1.20 + OpenAI 兼容接口（DeepSeek/OpenAI 等），
@@ -59,6 +68,8 @@ public class AiService {
     private static final int TITLE_MAX_LEN = 20;
     /** 模型调用超时（秒），避免长时间无响应卡死 SSE */
     private static final long MODEL_TIMEOUT_SECONDS = 60L;
+    /** RAG 来源回传给前端的单个片段摘要最大字符数 */
+    private static final int RAG_SNIPPET_MAX_LEN = 120;
 
     @Autowired private AiConversationMapper conversationMapper;
     @Autowired private AiMessageMapper messageMapper;
@@ -76,6 +87,7 @@ public class AiService {
     @Autowired private StatsService statsService;
     @Autowired private CacheManager cacheManager;
     @Autowired private LibraryConfigService libraryConfigService;
+    @Autowired private RagIndexService ragIndexService;
 
     /** 缓存最近构建的流式模型，配置未变时复用，避免重复创建 OkHttpClient */
     private volatile OpenAiStreamingChatModel cachedModel;
@@ -149,6 +161,14 @@ public class AiService {
                也不要在正文解释"我将调用哪个工具"或贴出调用过程。工具由系统自动执行，
                调用过程会自动以工具卡片形式展示给用户，你只需用自然语言呈现查询结果与结论。
                理由：工具调用代码属于内部实现细节，普通用户看不懂且严重干扰阅读。
+
+            10. 知识库资料优先且必须标注来源：当本次请求的上下文中提供了「馆方知识库检索到的资料片段」时，
+                制度/规章类问题（借阅规则、逾期罚款标准、开放时间、读者须知、办证流程等）必须以这些资料为依据作答，
+                并在回答末尾用「（来源：《文档名》）」标注所依据的文档；资料未覆盖或不足以回答该问题时，
+                如实说明「馆方知识库中暂未收录相关内容」，不得凭常识猜测或用其他资料顶替。
+                资料中的数量、状态类数字（在馆数、可借数、当前罚款金额等）只是录入时的快照，
+                一律不得当作实时数据播报，此类问题必须按规则 2 调用工具现查。
+                理由：制度性内容最容易被模型用通用常识替代，来源标注才能追溯；资料是静态文本，当实时数据用会答错。
             """;
 
     /**
@@ -202,6 +222,7 @@ public class AiService {
      * 事件流：
      * <ul>
      *   <li>{@code delta} —— 增量文本片段</li>
+     *   <li>{@code rag}   —— 本轮检索注入的知识库来源（JSON 数组：[{docTitle, snippet}]，早于 delta）</li>
      *   <li>{@code tool}  —— 工具调用过程（JSON：{name, phase, detail}）</li>
      *   <li>{@code done}  —— "[DONE]"，表示本轮结束</li>
      *   <li>{@code error} —— 错误消息</li>
@@ -313,16 +334,24 @@ public class AiService {
         roleTools.setEventEmitter(emitterCb);
 
         try {
-            LibraryAssistant assistant = AiServices.builder(LibraryAssistant.class)
+            // RAG：知识库启用且索引就绪时挂载检索增强；retriever 每请求构造以携带当前用户的可见范围
+            RetrievalAugmentor augmentor = buildAugmentor(admin);
+
+            AiServices<LibraryAssistant> serviceBuilder = AiServices.builder(LibraryAssistant.class)
                     .streamingChatModel(model)
                     // 请求级记忆：持有完整工具调用上下文（含 tool_calls/tool 结果），不落库
                     .chatMemory(memory)
                     // 按角色注册工具：管理员工具（admin 开头）不会出现在读者的模型上下文中
                     .tools(commonTools, roleTools)
-                    .systemMessageProvider(memoryId -> buildSystemPrompt(displayName, cu.getUserType()))
-                    .build();
+                    .systemMessageProvider(memoryId -> buildSystemPrompt(displayName, cu.getUserType()));
+            if (augmentor != null) {
+                serviceBuilder.retrievalAugmentor(augmentor);
+            }
+            LibraryAssistant assistant = serviceBuilder.build();
 
             assistant.chat(content)
+                    // 知识库来源回传：在调用 LLM 之前触发（早于 delta），前端据此展示「参考资料」
+                    .onRetrieved(contents -> emitRagSources(emitter, contents))
                     .onPartialThinking(partial -> {
                         // 深度思考思维链增量（reasoning_content）：独立 thinking 事件推给前端展示，
                         // 不落库、不计入回答正文（与工具中间态一致，避免污染历史）
@@ -427,6 +456,83 @@ public class AiService {
     }
 
     // ===== 内部方法 =====
+
+    /**
+     * 构造 RAG 检索增强器；知识库关闭或索引未就绪时返回 null（调用方跳过挂载，行为与接入前一致）。
+     * <p>
+     * 检索器每请求构造：{@code LibraryAssistant#chat} 没有 {@code @MemoryId}，
+     * dynamicFilter 拿不到用户身份，而 AiServices 本就每请求构建，
+     * 因此直接用<b>静态 filter</b> 按 scope 做权限隔离，比 ThreadLocal 方案更直接且无泄漏风险。
+     * <ul>
+     *   <li>管理员：{@code scope in (public, admin)}，可见全部资料</li>
+     *   <li>读者：{@code scope = public}，admin 类内部规章不会进入其检索结果</li>
+     * </ul>
+     */
+    private RetrievalAugmentor buildAugmentor(boolean admin) {
+        if (!ragIndexService.isReady()) {
+            return null;
+        }
+        LibraryConfigService.RagConfig cfg = libraryConfigService.getRagConfig();
+        if (!Boolean.TRUE.equals(cfg.getEnabled())) {
+            return null;
+        }
+        Filter scopeFilter = admin
+                ? metadataKey("scope").isIn(RagIndexService.SCOPE_PUBLIC, RagIndexService.SCOPE_ADMIN)
+                : metadataKey("scope").isEqualTo(RagIndexService.SCOPE_PUBLIC);
+        ContentRetriever retriever = EmbeddingStoreContentRetriever.builder()
+                .embeddingStore(ragIndexService.getStore())
+                .embeddingModel(ragIndexService.getEmbeddingModel())
+                .maxResults(cfg.getMaxResults())
+                .minScore(cfg.getMinScore())
+                .filter(scopeFilter)
+                .build();
+        return DefaultRetrievalAugmentor.builder()
+                .contentRetriever(retriever)
+                // 自定义中文注入模板（默认模板是英文且无来源标注/免责约束）
+                .contentInjector(RagContentInjector.get())
+                .build();
+    }
+
+    /**
+     * 把本轮检索到的知识库来源通过 SSE {@code rag} 事件回传（早于 delta）。
+     * 检索结果为空时不推送——不注入内容就没有来源可展示。
+     */
+    private void emitRagSources(SseEmitter emitter, List<Content> contents) {
+        if (contents == null || contents.isEmpty()) {
+            return;
+        }
+        try {
+            List<Map<String, String>> sources = new ArrayList<>();
+            for (Content c : contents) {
+                TextSegment segment = c.textSegment();
+                if (segment == null) {
+                    continue;
+                }
+                String title = segment.metadata() == null ? null : segment.metadata().getString("docTitle");
+                sources.add(Map.of(
+                        "docTitle", title == null || title.isBlank() ? "未命名文档" : title,
+                        "snippet", truncate(segment.text(), RAG_SNIPPET_MAX_LEN)));
+            }
+            if (sources.isEmpty()) {
+                return;
+            }
+            emitter.send(SseEmitter.event().name("rag")
+                    .data(objectMapper.writeValueAsString(sources)));
+        } catch (IOException e) {
+            // 客户端已断开，忽略
+        } catch (Exception e) {
+            log.warn("[AI] 知识库来源序列化失败: {}", e.getMessage());
+        }
+    }
+
+    /** 截断文本（超长时加省略号），用于来源摘要 */
+    private static String truncate(String text, int maxLen) {
+        if (text == null) {
+            return "";
+        }
+        String flat = text.replaceAll("\\s+", " ").trim();
+        return flat.length() <= maxLen ? flat : flat.substring(0, maxLen) + "…";
+    }
 
     /**
      * 已注册的全部工具名（与 CommonTools/ReaderTools/AdminTools 的 @Tool 方法名保持一致），

@@ -23,6 +23,8 @@
     <pagehelper.version>2.1.0</pagehelper.version>
     <jjwt.version>0.12.6</jjwt.version>
     <langchain4j.version>1.20.0</langchain4j.version>
+    <!-- embeddings 系列使用独立版本号，与 core 1.20.0 对应的最新版为 1.20.0-beta30（不存在纯 1.20.0） -->
+    <langchain4j.embeddings.version>1.20.0-beta30</langchain4j.embeddings.version>
   </properties>
 
   <dependencies>
@@ -131,6 +133,13 @@
       <groupId>dev.langchain4j</groupId>
       <artifactId>langchain4j-http-client-jdk</artifactId>
       <version>${langchain4j.version}</version>
+    </dependency>
+
+    <!-- 本地 ONNX 中文 Embedding 模型（384 维量化版，约 30MB，首次运行自动下载并缓存，零 API 成本） -->
+    <dependency>
+      <groupId>dev.langchain4j</groupId>
+      <artifactId>langchain4j-embeddings-bge-small-zh-v15-q</artifactId>
+      <version>${langchain4j.embeddings.version}</version>
     </dependency>
 
     <!-- 测试 -->

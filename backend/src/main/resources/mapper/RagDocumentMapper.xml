@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.library.mapper.RagDocumentMapper">
+
+    <resultMap id="docMap" type="com.library.entity.RagDocument">
+        <id property="id" column="id"/>
+        <result property="title" column="title"/>
+        <result property="sourceType" column="source_type"/>
+        <result property="sourceRef" column="source_ref"/>
+        <result property="scope" column="scope"/>
+        <result property="status" column="status"/>
+        <result property="segmentCount" column="segment_count"/>
+        <result property="createTime" column="create_time"/>
+        <result property="updateTime" column="update_time"/>
+    </resultMap>
+
+    <!-- 列表：只取列表展示所需列，raw_text 是大字段不返回 -->
+    <sql id="listColumns">
+        id, title, source_type, source_ref, scope, status, segment_count, create_time, update_time
+    </sql>
+
+    <select id="selectPage" resultMap="docMap">
+        SELECT <include refid="listColumns"/> FROM rag_documents
+        <where>
+            <if test="keyword != null and keyword != ''">
+                AND title LIKE CONCAT('%', #{keyword}, '%')
+            </if>
+            <if test="scope != null and scope != ''">
+                AND scope = #{scope}
+            </if>
+        </where>
+        ORDER BY update_time DESC, id DESC
+    </select>
+
+    <select id="selectById" resultMap="docMap">
+        SELECT <include refid="listColumns"/>, raw_text FROM rag_documents WHERE id = #{id}
+    </select>
+
+    <select id="selectEnabled" resultMap="docMap">
+        SELECT <include refid="listColumns"/>, raw_text FROM rag_documents WHERE status = 1 ORDER BY id ASC
+    </select>
+
+    <insert id="insert" parameterType="com.library.entity.RagDocument" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO rag_documents
+            (title, source_type, source_ref, scope, status, segment_count, raw_text, create_time, update_time)
+        VALUES
+            (#{title}, #{sourceType}, #{sourceRef}, #{scope}, #{status}, #{segmentCount}, #{rawText}, #{createTime}, #{updateTime})
+    </insert>
+
+    <update id="updateStatus">
+        UPDATE rag_documents SET status = #{status}, update_time = NOW() WHERE id = #{id}
+    </update>
+
+    <update id="updateSegmentCount">
+        UPDATE rag_documents SET segment_count = #{segmentCount}, update_time = NOW() WHERE id = #{id}
+    </update>
+
+    <delete id="deleteById">
+        DELETE FROM rag_documents WHERE id = #{id}
+    </delete>
+
+</mapper>
