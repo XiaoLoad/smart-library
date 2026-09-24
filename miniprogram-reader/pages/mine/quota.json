@@ -1,4 +1,5 @@
 {
   "navigationBarTitleText": "借阅额度",
+  "enablePullDownRefresh": true,
   "usingComponents": {}
 }
