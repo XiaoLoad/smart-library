@@ -1,6 +1,6 @@
-const request = require('../../utils/request')
-const badge = require('../../utils/badge')
-const { fmtDateTime } = require('../../utils/datetime')
+const request = require('../../utils/core/request')
+const badge = require('../../utils/feature/badge')
+const { fmtDateTime } = require('../../utils/feature/datetime')
 
 const PAGE_SIZE = 10
 // 自定义 tabBar 的高度，rpx；与 app.wxss 的 --tabbar-h 同值（tabBar 浮在页面之上，

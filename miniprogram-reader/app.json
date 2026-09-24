@@ -6,12 +6,12 @@
     "pages/mine/index",
     "pages/auth/login",
     "pages/book/detail",
-    "pages/fine/index",
+    "pages/fine/list",
     "pages/message/notice-detail",
     "pages/mine/quota",
     "pages/mine/profile",
     "pages/mine/password",
-    "pages/ai/chat"
+    "pages/ai/index"
   ],
   "subPackages": [
     {
@@ -46,7 +46,7 @@
         "selectedIconPath": "assets/tab/scroll-active.png"
       },
       {
-        "pagePath": "pages/ai/chat",
+        "pagePath": "pages/ai/index",
         "text": "AI 助手",
         "iconPath": "assets/tab/ai.png",
         "selectedIconPath": "assets/tab/ai-active.png"

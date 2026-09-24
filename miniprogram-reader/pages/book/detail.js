@@ -1,6 +1,6 @@
-const request = require('../../utils/request')
-const cover = require('../../utils/cover')
-const { fmtDate } = require('../../utils/datetime')
+const request = require('../../utils/core/request')
+const cover = require('../../utils/feature/cover')
+const { fmtDate } = require('../../utils/feature/datetime')
 
 Page({
   data: {

@@ -1,0 +1,58 @@
+/* ===== 基础层：设计令牌 + 页面根 + 原子工具类 =====
+ * 由 app.wxss @import 引入，勿在页面直接引用本文件。
+ */
+page {
+  /* —— 基础色 · 暖纸调 —— */
+  --bg: #faf8f5;
+  --bg-elevated: #ffffff;
+  --bg-subtle: #f3efe9;
+  --bg-muted: #ece6dd;
+  /* —— 文字 —— */
+  --text: #2c2825;
+  --text-2: #6b6560;
+  --text-3: #9c958d;
+  --inverse: #faf8f5;
+  /* —— 强调 —— */
+  --primary: #3a5a6b;
+  --primary-hover: #2f4a59;
+  --primary-light: #e8eef0;
+  --secondary: #7a9270;
+  --secondary-light: #eef2ea;
+  /* —— 功能色 —— */
+  --success: #5d8a6b;
+  --warning: #c4904a;
+  --danger: #a85a4a;
+  /* —— 线 —— */
+  --border: #e8e3dc;
+  --border-strong: #d4cdc2;
+  /* —— 底部导航总高（栏体 112rpx，安全区另加）—— 各页避让统一引用此变量 —— */
+  --tabbar-h: 112rpx;
+
+  background: var(--bg);
+  color: var(--text);
+  font-size: 28rpx;
+  line-height: 1.8;
+}
+
+.serif { font-family: 'Songti SC', 'STSong', 'SimSun', 'Noto Serif CJK SC', serif; }
+.muted { color: var(--text-2); }
+.tiny { font-size: 24rpx; color: var(--text-3); line-height: 1.7; }
+.eyebrow {
+  font-size: 20rpx;
+  letter-spacing: 4rpx;
+  color: var(--text-3);
+  font-weight: 500;
+}
+.row { display: flex; align-items: center; }
+.row-between { display: flex; align-items: center; justify-content: space-between; }
+.flex-1 { flex: 1; min-width: 0; }
+.ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* —— 淡入（数据加载） —— */
+.fade-in {
+  animation: fade-in-up 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(8rpx); }
+  to { opacity: 1; transform: translateY(0); }
+}

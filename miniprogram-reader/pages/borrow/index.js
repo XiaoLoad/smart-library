@@ -1,6 +1,6 @@
-const request = require('../../utils/request')
-const cache = require('../../utils/cache')
-const { fmtDateTime } = require('../../utils/datetime')
+const request = require('../../utils/core/request')
+const cache = require('../../utils/core/cache')
+const { fmtDateTime } = require('../../utils/feature/datetime')
 
 const PAGE_SIZE = 10
 // 自定义 tabBar 的高度，rpx；与 app.wxss 的 --tabbar-h 同值（tabBar 浮在页面之上，
@@ -268,6 +268,6 @@ Page({
   },
 
   goFine() {
-    wx.navigateTo({ url: '/pages/fine/index' })
+    wx.navigateTo({ url: '/pages/fine/list' })
   },
 })

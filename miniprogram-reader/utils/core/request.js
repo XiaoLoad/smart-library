@@ -3,7 +3,7 @@
  */
 const { BASE_URL } = require('./config')
 const auth = require('./auth')
-const badge = require('./badge')
+const badge = require('../feature/badge')
 const report = require('./report')
 
 let redirecting = false

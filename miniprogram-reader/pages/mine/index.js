@@ -1,7 +1,7 @@
-const request = require('../../utils/request')
-const auth = require('../../utils/auth')
-const badge = require('../../utils/badge')
-const cover = require('../../utils/cover')
+const request = require('../../utils/core/request')
+const auth = require('../../utils/core/auth')
+const badge = require('../../utils/feature/badge')
+const cover = require('../../utils/feature/cover')
 
 Page({
   data: { user: null, avatar: '', wechatBound: false, wechatLoading: false },
@@ -42,7 +42,7 @@ Page({
 
   // AI 助手为 tabBar 页，必须 switchTab
   goAi() {
-    wx.switchTab({ url: '/pages/ai/chat' })
+    wx.switchTab({ url: '/pages/ai/index' })
   },
 
   onWechatTap() {

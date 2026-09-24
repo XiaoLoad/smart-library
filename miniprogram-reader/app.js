@@ -1,8 +1,8 @@
 // 智慧图书借阅管理系统 · 读者端小程序（原生）
-const auth = require('./utils/auth')
-const request = require('./utils/request')
-const badge = require('./utils/badge')
-const report = require('./utils/report')
+const auth = require('./utils/core/auth')
+const request = require('./utils/core/request')
+const badge = require('./utils/feature/badge')
+const report = require('./utils/core/report')
 
 App({
   globalData: {
