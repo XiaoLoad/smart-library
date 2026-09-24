@@ -210,6 +210,7 @@ Page({
   selectConv(id) {
     const conv = this.data.conversations.find((c) => c.id === id)
     if (!conv) return
+    this._ragCarry = null
     this.setData({ currentConv: conv, messages: [], drawerOpen: false, hasMoreHistory: false })
     this.loadHistory(true)
   },
@@ -267,10 +268,26 @@ Page({
         thinkingOpen: false,
         toolEvents: [],
         toolChips: parseToolChips(m.toolSummary),
+        // 参考资料同理：rag 事件只在当轮推送，落库内容不含来源，历史消息无此块
+        ragSources: [],
+        ragOpen: -1,
+        refTitle: '',
+        refSnippet: '',
       }))
       // 后端 ORDER BY id DESC（最新在上），显示需转成正序（最旧在上、最新在下），与 Web 端 chat.vue 对齐
       const ordered = items.reverse()
       const messages = beforeId ? ordered.concat(this.data.messages) : ordered
+      // 参考资料不落库：回源刷掉刚结束的一轮后就没了，这里把它补回最后一条 AI 消息
+      const carry = this._ragCarry
+      this._ragCarry = null
+      if (reset && carry && carry.length) {
+        for (let i = messages.length - 1; i >= 0; i--) {
+          if (messages[i].role === 'assistant') {
+            messages[i].ragSources = carry
+            break
+          }
+        }
+      }
       const rounds = decorateMeta(messages)
       const patch = {
         messages,
@@ -395,11 +412,18 @@ Page({
       thinkingOpen: false,
       toolEvents: [],
       toolChips: [], // 流式期间保持空（卡片展示），finalize 后由 toolEvents 收拢为徽章
+      // 知识库来源（SSE rag 事件）：在调用 LLM 前推送，故先出「参考资料」行、正文随后流式出现；
+      // 后端不落库，历史消息无此块
+      ragSources: [],
+      ragOpen: -1, // 当前展开片段摘要的序号，-1 表示全部收起
+      refTitle: '', // 展开中的来源标题与摘要（wxml 不做嵌套下标取值，展开时就近取好）
+      refSnippet: '',
       pending: true,
       _done: false,
     }
     this._streamIdx = this.data.messages.length + 1
     this._streamFailed = false
+    this._ragCarry = null // 上一轮的参考资料不再回贴
     const messages = this.data.messages.concat([userMsg, this._streamMsg])
     const rounds = decorateMeta(messages)
     const tick = (this.data.scrollTick || 0) + 1
@@ -454,6 +478,11 @@ Page({
       if (!data) return
       this.mergeToolEvent(msg, data)
       this.scheduleFlush()
+    } else if (event === 'rag') {
+      // 知识库来源：检索命中即「参考资料」行；正文(delta)随后才来
+      if (!data) return
+      this.mergeRagSources(msg, data)
+      this.scrollToBottom()
     } else if (event === 'done') {
       this.finishStream()
       return
@@ -530,6 +559,42 @@ Page({
     } catch (e) {
       /* 忽略非法帧 */
     }
+  },
+
+  // 知识库来源：同一轮可能多批推送（多轮工具调用会重复检索），按「标题 + 摘要」去重
+  mergeRagSources(msg, raw) {
+    let list
+    try {
+      list = JSON.parse(raw)
+    } catch (e) {
+      return
+    }
+    if (!Array.isArray(list)) return
+    const sources = msg.ragSources || (msg.ragSources = [])
+    list.forEach((item) => {
+      const docTitle = (item && item.docTitle) || '未命名文档'
+      const snippet = (item && item.snippet) || ''
+      if (sources.some((s) => s.docTitle === docTitle && s.snippet === snippet)) return
+      sources.push({ docTitle, snippet })
+    })
+    if (!sources.length) return
+    // 只追加、不重排，故展开序号保持有效，这里不重置 ragOpen
+    this.setData({ ['messages[' + this._streamIdx + '].ragSources']: sources })
+  },
+
+  // 点参考资料药丸：展开 / 收起该片段摘要（历史消息无来源，无药丸可点）
+  onRefTap(e) {
+    const idx = this.findMsgIndex(e.currentTarget.dataset.id)
+    if (idx < 0) return
+    const ri = Number(e.currentTarget.dataset.ri)
+    const msg = this.data.messages[idx]
+    const close = msg.ragOpen === ri
+    const src = close ? null : (msg.ragSources || [])[ri]
+    this.setData({
+      ['messages[' + idx + '].ragOpen']: close ? -1 : ri,
+      ['messages[' + idx + '].refTitle']: src ? src.docTitle : '',
+      ['messages[' + idx + '].refSnippet']: src ? src.snippet : '',
+    })
   },
 
   // 徽章计数：同名工具合并（仅内存累计，finalizeStream 才 setData 渲染）
@@ -615,6 +680,8 @@ Page({
     // 回源拉最新消息，同步服务端持久化的 id 与消毒后的正文；
     // 失败/手动停止时不回源，否则会把前端已渲染的内容与提示一起冲掉
     if (!this._streamFailed) {
+      // 参考资料不落库，回源会把它冲掉，暂存给 loadHistory 贴回最后一条 AI 消息
+      this._ragCarry = msg.ragSources && msg.ragSources.length ? msg.ragSources : null
       setTimeout(() => {
         this.loadHistory(true)
         this.syncConvTitle()
