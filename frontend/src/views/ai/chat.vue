@@ -136,6 +136,38 @@
                   </div>
                 </div>
 
+                <!-- 参考资料：本轮注入的知识库来源。
+                     后端 rag 事件在调用 LLM 之前推送（早于 delta），故参考资料条先出、正文随后流式出现；
+                     点击药丸展开片段摘要（后端只回传截断摘要，不落库，历史消息无此块） -->
+                <div v-if="m.ragSources && m.ragSources.length" class="rag-block">
+                  <div class="rag-row">
+                    <span class="rag-label">
+                      <AppIcon name="knowledge" :size="13" />
+                      <span>参考资料</span>
+                    </span>
+                    <button
+                      v-for="(s, si) in m.ragSources"
+                      :key="si"
+                      class="rag-chip"
+                      :class="{ active: m.ragOpenIndex === si }"
+                      :title="m.ragOpenIndex === si ? '收起片段' : '查看片段摘要'"
+                      @click="m.ragOpenIndex = m.ragOpenIndex === si ? -1 : si"
+                    >
+                      <AppIcon name="book" :size="12" />
+                      <span class="rag-title">{{ s.docTitle }}</span>
+                    </button>
+                  </div>
+                  <transition name="tool-expand">
+                    <div v-if="m.ragOpenIndex >= 0 && m.ragSources[m.ragOpenIndex]" class="rag-snippet">
+                      <div class="tool-data-label">
+                        <AppIcon name="knowledge" :size="12" />
+                        <span>{{ m.ragSources[m.ragOpenIndex].docTitle }} · 检索片段摘要</span>
+                      </div>
+                      <p>{{ m.ragSources[m.ragOpenIndex].snippet }}</p>
+                    </div>
+                  </transition>
+                </div>
+
                 <div class="msg-content markdown" v-html="m.html"></div>
               </div>
             </div>
@@ -294,6 +326,9 @@ const enrichMsg = (m) => ({
   reasoningSegments: [],
   reasoningOpen: false,
   reasoningStreaming: false,
+  // 参考资料同理：rag 事件只在当轮推送，落库内容不含来源，历史消息无此块
+  ragSources: [],
+  ragOpenIndex: -1,
 })
 
 // ===== 日期分隔（历史导航锚点） =====
@@ -615,6 +650,9 @@ const send = async () => {
           reasoningOpen: false,
           reasoningStreaming: false,
           _reasonSegOpen: false,
+          // 知识库来源（SSE rag 事件），ragOpenIndex 为当前展开的片段序号，-1 表示全部收起
+          ragSources: [],
+          ragOpenIndex: -1,
           createTime: new Date().toISOString(),
         })
         messages.value.push(assistantMsg)
@@ -650,6 +688,25 @@ const send = async () => {
           msg.reasoningStreaming = true
           msg.reasoningOpen = true
           scrollToBottom()
+        }
+      } else if (event === 'rag') {
+        // 知识库来源：在调用 LLM 之前推送（早于 delta），气泡内先出「参考资料」条
+        const msg = ensureAssistantMsg()
+        try {
+          const list = JSON.parse(data)
+          if (Array.isArray(list)) {
+            for (const item of list) {
+              const docTitle = item?.docTitle || '未命名文档'
+              const snippet = item?.snippet || ''
+              // 多轮工具调用可能重复检索到同一片段，按「标题 + 摘要」去重，避免药丸堆积
+              const dup = msg.ragSources.some(
+                (s) => s.docTitle === docTitle && s.snippet === snippet
+              )
+              if (!dup) msg.ragSources.push({ docTitle, snippet })
+            }
+          }
+        } catch {
+          // 忽略解析失败的 rag 事件
         }
       } else if (event === 'delta') {
         const msg = ensureAssistantMsg()
@@ -1209,6 +1266,75 @@ onMounted(loadConversations)
 .reason-expand-leave-to {
   opacity: 0;
   transform: translateY(-4px) scaleY(0.96);
+}
+
+/* —— 参考资料（知识库检索来源） ——
+   沿用工具卡片的视觉语言：纸色药丸 + 虚线下分隔，不新增视觉语言 */
+.rag-block {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+  margin-bottom: var(--space-2);
+}
+.rag-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.rag-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--fs-caption);
+  color: var(--color-text-tertiary);
+}
+.rag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 240px;
+  padding: 4px 12px;
+  border-radius: var(--radius-pill);
+  border: 1px dashed var(--color-border);
+  background: var(--color-bg-elevated);
+  font-size: var(--fs-caption);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-soft);
+}
+.rag-chip:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+.rag-chip.active {
+  border-style: solid;
+  border-color: var(--color-primary);
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+}
+/* 文档名可能很长：单行省略，完整名称由 title 悬停给出 */
+.rag-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rag-snippet {
+  max-width: 560px;
+  margin-top: var(--space-1);
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-subtle);
+  font-size: var(--fs-caption);
+  color: var(--color-text-secondary);
+}
+.rag-snippet p {
+  margin: 6px 0 0;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 /* —— 工具调用卡片 —— */

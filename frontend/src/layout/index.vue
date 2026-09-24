@@ -206,6 +206,7 @@ const MENU_SECTIONS = [
     { title: '个人中心', path: '/profile', icon: 'user', roles: [1, 2] },
   ]},
   { title: '平台', items: [
+    { title: '知识库', path: '/knowledge/list', icon: 'knowledge', roles: [3] },
     { title: '系统设置', path: '/system/settings', icon: 'gear', roles: [3] },
   ]},
 ]
