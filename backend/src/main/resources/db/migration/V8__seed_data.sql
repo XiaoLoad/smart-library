@@ -1,14 +1,39 @@
--- ===== 智慧图书管理系统 · 种子数据 =====
--- 密码列为明文，首启由 DataInitializer 编码为 BCrypt
-USE library_db;
+-- ===== V8 种子数据（幂等） =====
+-- 收编原 db/data.sql（业务演示数据）与 db/settings.sql（system_settings 表 + 参数种子），
+-- 全新库随 Flyway 自动建库建表灌数，无需手动执行任何 SQL；
+-- 对已有库重复执行无副作用：
+--   · 带主键/唯一键的行用 INSERT IGNORE（唯一键冲突即整行跳过）；
+--   · system_settings 用 ON DUPLICATE KEY UPDATE 保留已有配置值。
+-- 注意：users.password 为明文，首次启动由 DataInitializer 编码为 BCrypt。
 
--- 借阅额度规则
-INSERT INTO borrow_limits (user_type, max_books, loan_days, renew_max_count, renew_days, pickup_days) VALUES
+-- ---- 系统设置表（原 settings.sql）----
+CREATE TABLE IF NOT EXISTS system_settings (
+  id            BIGINT       NOT NULL AUTO_INCREMENT,
+  setting_key   VARCHAR(50)  NOT NULL,
+  setting_value TEXT         DEFAULT NULL,
+  update_time   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_key (setting_key)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='系统设置';
+
+-- AI 渠道列表（多渠道，按 sort 取第一个 enabled 为生效渠道）
+-- 仅种入空列表占位；服务端发现列表为空时会自动从旧库 ai_config 迁移
+INSERT INTO system_settings (setting_key, setting_value)
+VALUES ('ai_channels', '{"channels":[]}')
+ON DUPLICATE KEY UPDATE setting_value = setting_value;
+
+-- 馆内规则：逾期罚款费率（元/天，按自然日计算）
+INSERT INTO system_settings (setting_key, setting_value)
+VALUES ('library_rules', '{"fineRatePerDay":0.50}')
+ON DUPLICATE KEY UPDATE setting_value = setting_value;
+
+-- ---- 借阅额度规则（1教师 2学生）----
+INSERT IGNORE INTO borrow_limits (user_type, max_books, loan_days, renew_max_count, renew_days, pickup_days) VALUES
   (1, 10, 60, 2, 30, 7),
   (2, 5, 30, 1, 15, 3);
 
--- 用户（password 为明文，首启由 DataInitializer 编码）
-INSERT INTO users (id, username, password, real_name, user_type, role_name, email, phone, status, create_time, avatar, teacher_no, department, title, student_no, class_name, grade, major) VALUES
+-- ---- 用户（password 为明文，首启由 DataInitializer 编码）----
+INSERT IGNORE INTO users (id, username, password, real_name, user_type, role_name, email, phone, status, create_time, avatar, teacher_no, department, title, student_no, class_name, grade, major) VALUES
   (1,'admin','admin123','系统管理员',3,'超级管理员','admin@library.edu','13800138000',1,'2026-09-01 09:00:00','',NULL,NULL,NULL,NULL,NULL,NULL,NULL),
   (2,'teacher01','123456','李文清',1,'教师','li.wq@library.edu','13900139001',1,'2026-09-02 10:30:00',NULL,'T2026001','中文系','副教授',NULL,NULL,NULL,NULL),
   (3,'teacher02','123456','陈书韵',1,'教师','chen.sy@library.edu','13900139002',1,'2026-09-02 11:15:00',NULL,'T2026002','历史系','讲师',NULL,NULL,NULL,NULL),
@@ -16,8 +41,8 @@ INSERT INTO users (id, username, password, real_name, user_type, role_name, emai
   (5,'student02','123456','苏念安',2,'学生','su.na@stu.library.edu','13700137002',1,'2026-09-03 15:00:00',NULL,NULL,'历史系',NULL,'S20260002','历史学1班','2026','中国史'),
   (6,'student03','123456','顾沉舟',2,'学生','gu.cz@stu.library.edu','13700137003',0,'2026-09-04 09:10:00',NULL,NULL,'哲学系',NULL,'S20260003','哲学1班','2026','哲学');
 
--- 分类
-INSERT INTO categories (id, parent_id, category_name, category_code, level, sort_order, status) VALUES
+-- ---- 分类（三级树）----
+INSERT IGNORE INTO categories (id, parent_id, category_name, category_code, level, sort_order, status) VALUES
   (1,0,'文学','LIT',1,1,1),
   (11,1,'中国文学','LIT-CN',2,1,1),
   (111,11,'古典文学','LIT-CN-CLS',3,1,1),
@@ -30,8 +55,8 @@ INSERT INTO categories (id, parent_id, category_name, category_code, level, sort
   (31,3,'自然科学','SCI-NT',2,1,1),
   (32,3,'计算机科学','SCI-CS',2,2,1);
 
--- 图书
-INSERT INTO books (id, title, author, publisher, isbn, category_id, location, price, publish_date, cover_url, description, total_count, available_count, status, create_time) VALUES
+-- ---- 图书 ----
+INSERT IGNORE INTO books (id, title, author, publisher, isbn, category_id, location, price, publish_date, cover_url, description, total_count, available_count, status, create_time) VALUES
   (1,'红楼梦','曹雪芹','人民文学出版社','9787020002207',111,'A区1排3架',59.00,'2018-01-15','','中国古典四大名著之一，以贾、史、王、薛四大家族兴衰为背景，以贾宝玉与林黛玉、薛宝钗的爱情婚姻悲剧为主线，写尽封建社会末世的人情世态与女性群像，是中国古典小说的巅峰之作。',3,1,1,'2026-09-01 08:00:00'),
   (2,'百年孤独','加西亚·马尔克斯','南海出版公司','9787544291170',12,'B区2排1架',39.50,'2018-02-15','','魔幻现实主义文学代表作，讲述布恩迪亚家族七代人在马孔多小镇的百年兴衰，神话、战争与爱情交织成拉美大陆轮回般的孤独命运。',5,3,1,'2026-09-01 08:00:00'),
   (3,'史记','司马迁','中华书局','9787101053434',21,'C区1排2架',128.00,'2018-03-15','','中国第一部纪传体通史，司马迁著，记载上起黄帝、下至汉武帝约三千年史事，分本纪、世家、列传、表、书五体，开创正史体例，被誉为“史家之绝唱，无韵之离骚”。',2,0,1,'2026-09-01 08:00:00'),
@@ -45,8 +70,8 @@ INSERT INTO books (id, title, author, publisher, isbn, category_id, location, pr
   (11,'围城','钱锺书','人民文学出版社','9787020024759',112,'A区2排3架',19.00,'2018-02-15','','钱锺书唯一长篇小说，以留学归国的方鸿渐为中心，描摹抗战初期知识分子的婚恋、求职与人际百态，“城外的人想进去，城里的人想出来”道尽人生处境。',2,0,1,'2026-09-01 08:00:00'),
   (12,'中国哲学简史','冯友兰','商务印书馆','9787100024438',22,'C区3排2架',32.00,'2018-03-15','','冯友兰用英文写就的中国哲学入门经典，自先秦诸子讲到明清近代，串起儒家、道家、墨家、禅宗等思想脉络，深入浅出，是了解中国精神世界的捷径。',5,3,1,'2026-09-01 08:00:00');
 
--- 借阅记录
-INSERT INTO borrows (id, borrow_no, user_id, user_name, book_id, book_title, apply_time, borrow_time, due_time, return_time, renew_count, renew_max_count, pickup_deadline, status, remark, qr_payload) VALUES
+-- ---- 借阅记录 ----
+INSERT IGNORE INTO borrows (id, borrow_no, user_id, user_name, book_id, book_title, apply_time, borrow_time, due_time, return_time, renew_count, renew_max_count, pickup_deadline, status, remark, qr_payload) VALUES
   (1,'BR202609010001',4,'林知微',1,'红楼梦','2026-09-01 10:00:00','2026-09-01 10:00:00','2026-10-01 10:00:00',NULL,0,1,NULL,1,'',NULL),
   (2,'BR202609020002',5,'苏念安',2,'百年孤独','2026-08-15 14:30:00','2026-08-15 14:30:00','2026-09-14 14:30:00',NULL,1,1,NULL,3,'已超期',NULL),
   (3,'BR202609030003',4,'林知微',5,'三体','2026-08-20 09:15:00','2026-08-20 09:15:00','2026-09-19 09:15:00','2026-09-10 16:00:00',0,1,NULL,2,'',NULL),
@@ -55,29 +80,28 @@ INSERT INTO borrows (id, borrow_no, user_id, user_name, book_id, book_title, app
   (6,'BR202609060006',3,'陈书韵',4,'存在与时间','2026-08-25 10:20:00','2026-08-25 10:20:00','2026-10-24 10:20:00',NULL,0,2,NULL,1,'教师借阅',NULL),
   (7,'BR202609070007',4,'林知微',8,'理想国','2026-09-07 09:00:00',NULL,NULL,NULL,0,1,'2026-09-10 09:00:00',0,'待取书',NULL);
 
--- 罚款
-INSERT INTO fines (id, user_id, user_name, borrow_record_id, borrow_no, book_title, amount, days_overdue, reason, status, paid_time, create_time) VALUES
+-- ---- 罚款 ----
+INSERT IGNORE INTO fines (id, user_id, user_name, borrow_record_id, borrow_no, book_title, amount, days_overdue, reason, status, paid_time, create_time) VALUES
   (1,5,'苏念安',2,'BR202609020002','百年孤独',15.00,30,'超期未还',0,NULL,'2026-09-15 00:00:00'),
   (2,4,'林知微',3,'BR202609030003','三体',8.00,16,'超期已归还',1,'2026-09-10 16:05:00','2026-09-10 00:00:00');
 
--- 公告
-INSERT INTO announcements (id, title, content, publisher_id, publisher_name, top, status, publish_time) VALUES
+-- ---- 公告 ----
+INSERT IGNORE INTO announcements (id, title, content, publisher_id, publisher_name, top, status, publish_time) VALUES
   (1,'关于 2026 年秋季学期图书馆开放时间的通知','尊敬的师生：秋季学期图书馆开放时间为周一至周日 7:00-22:30，请合理安排借阅时间。',1,'系统管理员',1,1,'2026-09-01 08:00:00'),
   (2,'新书到馆：本月新增哲学类馆藏 50 册','本月新增商务印书馆"汉译世界学术名著丛书"哲学类 50 册，欢迎借阅。',1,'系统管理员',0,1,'2026-09-05 10:00:00'),
   (3,'超期提醒：请及时归还逾期图书','近期有部分图书已逾期，请相关读者尽快归还，避免影响后续借阅。',1,'系统管理员',0,1,'2026-09-06 14:00:00');
 
--- 通知
-INSERT INTO notifications (id, user_id, type, title, content, is_read, create_time) VALUES
+-- ---- 通知 ----
+INSERT IGNORE INTO notifications (id, user_id, type, title, content, is_read, create_time) VALUES
   (1,5,2,'图书已超期','您借阅的《百年孤独》已超期 30 天，请尽快归还。',0,'2026-09-15 00:00:00'),
   (2,4,4,'归还提醒','您借阅的《红楼梦》将于 10 月 1 日到期。',0,'2026-09-20 09:00:00'),
   (3,4,1,'系统公告','图书馆秋季开放时间已调整。',1,'2026-09-01 08:00:00');
 
--- AI 对话
-INSERT INTO ai_conversations (id, user_id, title, model, status, create_time) VALUES
+-- ---- AI 对话 / 消息 ----
+INSERT IGNORE INTO ai_conversations (id, user_id, title, model, status, create_time) VALUES
   (1,4,'查询我的借阅','qwen-plus',1,'2026-09-06 10:00:00'),
   (2,4,'查找哲学类图书','qwen-plus',1,'2026-09-06 11:20:00');
 
--- AI 消息
-INSERT INTO ai_messages (id, conversation_id, role, content, create_time) VALUES
+INSERT IGNORE INTO ai_messages (id, conversation_id, role, content, create_time) VALUES
   (1,1,'user','帮我查一下我当前借了哪些书？','2026-09-06 10:00:00'),
   (2,1,'assistant','您好，林知微同学。您当前借阅中图书 2 本：\n1. 《红楼梦》— 应还日期 2026-10-01\n2. 《三体》— 应还日期 2026-09-19（已逾期 18 天）\n\n建议您尽快归还《三体》以避免产生更多罚款。','2026-09-06 10:00:05');
