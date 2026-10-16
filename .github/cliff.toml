@@ -17,7 +17,7 @@ body = """
 ### {{ group }}
 
 {% for commit in commits %}\
-- {{ commit.message | upper_first | split(pat="\n") | first }} ([{{ commit.id | truncate(length=7, end="") }}]({{ remote.url }}/commit/{{ commit.id }}))\
+- {{ commit.message | upper_first | split(pat="\n") | first }} ([{{ commit.id | truncate(length=7, end="") }}](https://github.com/XiaoLoad/smart-library/commit/{{ commit.id }}))\
 {% if commit.breaking %} **破坏性变更**{% endif %}
 
 {% endfor %}\
