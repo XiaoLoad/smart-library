@@ -13,6 +13,7 @@ const SCOPES = ['backend', 'frontend', 'miniprogram', 'db', 'ai', 'rag', 'spider
 // 路径 → scope 映射（顺序即优先级，先匹配者胜）
 const PATH_SCOPES = [
   [/^\.github\/workflows\//, 'ci'],
+  [/^\.githooks\//, 'ci'],
   [/^backend\/src\/main\/resources\/db\//, 'db'],
   [/^backend\//, 'backend'],
   [/^frontend\//, 'frontend'],
@@ -21,7 +22,7 @@ const PATH_SCOPES = [
   [/^(docs|.*\.md)$/, 'docs'],
 ]
 
-const header = readFileSync(msgFile, 'utf8').split(/\r?\n/)[0]
+const header = readFileSync(msgFile, 'utf8').replace(/^\uFEFF/, '').split(/\r?\n/)[0]
 const re = new RegExp(`^(${TYPES.join('|')})(\\((${SCOPES.join('|')})\\))?(!)?: (.+)$`)
 const m = header.match(re)
 
