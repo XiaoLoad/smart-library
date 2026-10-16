@@ -1,0 +1,105 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: write
+
+jobs:
+  # ---------- 版本一致性校验：tag == VERSION == pom.xml == frontend/package.json ----------
+  verify-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      prerelease: ${{ steps.v.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          VERSION_FILE=$(tr -d '[:space:]' < VERSION)
+          POM_VERSION=$(mvn -q -Dexec.executable=echo -Dexec.args='${project.version}' --non-recursive exec:exec 2>/dev/null || grep -m1 -A2 '<artifactId>library-backend</artifactId>' backend/pom.xml | grep -oP '(?<=<version>)[^<]+')
+          FE_VERSION=$(node -p "require('./frontend/package.json').version")
+          echo "version=$TAG" >> "$GITHUB_OUTPUT"
+          [[ "$TAG" =~ - ]] && echo "prerelease=true" >> "$GITHUB_OUTPUT" || echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG  VERSION=$VERSION_FILE  pom=$POM_VERSION  frontend=$FE_VERSION"
+          MISMATCH=0
+          [ "$TAG" != "$VERSION_FILE" ] && { echo "::error::VERSION 文件($VERSION_FILE) != tag($TAG)"; MISMATCH=1; }
+          [ "$TAG" != "$POM_VERSION" ] && { echo "::error::pom.xml($POM_VERSION) != tag($TAG)"; MISMATCH=1; }
+          [ "$TAG" != "$FE_VERSION" ] && { echo "::error::frontend/package.json($FE_VERSION) != tag($TAG)"; MISMATCH=1; }
+          exit $MISMATCH
+
+  # ---------- 全量构建三端 ----------
+  build:
+    needs: verify-version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '22'
+          cache: maven
+      - uses: pnpm/action-setup@v4
+        with:
+          working-directory: frontend
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Build backend jar
+        working-directory: backend
+        run: mvn -B package -DskipTests=false
+      - name: Build frontend dist
+        working-directory: frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+      - name: Package artifacts
+        run: |
+          JAR=$(ls backend/target/*.jar | grep -v original | head -1)
+          cp "$JAR" "library-backend-${{ needs.verify-version.outputs.version }}.jar"
+          cd frontend/dist && zip -qr "../../library-frontend-${{ needs.verify-version.outputs.version }}.zip" . && cd ../..
+          sha256sum library-* > checksums.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-artifacts
+          path: |
+            library-backend-*.jar
+            library-frontend-*.zip
+            checksums.txt
+
+  # ---------- 生成 CHANGELOG 并创建 GitHub Release ----------
+  github-release:
+    needs: [verify-version, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Generate changelog (git-cliff)
+        uses: orhun/git-cliff-action@v4
+        id: changelog
+        with:
+          config: .github/cliff.toml
+          args: --latest --strip header
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-artifacts
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: v${{ needs.verify-version.outputs.version }}
+          body: ${{ steps.changelog.outputs.content }}
+          prerelease: ${{ needs.verify-version.outputs.prerelease == 'true' }}
+          generate_release_notes: true
+          files: |
+            library-backend-*.jar
+            library-frontend-*.zip
+            checksums.txt

@@ -1,0 +1,48 @@
+# git-cliff 配置：从约定式提交生成 CHANGELOG
+# 文档: https://git-cliff.org
+[changelog]
+header = """
+# Changelog
+
+所有重要变更将记录在本文件中。
+
+格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
+版本号遵循 [语义化版本 2.0.0](https://semver.org/lang/zh-CN/)。
+
+"""
+body = """
+{% if version %}## [{{ version }}] - {{ timestamp | date(format="%Y-%m-%d") }}{% else %}## [未发布]{% endif %}
+
+{% for group, commits in commits | group_by(attribute="group") %}\
+### {{ group }}
+
+{% for commit in commits %}\
+- {{ commit.message | upper_first | split(pat="\n") | first }} ([{{ commit.id | truncate(length=7, end="") }}]({{ remote.url }}/commit/{{ commit.id }}))\
+{% if commit.breaking %} **⚠️ 破坏性变更**{% endif %}
+
+{% endfor %}\
+{% endfor %}\
+"""
+trim = true
+footer = ""
+
+[git]
+conventional_commits = true
+filter_unconventional = false
+split_commits = false
+protect_breaking_commits = true
+tag_pattern = "v[0-9].*"
+
+commit_parsers = [
+  { message = "^feat", group = "🚀 新功能" },
+  { message = "^fix", group = "🐛 修复" },
+  { message = "^perf", group = "⚡ 性能优化" },
+  { message = "^refactor", group = "♻️ 重构" },
+  { message = "^docs", group = "📚 文档" },
+  { message = "^test", group = "🧪 测试" },
+  { message = "^build", group = "🔧 构建" },
+  { message = "^ci", group = "👷 CI/CD" },
+  { message = "^revert", group = "⏪ 回滚" },
+  { message = "^chore", group = "🧹 杂项" },
+]
+filter_commits = true
