@@ -84,7 +84,7 @@ jobs:
             | xargs -0 -n1 node --check
           echo "✓ 小程序 JS 语法检查通过"
 
-  # ---------- 仓库卫生：禁止运行时数据/爬虫数据入库 ----------
+  # ---------- 仓库卫生：禁止爬虫目录/运行时数据/冗余锁文件入库 ----------
   repo-hygiene:
     runs-on: ubuntu-latest
     steps:
@@ -94,7 +94,7 @@ jobs:
       - name: Check forbidden paths
         run: |
           ERR=0
-          for pat in 'backend/uploads/' 'spider/data/' 'spider/__pycache__/' '.workbuddy/' '*.pyc'; do
+          for pat in 'backend/uploads/' 'spider/' '.workbuddy/' '*.pyc' 'frontend/yarn.lock' 'frontend/package-lock.json' 'db/patch_'; do
             FILES=$(git diff --name-only "origin/${{ github.base_ref || 'main' }}...HEAD" 2>/dev/null | grep -F "$pat" || true)
             if [ -n "$FILES" ]; then
               echo "::error::以下文件禁止入库（匹配 $pat）:"; echo "$FILES"
