@@ -64,6 +64,8 @@ jobs:
           JAR=$(ls backend/target/*.jar | grep -v original | head -1)
           cp "$JAR" "library-backend-${{ needs.verify-version.outputs.version }}.jar"
           cd frontend/dist && zip -qr "../../library-frontend-${{ needs.verify-version.outputs.version }}.zip" . && cd ../..
+          zip -qr "library-miniprogram-${{ needs.verify-version.outputs.version }}.zip" miniprogram-reader \
+            -x "miniprogram-reader/node_modules/*" -x "miniprogram-reader/miniprogram_npm/*"
           sha256sum library-* > checksums.txt
 
       - uses: actions/upload-artifact@v4
@@ -72,6 +74,7 @@ jobs:
           path: |
             library-backend-*.jar
             library-frontend-*.zip
+            library-miniprogram-*.zip
             checksums.txt
 
   # ---------- 生成 CHANGELOG 并创建 GitHub Release ----------
@@ -102,4 +105,5 @@ jobs:
           files: |
             library-backend-*.jar
             library-frontend-*.zip
+            library-miniprogram-*.zip
             checksums.txt
