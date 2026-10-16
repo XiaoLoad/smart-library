@@ -20,7 +20,7 @@ jobs:
         run: |
           TAG="${GITHUB_REF_NAME#v}"
           VERSION_FILE=$(tr -d '[:space:]' < VERSION)
-          POM_VERSION=$(mvn -q -Dexec.executable=echo -Dexec.args='${project.version}' --non-recursive exec:exec 2>/dev/null || grep -m1 -A2 '<artifactId>library-backend</artifactId>' backend/pom.xml | grep -oP '(?<=<version>)[^<]+')
+          POM_VERSION=$(grep -m1 -A2 '<artifactId>library-backend</artifactId>' backend/pom.xml | grep -oP '(?<=<version>)[^<]+')
           FE_VERSION=$(node -p "require('./frontend/package.json').version")
           echo "version=$TAG" >> "$GITHUB_OUTPUT"
           [[ "$TAG" =~ - ]] && echo "prerelease=true" >> "$GITHUB_OUTPUT" || echo "prerelease=false" >> "$GITHUB_OUTPUT"
@@ -44,7 +44,7 @@ jobs:
           cache: maven
       - uses: pnpm/action-setup@v4
         with:
-          working-directory: frontend
+          version: 11.7.0
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
