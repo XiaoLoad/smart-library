@@ -88,3 +88,8 @@ project.private.config.json
 # ===== DOC =====
 # 文档与方案不进版本库，仅保留在工作区（docs/、论文/ 等）
 *.md
+# 开源必需的根文档与变更日志例外
+!README.md
+!CONTRIBUTING.md
+!CHANGELOG.md
+!SECURITY.md

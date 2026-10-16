@@ -1,0 +1,11 @@
+#!/bin/sh
+# ============================================================
+# prepare-commit-msg 钩子：根据暂存文件自动推断 scope，填充提交信息草稿
+# 仅在无消息源（非 -m/-F/--amend/squash）时介入
+# ============================================================
+COMMIT_MSG_FILE="$1"
+COMMIT_SOURCE="$2"
+
+[ -n "$COMMIT_SOURCE" ] && exit 0
+
+node "$(git rev-parse --git-dir)/../.githooks/infer-scope.mjs" "$COMMIT_MSG_FILE" "$(git rev-parse --git-dir)" || exit 0
