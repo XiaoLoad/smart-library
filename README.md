@@ -70,7 +70,6 @@ smart-library/
 │   └── src/views/      #   页面（仪表盘、图书、借阅、AI 助手、系统设置等）
 ├── miniprogram-reader/ # 微信小程序读者端（书库/借阅/消息/AI 助手）
 ├── rag-docs/           # RAG 知识库文档（馆规/借阅规则等）
-├── spider/             # 图书数据爬虫与导入脚本
 ├── .githooks/          # 提交规范钩子（自动 scope 推断 + 校验）
 ├── .github/            # CI/CD 工作流、模板、git-cliff 配置
 └── docs/               # 设计文档
@@ -83,7 +82,6 @@ smart-library/
 | 后端 | Java 22 · Spring Boot 3.3 · MyBatis · MySQL 8 · Flyway · LangChain4j |
 | Web 前端 | Vue 3 · Vite · Element Plus · Pinia · ECharts |
 | 小程序 | 微信原生小程序（自定义 tabBar） |
-| 数据工具 | Python 爬虫/数据修补脚本（`spider/`） |
 
 ## 参与贡献
 

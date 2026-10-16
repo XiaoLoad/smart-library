@@ -61,14 +61,16 @@ fix_system_path.ps1
 __pycache__/
 *.pyc
 
-# ===== 爬虫调试 / 临时数据 =====
-spider/data/probe_*.html
-spider/data/Books_2.csv
-spider/data/tag_sample.csv
-spider/data/books_raw.json
+# ===== 爬虫（私有，不开源） =====
+spider/
 
 # ===== 运行时上传数据（封面等，由爬虫/用户上传生成，非源码） =====
 backend/uploads/
+
+# ===== 前端 =====
+# 包管理器统一用 pnpm，屏蔽其他锁文件
+frontend/yarn.lock
+frontend/package-lock.json
 
 # ===== 微信小程序 =====
 # 代码上传密钥（miniprogram-ci 用），属私钥，绝不入库
