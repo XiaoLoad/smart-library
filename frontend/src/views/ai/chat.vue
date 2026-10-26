@@ -171,6 +171,13 @@
 
                 <div class="msg-content markdown" v-html="m.html"></div>
 
+                <!-- 降级提示：工具循环超限时的优雅收尾（非报错样式）。
+                     说明已完成部分仍然有效，引导用户就未完成部分继续追问 -->
+                <div v-if="m.degraded" class="degrade-tip">
+                  <AppIcon name="knowledge" :size="13" />
+                  <span>{{ m.degradeMessage }}</span>
+                </div>
+
                 <!-- 等待中：已建消息占位但尚无任何可见产出（思考未开始/检索中/工具间隙），
                      点状跳动提示避免「参考资料之后就没动静」的空窗；有正文或思考流后立即消失 -->
                 <div
@@ -643,6 +650,9 @@ const send = async () => {
     // 知识库来源（SSE rag 事件），ragOpenIndex 为当前展开的片段序号，-1 表示全部收起
     ragSources: [],
     ragOpenIndex: -1,
+    // 降级标记（SSE degrade 事件）：工具循环超限时的优雅收尾提示
+    degraded: false,
+    degradeMessage: '',
     createTime: new Date().toISOString(),
   })
   messages.value.push(assistantMsg)
@@ -856,6 +866,28 @@ const send = async () => {
         if (isFirstMsg && conv) {
           conv.title = content.length > 20 ? content.substring(0, 20) + '…' : content
         }
+      } else if (event === 'degrade') {
+        // 工具循环超限降级：非报错样式，提示已完成部分 + 建议继续追问
+        const msg = ensureAssistantMsg()
+        msg.pending = false
+        stopReasonTimer(msg)
+        msg._reasonSegOpen = false
+        msg.reasoningStreaming = false
+        msg.reasoningOpen = false
+        try {
+          const info = JSON.parse(data)
+          msg.degraded = true
+          msg.degradeMessage = info.message || '任务较复杂，已为你简化处理。'
+        } catch {
+          msg.degraded = true
+          msg.degradeMessage = '任务较复杂，已为你简化处理。'
+        }
+        // 已有正文（模型在超限前输出的一部分）保留在前，降级说明追加其后
+        msg.content = msg.content
+          ? `${msg.content}\n\n${msg.degradeMessage}`
+          : msg.degradeMessage
+        msg.html = renderMarkdown(msg.content)
+        scrollToBottom()
       } else if (event === 'error') {
         thinking.value = false
         const msg = ensureAssistantMsg()
@@ -1341,6 +1373,26 @@ onMounted(loadConversations)
 .reason-expand-leave-to {
   opacity: 0;
   transform: translateY(-4px) scaleY(0.96);
+}
+
+/* —— 降级提示（工具循环超限） ——
+   区别于 error 的红色报错：沿用项目陶土黄警示色系（--color-warning），
+   传达「已简化处理」而非「出错了」；不新增设计 token */
+.degrade-tip {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: var(--space-2);
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: rgba(196, 144, 74, 0.1);
+  border: 1px solid rgba(196, 144, 74, 0.3);
+  color: var(--color-warning);
+  font-size: var(--fs-caption);
+  line-height: 1.7;
+}
+.degrade-tip span {
+  flex: 1;
 }
 
 /* —— 参考资料（知识库检索来源） ——

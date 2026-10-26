@@ -357,6 +357,21 @@ const send = async () => {
           }
         } catch { /* 忽略 */ }
         scrollToBottom()
+      } else if (event === 'degrade') {
+        // 工具循环超限降级：非报错样式，提示已完成部分 + 建议继续追问
+        msg.pending = false
+        stopReasonTimer(msg)
+        msg._reasonSegOpen = false
+        msg.reasoningStreaming = false
+        msg.reasoningOpen = false
+        let tip = '任务较复杂，已为你简化处理。'
+        try {
+          const info = JSON.parse(data)
+          if (info?.message) tip = info.message
+        } catch { /* 解析失败用默认文案 */ }
+        msg.content = msg.content ? `${msg.content}\n\n${tip}` : tip
+        msg.html = renderMarkdown(msg.content)
+        scrollToBottom()
       } else if (event === 'done' || event === 'error') {
         generating.value = false
         emitState(false, true)

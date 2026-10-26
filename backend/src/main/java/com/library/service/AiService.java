@@ -62,6 +62,15 @@ public class AiService {
 
     /** 单会话保留的最大历史消息条数（窗口记忆） */
     private static final int MAX_MEMORY_MESSAGES = 40;
+    /**
+     * 单次对话允许的最大工具循环轮次（模型返回「含工具调用的响应」的次数）。
+     * <p>
+     * 不设置时 LangChain4j 默认允许 100 轮，模型若陷入「查了没结果→再查」的死循环
+     * 会持续消耗 token 与时间直到框架抛异常。设上限后超限走优雅降级（见 {@link #isToolRoundLimitExceeded}）。
+     * <p>
+     * 取值 8 的依据：覆盖省赛演示主线的最大轮数（查额度→检索图书→确认→办理→推荐→汇总）。
+     */
+    private static final int MAX_TOOL_ROUNDS = 8;
     /** SSE 超时时间（毫秒） */
     private static final long SSE_TIMEOUT_MS = 300_000L;
     /** 首条消息生成标题的最大字符数 */
@@ -314,6 +323,14 @@ public class AiService {
         // 本次回复实际执行完成的工具调用（按顺序记录工具名），随助手消息落库为摘要
         java.util.List<String> toolCalls = new java.util.concurrent.CopyOnWriteArrayList<>();
 
+        // 本轮工具循环轮次：与框架的计数口径严格一致。
+        // <p>
+        // 框架（LangChain4j 1.22）在每次「模型返回含工具调用的响应」时递减计数，
+        // 且该递减点与 {@code onIntermediateResponse} 回调一一对应（两者在同一个响应处理点触发）。
+        // 因此这里用 onIntermediateResponse 计数，而不是数工具调用次数——
+        // 一轮模型往返可能并发调用多个工具，按工具数计数会低估轮次，导致熔断阈值失真。
+        java.util.concurrent.atomic.AtomicInteger toolRounds = new java.util.concurrent.atomic.AtomicInteger(0);
+
         // 工具事件发射器：将工具调用过程通过 SSE 推送给前端
         // 结构化输出：end 阶段携带 data 字段（工具返回的精简 JSON 快照）
         BaseLibraryTools.ToolEventEmitter emitterCb = (toolName, phase, detail, data) -> {
@@ -356,6 +373,9 @@ public class AiService {
                     .chatMemory(memory)
                     // 按角色注册工具：管理员工具（admin 开头）不会出现在读者的模型上下文中
                     .tools(commonTools, roleTools)
+                    // 工具循环上限：防止模型陷入死循环无限消耗 token，超限由 onError 转优雅降级。
+                    // 用 maxToolCallingRoundTrips（1.15.0 起的新名）；maxSequentialToolsInvocations 已废弃。
+                    .maxToolCallingRoundTrips(MAX_TOOL_ROUNDS)
                     .systemMessageProvider(memoryId -> buildSystemPrompt(displayName, cu.getUserType()));
             if (augmentor != null) {
                 serviceBuilder.retrievalAugmentor(augmentor);
@@ -365,6 +385,11 @@ public class AiService {
             assistant.chat(content)
                     // 知识库来源回传：在调用 LLM 之前触发（早于 delta），前端据此展示「参考资料」
                     .onRetrieved(contents -> emitRagSources(emitter, contents))
+                    .onIntermediateResponse(response -> {
+                        // 工具循环轮次自增：与框架的计数递减点严格对应
+                        // （框架在同一次「模型返回含工具调用的响应」时递减 maxToolCallingRoundTrips）
+                        toolRounds.incrementAndGet();
+                    })
                     .onPartialThinking(partial -> {
                         // 深度思考思维链增量（reasoning_content）：独立 thinking 事件推给前端展示，
                         // 不落库、不计入回答正文（与工具中间态一致，避免污染历史）
@@ -446,6 +471,12 @@ public class AiService {
                         emitter.complete();
                     })
                     .onError(err -> {
+                        // 工具循环超限：转优雅降级（degrade 事件），而非红色报错。
+                        // 已完成的动作仍然有效，未完成部分提示用户再说一次。
+                        if (isToolRoundLimitExceeded(err, toolRounds.get())) {
+                            handleToolRoundDegrade(emitter, conversationId, toolRounds.get());
+                            return;
+                        }
                         try {
                             // 提取可读错误信息：LangChain4j 异常 message 常为空，需取 cause
                             String msg = err.getMessage();
@@ -483,6 +514,84 @@ public class AiService {
     }
 
     // 内部方法
+
+    /**
+     * 判断异常是否为「工具循环超限」。
+     * <p>
+     * 判定顺序：先沿异常链匹配框架的消息特征，再以轮次计数是否已达上限兜底。
+     * <p>
+     * 框架在超限时抛出的消息形如：
+     * {@code "Something is wrong, exceeded 8 tool calling round trips (maxToolCallingRoundTrips)"}，
+     * 属于 IllegalStateException（{@code runtime(...)} 包装）。
+     * <p>
+     * 兜底的理由：框架的异常消息文案可能随版本变化，仅靠字符串匹配会漏判；
+     * 而漏判的后果是用户看到红色报错而非优雅降级。轮次已达上限时，任何异常都按超限处理，
+     * 此时把「真实故障」误判为「超限」的代价也只是降级提示，不会掩盖严重问题。
+     *
+     * @param err        框架抛出的异常
+     * @param toolRounds 本轮已执行的工具循环轮次
+     */
+    private boolean isToolRoundLimitExceeded(Throwable err, int toolRounds) {
+        Throwable t = err;
+        while (t != null) {
+            String msg = t.getMessage();
+            if (msg != null) {
+                String lower = msg.toLowerCase();
+                if (lower.contains("tool calling round trips")
+                        || lower.contains("maxtoolcallingroundtrips")
+                        || lower.contains("toolcallingroundtrips")) {
+                    return true;
+                }
+            }
+            t = t.getCause();
+        }
+        // 兜底：轮次已达上限
+        return toolRounds >= MAX_TOOL_ROUNDS;
+    }
+
+    /**
+     * 工具循环超限的降级处理：推送 degrade 事件 + 降级文案落库 + 正常结束本轮。
+     * <p>
+     * 落库原因：超限时模型未产出最终回答（{@code onCompleteResponse} 不触发），
+     * 若不落库，会话历史里会留下「有提问无回答」，导致下一轮上下文断裂、模型重复已完成的操作。
+     * <p>
+     * 文案原则：只陈述已完成的部分，绝不承诺未完成的结果（与 CORE_RULES 规则 2/7 一致）。
+     */
+    private void handleToolRoundDegrade(SseEmitter emitter, Long conversationId, int rounds) {
+        String text = "这个任务涉及的步骤较多，我已执行 " + rounds
+                + " 轮查询后停止。已完成的操作仍然有效，未完成的部分可以再说一次。";
+        try {
+            Map<String, Object> payload = new java.util.LinkedHashMap<>();
+            payload.put("rounds", rounds);
+            payload.put("message", text);
+            emitter.send(SseEmitter.event().name("degrade")
+                    .data(objectMapper.writeValueAsString(payload)));
+        } catch (IOException e) {
+            // 客户端已断开，忽略
+        } catch (Exception e) {
+            log.warn("[AI] 降级事件序列化失败: {}", e.getMessage());
+        }
+
+        // 降级文案落库，保证会话历史完整（用户提问有对应回答），下次提问上下文连续
+        try {
+            com.library.entity.AiMessage aiMsg = new com.library.entity.AiMessage();
+            aiMsg.setConversationId(conversationId);
+            aiMsg.setRole("assistant");
+            aiMsg.setContent(text);
+            aiMsg.setCreateTime(LocalDateTime.now());
+            messageMapper.insert(aiMsg);
+            evictMemory(conversationId);
+        } catch (Exception e) {
+            log.warn("[AI] 降级文案落库失败: {}", e.getMessage());
+        }
+
+        try {
+            emitter.send(SseEmitter.event().name("done").data("[DONE]"));
+        } catch (IOException e) {
+            // 忽略
+        }
+        emitter.complete();
+    }
 
     /**
      * 构造 RAG 检索增强器；知识库关闭或索引未就绪时返回 null（调用方跳过挂载，行为与接入前一致）。
