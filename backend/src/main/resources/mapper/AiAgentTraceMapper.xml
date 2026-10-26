@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.library.mapper.AiAgentTraceMapper">
+
+    <resultMap id="traceMap" type="com.library.entity.AiAgentTrace">
+        <id property="id" column="id"/>
+        <result property="conversationId" column="conversation_id"/>
+        <result property="turnId" column="turn_id"/>
+        <result property="userId" column="user_id"/>
+        <result property="userType" column="user_type"/>
+        <result property="userQuery" column="user_query"/>
+        <result property="toolSequence" column="tool_sequence"/>
+        <result property="thoughtSummary" column="thought_summary"/>
+        <result property="toolRounds" column="tool_rounds"/>
+        <result property="toolCount" column="tool_count"/>
+        <result property="gateTriggered" column="gate_triggered"/>
+        <result property="gateTool" column="gate_tool"/>
+        <result property="degraded" column="degraded"/>
+        <result property="promptTokens" column="prompt_tokens"/>
+        <result property="completionTokens" column="completion_tokens"/>
+        <result property="durationMs" column="duration_ms"/>
+        <result property="status" column="status"/>
+        <result property="errorMsg" column="error_msg"/>
+        <result property="createTime" column="create_time"/>
+        <result property="userRealName" column="user_real_name"/>
+    </resultMap>
+
+    <insert id="insert" parameterType="com.library.entity.AiAgentTrace" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO ai_agent_traces (
+            conversation_id, turn_id, user_id, user_type, user_query,
+            tool_sequence, thought_summary, tool_rounds, tool_count,
+            gate_triggered, gate_tool, degraded,
+            prompt_tokens, completion_tokens, duration_ms, status, error_msg, create_time
+        ) VALUES (
+            #{conversationId}, #{turnId}, #{userId}, #{userType}, #{userQuery},
+            #{toolSequence}, #{thoughtSummary}, #{toolRounds}, #{toolCount},
+            #{gateTriggered}, #{gateTool}, #{degraded},
+            #{promptTokens}, #{completionTokens}, #{durationMs}, #{status}, #{errorMsg}, #{createTime}
+        )
+    </insert>
+
+    <!-- 管理端列表：状态筛选 + 关键词（匹配提问/工具名） -->
+    <select id="selectPage" resultMap="traceMap">
+        SELECT t.*, u.real_name AS user_real_name
+        FROM ai_agent_traces t
+        LEFT JOIN users u ON u.id = t.user_id
+        <where>
+            <if test="status != null and status != ''">
+                AND t.status = #{status}
+            </if>
+            <if test="keyword != null and keyword != ''">
+                AND (t.user_query LIKE CONCAT('%', #{keyword}, '%')
+                     OR t.tool_sequence LIKE CONCAT('%', #{keyword}, '%')
+                     OR u.real_name LIKE CONCAT('%', #{keyword}, '%'))
+            </if>
+        </where>
+        ORDER BY t.id DESC
+        LIMIT #{offset}, #{limit}
+    </select>
+
+    <select id="countAll" resultType="java.lang.Integer">
+        SELECT COUNT(*)
+        FROM ai_agent_traces t
+        LEFT JOIN users u ON u.id = t.user_id
+        <where>
+            <if test="status != null and status != ''">
+                AND t.status = #{status}
+            </if>
+            <if test="keyword != null and keyword != ''">
+                AND (t.user_query LIKE CONCAT('%', #{keyword}, '%')
+                     OR t.tool_sequence LIKE CONCAT('%', #{keyword}, '%')
+                     OR u.real_name LIKE CONCAT('%', #{keyword}, '%'))
+            </if>
+        </where>
+    </select>
+
+    <select id="selectById" resultMap="traceMap">
+        SELECT * FROM ai_agent_traces WHERE id = #{id}
+    </select>
+
+    <!-- 汇总统计：作为答辩与运维的量化依据 -->
+    <select id="selectSummary" resultType="java.util.Map">
+        SELECT
+            COUNT(*)                                              AS totalRuns,
+            COALESCE(SUM(tool_count), 0)                         AS totalTools,
+            COALESCE(SUM(tool_rounds), 0)                        AS totalRounds,
+            COALESCE(SUM(gate_triggered), 0)                     AS gateCount,
+            COALESCE(SUM(degraded), 0)                           AS degradedCount,
+            COALESCE(SUM(prompt_tokens), 0)                      AS promptTokens,
+            COALESCE(SUM(completion_tokens), 0)                  AS completionTokens,
+            COALESCE(AVG(duration_ms), 0)                        AS avgDurationMs
+        FROM ai_agent_traces
+    </select>
+
+</mapper>

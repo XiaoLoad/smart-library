@@ -134,6 +134,13 @@ const routes = [
         component: () => import('@/views/ai/chat.vue'),
         meta: { title: 'AI 助手', roles: ALL_ROLES, keepAlive: true },
       },
+      {
+        // M6a：Agent 运行日志（工具序列/授权门禁/token 消耗），仅管理员可进
+        path: 'trace',
+        name: 'AiAgentTrace',
+        component: () => import('@/views/ai/trace.vue'),
+        meta: { title: 'Agent 运行日志', roles: [3], keepAlive: true },
+      },
     ],
   },
   {

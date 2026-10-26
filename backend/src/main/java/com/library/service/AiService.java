@@ -102,6 +102,7 @@ public class AiService {
     @Autowired private LibraryConfigService libraryConfigService;
     @Autowired private RagIndexService ragIndexService;
     @Autowired private AiConfirmService aiConfirmService;
+    @Autowired private AiAgentTraceService traceService;
 
     /** 缓存最近构建的流式模型，配置未变时复用，避免重复创建 OkHttpClient */
     private volatile OpenAiStreamingChatModel cachedModel;
@@ -313,6 +314,10 @@ public class AiService {
         messageMapper.insert(userMsg);
         evictMemory(conversationId);
 
+        // M6a：本次对话的轨迹收集器（工具序列、决策旁白、门禁/降级标记、耗时、token）
+        AiAgentTraceService.Collector trace = traceService.newCollector(
+                conversationId, cu.getUserId(), cu.getUserType(), content);
+
         // 3. 构建每请求独立的工具实例（烘焙 userId/userType，规避异步线程丢失 CurrentUser）
         AiToolContext toolCtx = buildToolContext();
         boolean admin = cu.getUserType() != null && cu.getUserType() == 3;
@@ -368,12 +373,14 @@ public class AiService {
                     // M4：过渡语不丢弃，改道为 thought 事件推给前端，
                     // 渲染成步骤时间线，让 Agent 的「想—做—再想」决策链可见。
                     // 正文仍需清空（reset），但决策旁白另行保留。
-                    emitPendingThought(emitter, thoughtBuffer);
+                    emitPendingThought(emitter, thoughtBuffer, trace);
                     emitter.send(SseEmitter.event().name("reset").data("[RESET]"));
                 }
                 // end 阶段计入摘要（成功执行完的工具；error 阶段不计）
                 if ("end".equals(phase)) {
                     toolCalls.add(toolName);
+                    // M6a：工具序列记入轨迹
+                    trace.recordTool(toolName);
                 }
                 Map<String, Object> payload = new java.util.LinkedHashMap<>();
                 payload.put("name", toolName);
@@ -399,7 +406,9 @@ public class AiService {
             try {
                 // M4：授权请求也是工具轮的一部分，先把过渡语发出，再推授权卡，
                 // 保证时间线顺序为「思考 → 授权请求」
-                emitPendingThought(emitter, thoughtBuffer);
+                emitPendingThought(emitter, thoughtBuffer, trace);
+                // M6a：门禁触发记入轨迹（安全事件的量化依据）
+                trace.markGate(toolName);
                 String token = aiConfirmService.issue(cu.getUserId(), conversationId, toolName, args, title, rows);
                 Map<String, Object> payload = new java.util.LinkedHashMap<>();
                 payload.put("token", token);
@@ -524,6 +533,9 @@ public class AiService {
                                     : content;
                             conversationMapper.updateTitle(conversationId, title);
                         }
+                        // M6a：记录 token 用量并落库轨迹
+                        recordTokenUsage(trace, response);
+                        traceService.save(trace);
                         try {
                             emitter.send(SseEmitter.event().name("done").data("[DONE]"));
                         } catch (IOException e) {
@@ -536,6 +548,9 @@ public class AiService {
                         // 已完成的动作仍然有效，未完成部分提示用户再说一次。
                         if (isToolRoundLimitExceeded(err, toolRounds.get())) {
                             handleToolRoundDegrade(emitter, conversationId, toolRounds.get());
+                            // M6a：降级轨迹
+                            trace.markDegraded();
+                            traceService.save(trace);
                             return;
                         }
                         try {
@@ -551,6 +566,9 @@ public class AiService {
                                 msg = err.getClass().getSimpleName();
                             }
                             emitter.send(SseEmitter.event().name("error").data(msg));
+                            // M6a：异常轨迹
+                            trace.markError(msg);
+                            traceService.save(trace);
                         } catch (IOException e) {
                             // 忽略
                         }
@@ -577,6 +595,27 @@ public class AiService {
     // 内部方法
 
     /**
+     * M6a：从最终响应中提取 token 用量记入轨迹。
+     * <p>
+     * 取不到时保持 null，不影响轨迹落库。
+     */
+    private void recordTokenUsage(AiAgentTraceService.Collector trace,
+                                  dev.langchain4j.model.chat.response.ChatResponse response) {
+        try {
+            if (response == null || response.metadata() == null) {
+                return;
+            }
+            var usage = response.metadata().tokenUsage();
+            if (usage == null) {
+                return;
+            }
+            trace.setTokenUsage(usage.inputTokenCount(), usage.outputTokenCount());
+        } catch (Exception e) {
+            // token 用量取不到不影响主流程
+        }
+    }
+
+    /**
      * M4：把缓冲的过渡语作为 thought 事件发出，并清空缓冲。
      * <p>
      * 过渡语是模型在调用工具前的旁白（「我先查一下馆藏…」），把它独立于正文推送后，
@@ -591,8 +630,10 @@ public class AiService {
      *
      * @param emitter SSE 发射器
      * @param buffer  过渡语缓冲
+     * @param traceCollector 轨迹收集器（可为 null）
      */
-    private void emitPendingThought(SseEmitter emitter, StringBuilder buffer) {
+    private void emitPendingThought(SseEmitter emitter, StringBuilder buffer,
+                                    AiAgentTraceService.Collector traceCollector) {
         if (buffer == null || buffer.length() == 0) {
             return;
         }
@@ -633,6 +674,10 @@ public class AiService {
         }
         try {
             emitter.send(SseEmitter.event().name("thought").data(text));
+            // M6a：决策旁白记入轨迹（Agent 规划轨迹的可视化证据）
+            if (traceCollector != null) {
+                traceCollector.recordThought(text);
+            }
         } catch (IOException e) {
             // 客户端已断开，忽略
         }

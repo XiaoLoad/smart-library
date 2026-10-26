@@ -219,6 +219,8 @@ const MENU_SECTIONS = [
   ]},
   { title: '平台', items: [
     { title: '知识库', path: '/knowledge/list', icon: 'knowledge', roles: [3] },
+    // M6a：Agent 运行日志，展示工具序列与授权门禁触发情况
+    { title: 'Agent 日志', path: '/ai/trace', icon: 'cpu', roles: [3] },
     { title: '系统设置', path: '/system/settings', icon: 'gear', roles: [3] },
   ]},
 ]

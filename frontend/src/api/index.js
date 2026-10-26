@@ -91,6 +91,13 @@ export const aiApi = {
   confirmWrite: (token, tool) => post('/ai/confirm', { token, tool }),
 }
 
+// M6a：Agent 运行轨迹（管理员）
+export const traceApi = {
+  list: (params) => get('/ai/trace/list', params),
+  detail: (id) => get(`/ai/trace/${id}`),
+  summary: () => get('/ai/trace/summary'),
+}
+
 // 知识库（RAG，仅管理员）
 export const ragApi = {
   documents: (params) => get('/rag/documents', params),
