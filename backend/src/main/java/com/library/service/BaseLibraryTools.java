@@ -55,6 +55,13 @@ public abstract class BaseLibraryTools {
     private static final int BOOK_SEARCH_SNAPSHOT_LIMIT = 15;
     /** 检索类工具快照独立字符上限（豁免全局 600 截断；15 条精简条目约 3~5KB） */
     private static final int BOOK_SEARCH_SNAPSHOT_MAX_LEN = 8000;
+    /**
+     * 看板类工具快照独立字符上限。
+     * <p>
+     * 统计概览类结果含分类分布、趋势、KPI 等多个数组，全局 600 上限会把它截成非法 JSON，
+     * 前端解析失败只能回落到 JSON 兜底视图——「生成式 UI」最该发挥的看板场景反而失效。
+     */
+    private static final int DASHBOARD_SNAPSHOT_MAX_LEN = 12000;
 
     protected final Long userId;
     protected final Integer userType;
@@ -169,18 +176,46 @@ public abstract class BaseLibraryTools {
     }
 
     /**
+     * M5：工具 → 前端渲染组件类型的映射。
+     * <p>
+     * 快照里带上 {@code type}，前端据此把 JSON 快照渲染成对应组件（图书卡、排行、图表…），
+     * 而非让用户去读原始 JSON。未在此表中的工具不带 type，前端退化为默认的 JSON 展开视图——
+     * 保证向后兼容，新工具不登记也不会出错。
+     */
+    private static final Map<String, String> SNAPSHOT_TYPES = Map.ofEntries(
+            Map.entry("queryBooks", "book_grid"),
+            Map.entry("queryHotBooks", "rank_list"),
+            Map.entry("queryBorrowQuota", "quota_bar"),
+            Map.entry("queryMyBorrows", "borrow_table"),
+            Map.entry("queryMyFines", "fine_table"),
+            Map.entry("queryCategories", "category_grid"),
+            Map.entry("queryAnnouncements", "announce_list"),
+            Map.entry("adminQueryBorrows", "borrow_table"),
+            Map.entry("adminQueryFines", "fine_table"),
+            Map.entry("adminQueryUsers", "user_table"),
+            Map.entry("adminQueryStats", "stats_dashboard")
+    );
+
+    /**
      * 生成工具返回值的精简 JSON 快照。
+     * <p>
      * 列表类结果（含 items）只保留前 {@link #LIST_SNAPSHOT_LIMIT} 条；
      * {@code queryBooks} 例外：保留全部条目（上限 {@link #BOOK_SEARCH_SNAPSHOT_LIMIT}），
      * 剔除 description 长文本，并按 {@link #BOOK_SEARCH_SNAPSHOT_MAX_LEN} 独立截断——
      * 前端用该快照驱动图书页面的 AI 检索结果视图，需要完整的图书列表而非前 3 条摘要，
      * 全局 600 字符上限会把 15 条结果截成非法 JSON 导致前端解析失败。
+     * <p>
+     * M5：附带 {@code type} 字段声明前端应渲染的组件类型。
      */
     private String snapshotData(Object r, String toolName) {
         if (r == null) return null;
         try {
             int maxLen = DATA_SNAPSHOT_MAX_LEN;
             Object toSerialize = r;
+            // 看板类结果体量大，给独立上限，避免被 600 截成非法 JSON
+            if ("stats_dashboard".equals(SNAPSHOT_TYPES.get(toolName))) {
+                maxLen = DASHBOARD_SNAPSHOT_MAX_LEN;
+            }
             if (r instanceof Map<?, ?> m && m.get("items") instanceof List<?> list) {
                 boolean fullList = "queryBooks".equals(toolName) || "queryHotBooks".equals(toolName);
                 if (fullList) {
@@ -205,7 +240,23 @@ public abstract class BaseLibraryTools {
                 slim.put("total", m.get("total"));
                 slim.put("items", head);
                 slim.put("truncated", list.size() > limit);
+                // 非列表型快照的顶层字段（如额度 maxBooks/used/remaining）也带过来，
+                // 前端渲染进度等组件时需要
+                for (Map.Entry<?, ?> e : m.entrySet()) {
+                    if (!"items".equals(e.getKey()) && !"total".equals(e.getKey())) {
+                        slim.put(String.valueOf(e.getKey()), e.getValue());
+                    }
+                }
                 toSerialize = slim;
+            }
+            // M5：声明前端渲染组件类型
+            if (toSerialize instanceof Map<?, ?> map) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> snapshot = (Map<String, Object>) map;
+                String type = SNAPSHOT_TYPES.get(toolName);
+                if (type != null) {
+                    snapshot.put("type", type);
+                }
             }
             String json = ctx.objectMapper.writeValueAsString(toSerialize);
             if (json.length() > maxLen) {

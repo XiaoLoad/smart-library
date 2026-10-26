@@ -136,14 +136,11 @@
                           <el-icon><ArrowDownBold v-if="!node.card.expanded" /><ArrowUpBold v-else /></el-icon>
                         </button>
                       </div>
-                      <!-- 展开面板：独立于 pill 之外，从下方滑出的抽屉 -->
+                      <!-- M5：生成式 UI —— 按快照 type 渲染成组件（图书卡/排行/额度条/表格/图表），
+                           无 type 或未映射时自动回落为 JSON 展开视图 -->
                       <transition name="tool-expand">
-                        <div v-if="node.card.expanded && node.card.data" class="tool-data">
-                          <div class="tool-data-label">
-                            <el-icon><Document /></el-icon>
-                            <span>返回数据快照</span>
-                          </div>
-                          <pre>{{ formatJson(node.card.data) }}</pre>
+                        <div v-if="node.card.expanded && node.card.data" class="tool-data gen-ui-wrap">
+                          <AiGenUi :snapshot="parseSnapshot(node.card.data)" />
                         </div>
                       </transition>
                     </div>
@@ -318,7 +315,7 @@
 import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import {
   Plus, ChatDotRound, MagicStick, Promotion, Delete,
-  VideoPause, Loading, Check, Close, ArrowDownBold, ArrowUpBold, Connection, Document,
+  VideoPause, Loading, Check, Close, ArrowDownBold, ArrowUpBold, Connection,
   Lock, Warning,
 } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -329,6 +326,7 @@ import { aiApi } from '@/api'
 import { useAiSearchStore } from '@/stores/aiSearch'
 import ConversationNav from '@/components/ConversationNav.vue'
 import AppIcon from '@/components/AppIcon.vue'
+import AiGenUi from '@/components/ai/AiGenUi.vue'
 
 // keep-alive 缓存名单按路由 name 匹配，故显式声明组件名
 defineOptions({ name: 'AIChat' })
@@ -404,6 +402,19 @@ const formatJson = (dataJson) => {
   }
 }
 
+/**
+ * M5：把工具快照 JSON 字符串解析为对象，供生成式 UI 组件按 type 渲染。
+ * 解析失败（含被截断的快照）返回 null，组件自动回落到 JSON 展示。
+ */
+const parseSnapshot = (dataJson) => {
+  if (!dataJson || typeof dataJson !== 'string') return null
+  try {
+    // 截断快照末尾的 "…" 需先去除再解析
+    return JSON.parse(dataJson.replace(/…$/, ''))
+  } catch {
+    return null
+  }
+}
 
 const renderMarkdown = (content) => {
   if (!content) return ''
@@ -1924,6 +1935,8 @@ onMounted(loadConversations)
   overflow-x: auto;
   position: relative;
 }
+/* M5：生成式 UI 容器 —— 内容自带卡片，容器只做留白与背景承载 */
+.gen-ui-wrap { padding: 10px 12px 12px; }
 /* 抽屉左上角与 pill 的视觉连接线 */
 .tool-data::before {
   content: '';
