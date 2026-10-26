@@ -59,8 +59,8 @@ jwt:
 
 # 微信小程序登录（code2session）
 wechat:
-  appid: ${WECHAT_APPID}           # 机密项：小程序 AppID
-  secret: ${WECHAT_SECRET}         # 机密项：小程序后台获取，生产建议用环境变量注入
+  appid: ${WECHAT_APPID:}          # 小程序 AppID；留空则不启用小程序登录（调用时返回"未配置"友好提示）
+  secret: ${WECHAT_SECRET:}        # 机密项：小程序后台获取，生产建议用环境变量注入
 
 logging:
   level:

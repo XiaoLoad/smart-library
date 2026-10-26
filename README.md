@@ -40,9 +40,12 @@
 
 ```bash
 cd backend
-# 数据库连接、JWT secret 等通过环境变量或 application-local.yml 配置
+# 复制环境变量模板并填入数据库密码、JWT secret（.env 已被 .gitignore 忽略，不会提交）
+cp .env.example .env
 mvn spring-boot:run
 ```
+
+> 首次启动前必填 `DB_PASSWORD` 与 `JWT_SECRET`（缺失时后端拒绝启动，模板内有生成指引）；微信小程序配置可留空。后端自动读取 `backend/.env`，也可改用环境变量或 `application-local.yml` 注入。
 
 ### 2. Web 前端
 

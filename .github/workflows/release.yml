@@ -107,3 +107,27 @@ jobs:
             library-frontend-*.zip
             library-miniprogram-*.zip
             checksums.txt
+
+  # 发版成功后自动同步 README 版本徽章（机器人提交直达 main，[skip ci] 防止再触发流水线）
+  sync-version-badge:
+    needs: [verify-version, github-release]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Update version badge
+        run: |
+          VERSION="${{ needs.verify-version.outputs.version }}"
+          # shields.io 徽章中字面量连字符需转义为 --（兼容预发布版本如 1.1.0-rc.1）
+          BADGE_VERSION="${VERSION//-/--}"
+          sed -E -i "s|badge/version-[0-9][0-9A-Za-z.-]*-0969DA|badge/version-${BADGE_VERSION}-0969DA|" README.md
+          grep -q "badge/version-${BADGE_VERSION}-0969DA" README.md || { echo "::error::README 版本徽章更新失败"; exit 1; }
+      - name: Commit and push
+        run: |
+          VERSION="${{ needs.verify-version.outputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README.md
+          git diff --cached --quiet || git commit -m "docs: 同步 README 版本徽章至 v${VERSION} [skip ci]"
+          git push
