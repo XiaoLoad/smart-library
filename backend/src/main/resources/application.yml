@@ -8,6 +8,11 @@ server:
     uri-encoding: UTF-8
 
 spring:
+  config:
+    # 自动导入本地 .env（properties 格式，已被 .gitignore 忽略，勿提交）；
+    # 两个路径分别兼容"以 backend 为工作目录"与"以仓库根为工作目录"两种启动方式
+    import: optional:file:.env[.properties],optional:file:backend/.env[.properties]
+
   datasource:
     # createDatabaseIfNotExist：库不存在时自动建库（字符集跟随连接，仍建议服务端默认 utf8mb4）
     url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/library_db?useUnicode=true&characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&zeroDateTimeBehavior=CONVERT_TO_NULL&createDatabaseIfNotExist=true
