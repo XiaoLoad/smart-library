@@ -22,9 +22,9 @@
     <mybatis.starter.version>3.0.4</mybatis.starter.version>
     <pagehelper.version>2.1.0</pagehelper.version>
     <jjwt.version>0.12.6</jjwt.version>
-    <langchain4j.version>1.20.0</langchain4j.version>
-    <!-- embeddings 系列使用独立版本号，与 core 1.20.0 对应的最新版为 1.20.0-beta30（不存在纯 1.20.0） -->
-    <langchain4j.embeddings.version>1.20.0-beta30</langchain4j.embeddings.version>
+    <langchain4j.version>1.22.0</langchain4j.version>
+    <!-- embeddings 系列使用独立版本号，与 core 1.22.0 对应的最新版为 1.22.0-beta32（不存在纯 1.22.0） -->
+    <langchain4j.embeddings.version>1.22.0-beta32</langchain4j.embeddings.version>
   </properties>
 
   <dependencies>
