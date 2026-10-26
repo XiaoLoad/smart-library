@@ -96,44 +96,63 @@
                   </transition>
                 </div>
 
-                <!-- 工具调用过程卡片 -->
-                <div v-if="m.toolEvents && m.toolEvents.length" class="tool-events">
+                <!-- M4：Agent 决策时间线
+                     把「思考旁白 → 工具调用 → 授权请求」按实际发生顺序串成一条链，
+                     让 Agent 的规划与自主决策过程可见（评审考察点：Agent 是否具备规划能力）。
+                     工具卡片沿用原有 pill 形态，thought 用左侧竖线旁白，confirm 用授权卡 -->
+                <div v-if="m.timeline && m.timeline.length" class="timeline">
                   <!-- 多工具串联计数：调用 ≥ 2 个时显示链路概览 -->
                   <div v-if="m.toolEvents.length >= 2" class="tool-chain-head">
                     <el-icon class="chain-icon"><Connection /></el-icon>
                     <span>本次共调用 {{ m.toolEvents.length }} 个工具</span>
                   </div>
-                  <div v-for="(t, ti) in m.toolEvents" :key="ti" class="tool-card" :class="t.phase">
-                    <!-- 紧凑 pill 头部：序号 + 图标 + 名称 + 摘要 + 展开按钮 -->
-                    <div class="tool-head">
-                      <span class="tool-seq">{{ ti + 1 }}</span>
-                      <el-icon class="tool-icon">
-                        <Loading v-if="t.phase === 'start'" />
-                        <Check v-else-if="t.phase === 'end'" />
-                        <Close v-else-if="t.phase === 'error'" />
-                      </el-icon>
-                      <span class="tool-name">{{ toolLabel(t.name) }}</span>
-                      <span v-if="t.detail" class="tool-detail">{{ t.detail }}</span>
-                      <button
-                        v-if="t.phase === 'end' && t.data"
-                        class="tool-toggle"
-                        :class="{ active: t.expanded }"
-                        :title="t.expanded ? '折叠数据' : '查看返回数据'"
-                        @click="t.expanded = !t.expanded"
-                      >
-                        <el-icon><ArrowDownBold v-if="!t.expanded" /><ArrowUpBold v-else /></el-icon>
-                      </button>
+
+                  <div v-for="(node, ni) in m.timeline" :key="ni" class="timeline-node" :class="node.kind">
+                    <!-- 节点序号：左侧轴线上的圆点标记 -->
+                    <span class="timeline-seq">{{ ni + 1 }}</span>
+
+                    <!-- ① 思考旁白：模型的过渡语，斜体弱化 -->
+                    <div v-if="node.kind === 'thought'" class="timeline-thought">
+                      {{ node.text }}
                     </div>
-                    <!-- 展开面板：独立于 pill 之外，从下方滑出的抽屉 -->
-                    <transition name="tool-expand">
-                      <div v-if="t.expanded && t.data" class="tool-data">
-                        <div class="tool-data-label">
-                          <el-icon><Document /></el-icon>
-                          <span>返回数据快照</span>
-                        </div>
-                        <pre>{{ formatJson(t.data) }}</pre>
+
+                    <!-- ② 工具调用：沿用原 pill 卡片形态 -->
+                    <div v-else-if="node.kind === 'tool'" class="tool-card" :class="node.card.phase">
+                      <div class="tool-head">
+                        <el-icon class="tool-icon">
+                          <Loading v-if="node.card.phase === 'start'" />
+                          <Check v-else-if="node.card.phase === 'end'" />
+                          <Close v-else-if="node.card.phase === 'error'" />
+                        </el-icon>
+                        <span class="tool-name">{{ toolLabel(node.card.name) }}</span>
+                        <span v-if="node.card.detail" class="tool-detail">{{ node.card.detail }}</span>
+                        <button
+                          v-if="node.card.phase === 'end' && node.card.data"
+                          class="tool-toggle"
+                          :class="{ active: node.card.expanded }"
+                          :title="node.card.expanded ? '折叠数据' : '查看返回数据'"
+                          @click="node.card.expanded = !node.card.expanded"
+                        >
+                          <el-icon><ArrowDownBold v-if="!node.card.expanded" /><ArrowUpBold v-else /></el-icon>
+                        </button>
                       </div>
-                    </transition>
+                      <!-- 展开面板：独立于 pill 之外，从下方滑出的抽屉 -->
+                      <transition name="tool-expand">
+                        <div v-if="node.card.expanded && node.card.data" class="tool-data">
+                          <div class="tool-data-label">
+                            <el-icon><Document /></el-icon>
+                            <span>返回数据快照</span>
+                          </div>
+                          <pre>{{ formatJson(node.card.data) }}</pre>
+                        </div>
+                      </transition>
+                    </div>
+
+                    <!-- ③ 授权请求：指向下方授权卡（卡片本身在时间线之后独立渲染） -->
+                    <div v-else-if="node.kind === 'confirm'" class="timeline-confirm">
+                      <el-icon><Lock /></el-icon>
+                      <span>等待你的授权确认</span>
+                    </div>
                   </div>
                 </div>
 
@@ -385,6 +404,7 @@ const formatJson = (dataJson) => {
   }
 }
 
+
 const renderMarkdown = (content) => {
   if (!content) return ''
   try {
@@ -406,6 +426,8 @@ const enrichMsg = (m) => ({
   // 参考资料同理：rag 事件只在当轮推送，落库内容不含来源，历史消息无此块
   ragSources: [],
   ragOpenIndex: -1,
+  // M4：thought 旁白不落库（与思维链一致），历史消息无时间线
+  timeline: [],
 })
 
 // 日期分隔（历史导航锚点）
@@ -758,6 +780,8 @@ const send = async () => {
     degradeMessage: '',
     // 写操作授权卡（SSE confirm 事件）
     confirmCard: null,
+    // M4：Agent 决策时间线（thought 旁白节点），与工具卡片交替构成决策链视图
+    timeline: [],
     createTime: new Date().toISOString(),
   })
   messages.value.push(assistantMsg)
@@ -825,7 +849,15 @@ const send = async () => {
         }
       }
       const data = dataParts.join('\n')
-      if (event === 'thinking') {
+      if (event === 'thought') {
+        // M4：Agent 决策旁白（工具调用前的过渡语），作为时间线节点插入
+        const msg = ensureAssistantMsg()
+        msg.pending = false
+        if (data) {
+          msg.timeline.push({ kind: 'thought', text: data })
+          scrollToBottom()
+        }
+      } else if (event === 'thinking') {
         // 深度思考思维链增量：流式追加到当前思考段，面板保持展开
         const msg = ensureAssistantMsg()
         msg.pending = false
@@ -904,13 +936,16 @@ const send = async () => {
           const events = msg.toolEvents
           if (info.phase === 'start') {
             // start：新增一张「调用中」卡片
-            events.push({
+            const card = {
               name: info.name || '',
               phase: 'start',
               detail: info.detail || '',
               data: null,
               expanded: false,
-            })
+            }
+            events.push(card)
+            // M4：工具调用记入时间线，作为决策链上的一个步骤节点
+            msg.timeline.push({ kind: 'tool', name: card.name, detail: card.detail, card })
           } else {
             // end / error：更新对应的 start 卡片（同名且仍在 start 状态的最后一条），
             // 而非新增卡片——否则 start 卡片会永远停在加载态
@@ -989,6 +1024,8 @@ const send = async () => {
             result: null,
             error: '',
           }
+          // M4：授权请求记入时间线，与旁白、工具卡片构成完整决策链
+          msg.timeline.push({ kind: 'confirm', tool: info.tool || '' })
           msg.content = msg.content || '请确认上方授权请求后继续。'
           msg.html = renderMarkdown(msg.content)
           scrollToBottom()
@@ -1699,6 +1736,80 @@ onMounted(loadConversations)
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+/* —— M4：Agent 决策时间线 ——
+   左侧一条竖轴串起「思考旁白 → 工具调用 → 授权请求」，
+   轴线用项目的主色淡化版，节点圆点实心，形成清晰的步骤感 */
+.timeline {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  padding-left: 22px;
+}
+/* 竖轴：贯穿整条时间线 */
+.timeline::before {
+  content: '';
+  position: absolute;
+  left: 6px;
+  top: 8px;
+  bottom: 8px;
+  width: 1px;
+  background: var(--color-divider);
+}
+.timeline-node {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+/* 节点圆点：骑在竖轴上 */
+.timeline-seq {
+  position: absolute;
+  left: -22px;
+  top: 4px;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-strong);
+  color: var(--color-text-tertiary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-family: var(--font-mono);
+  line-height: 1;
+}
+.timeline-node.thought .timeline-seq { border-color: var(--color-border-strong); }
+.timeline-node.tool .timeline-seq { border-color: var(--color-primary); color: var(--color-primary); }
+.timeline-node.confirm .timeline-seq { border-color: var(--color-warning); color: var(--color-warning); }
+/* 思考旁白：斜体 + 弱化，与工具卡片的实心 pill 形成层级差 */
+.timeline-thought {
+  padding: 2px 0;
+  font-size: var(--fs-small);
+  font-style: italic;
+  line-height: var(--lh-relaxed);
+  color: var(--color-text-tertiary);
+  border-left: 2px solid var(--color-divider);
+  padding-left: var(--space-3);
+}
+/* 授权请求节点 */
+.timeline-confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border-radius: var(--radius-pill);
+  border: 1px dashed var(--color-warning);
+  color: var(--color-warning);
+  background: var(--color-bg-elevated);
+  font-size: var(--fs-caption);
+}
+/* 时间线内的工具卡片：去掉左侧缩进，宽度自适应 */
+.timeline-node.tool .tool-card { width: 100%; }
+.timeline-node.tool .tool-head { align-self: flex-start; }
 
 /* 工具调用卡片 */
 .tool-events {

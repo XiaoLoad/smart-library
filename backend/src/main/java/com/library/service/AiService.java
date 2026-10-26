@@ -71,6 +71,8 @@ public class AiService {
      * 取值 8 的依据：覆盖省赛演示主线的最大轮数（查额度→检索图书→确认→办理→推荐→汇总）。
      */
     private static final int MAX_TOOL_ROUNDS = 8;
+    /** M4：单条过渡语（thought）最大字符数，避免长篇旁白淹没时间线 */
+    private static final int THOUGHT_MAX_LEN = 200;
     /** SSE 超时时间（毫秒） */
     private static final long SSE_TIMEOUT_MS = 300_000L;
     /** 首条消息生成标题的最大字符数 */
@@ -312,10 +314,7 @@ public class AiService {
         evictMemory(conversationId);
 
         // 3. 构建每请求独立的工具实例（烘焙 userId/userType，规避异步线程丢失 CurrentUser）
-        AiToolContext toolCtx = new AiToolContext(
-                borrowMapper, bookMapper, fineMapper, announcementMapper,
-                borrowLimitMapper, userMapper, categoryMapper, notificationMapper,
-                categoryService, borrowService, statsService, objectMapper);
+        AiToolContext toolCtx = buildToolContext();
         boolean admin = cu.getUserType() != null && cu.getUserType() == 3;
         CommonTools commonTools = new CommonTools(cu.getUserId(), cu.getUserType(), toolCtx);
         BaseLibraryTools roleTools = admin
@@ -348,6 +347,16 @@ public class AiService {
         // 一轮模型往返可能并发调用多个工具，按工具数计数会低估轮次，导致熔断阈值失真。
         java.util.concurrent.atomic.AtomicInteger toolRounds = new java.util.concurrent.atomic.AtomicInteger(0);
 
+        // M4：工具轮的过渡语缓冲。
+        // <p>
+        // 模型在调用工具前常会说一段过渡语（「我先查一下馆藏…」），这些文本原本随 reset 被清空丢弃，
+        // 导致用户/评委看不到 Agent 的决策链。此处把过渡语累积起来，在下一个工具开始时
+        // 改道为 thought 事件发出，由前端渲染成步骤时间线。
+        // <p>
+        // 用 StringBuilder 而非并发容器：写入端（onPartialResponse）与读取端（工具事件回调）
+        // 都跑在同一条对话的流式线程上，且此处不做跨请求共享，无需额外同步。
+        StringBuilder thoughtBuffer = new StringBuilder();
+
         // 工具事件发射器：将工具调用过程通过 SSE 推送给前端
         // 结构化输出：end 阶段携带 data 字段（工具返回的精简 JSON 快照）
         BaseLibraryTools.ToolEventEmitter emitterCb = (toolName, phase, detail, data) -> {
@@ -356,6 +365,10 @@ public class AiService {
                 // 工具调用前的过渡语（模型也可能误输出工具调用代码块），
                 // 通知前端清空正文——工具调用过程由工具卡片承载，正文只保留最终回答
                 if ("start".equals(phase)) {
+                    // M4：过渡语不丢弃，改道为 thought 事件推给前端，
+                    // 渲染成步骤时间线，让 Agent 的「想—做—再想」决策链可见。
+                    // 正文仍需清空（reset），但决策旁白另行保留。
+                    emitPendingThought(emitter, thoughtBuffer);
                     emitter.send(SseEmitter.event().name("reset").data("[RESET]"));
                 }
                 // end 阶段计入摘要（成功执行完的工具；error 阶段不计）
@@ -384,6 +397,9 @@ public class AiService {
         // 令牌在服务端登记，客户端只拿到不透明 token，确认时回传 token 而非参数——参数无法被篡改。
         BaseLibraryTools.ConfirmRequestHandler confirmCb = (toolName, title, rows, args) -> {
             try {
+                // M4：授权请求也是工具轮的一部分，先把过渡语发出，再推授权卡，
+                // 保证时间线顺序为「思考 → 授权请求」
+                emitPendingThought(emitter, thoughtBuffer);
                 String token = aiConfirmService.issue(cu.getUserId(), conversationId, toolName, args, title, rows);
                 Map<String, Object> payload = new java.util.LinkedHashMap<>();
                 payload.put("token", token);
@@ -446,6 +462,9 @@ public class AiService {
                             // 经 <think> 标签过滤器分流：标签内 → thinking 事件，标签外 → delta
                             String routed = thinkFilter.feed(partial);
                             if (routed != null && !routed.isEmpty()) {
+                                // M4：同时累积到过渡语缓冲，等工具开始时改道为 thought 事件。
+                                // 缓冲内容若最终未被发出（模型直接给最终答案），在 onCompleteResponse 清空即可。
+                                thoughtBuffer.append(routed);
                                 emitter.send(SseEmitter.event().name("delta").data(routed));
                             }
                         } catch (IOException e) {
@@ -453,6 +472,9 @@ public class AiService {
                         }
                     })
                     .onCompleteResponse(response -> {
+                        // M4：最终回答完成，缓冲里剩余的文本是最终答案的一部分（不是过渡语），
+                        // 直接丢弃，避免它在下一次工具调用时被误当作旁白发出。
+                        thoughtBuffer.setLength(0);
                         // 冲刷 <think> 过滤器缓冲：pending 中滞留的末尾正文增量补发为 delta，
                         // 否则回答结尾会缺字（残片滞留缓冲从未被发出）
                         try {
@@ -553,6 +575,103 @@ public class AiService {
     }
 
     // 内部方法
+
+    /**
+     * M4：把缓冲的过渡语作为 thought 事件发出，并清空缓冲。
+     * <p>
+     * 过渡语是模型在调用工具前的旁白（「我先查一下馆藏…」），把它独立于正文推送后，
+     * 前端可将其渲染成步骤时间线节点，与工具卡片交替出现，形成 Agent 的决策链视图。
+     * <p>
+     * 清洗规则：
+     * <ul>
+     *   <li>去掉首尾空白与 markdown 装饰残留；</li>
+     *   <li>剔除工具调用代码块（模型偶尔会把函数调用写进正文）；</li>
+     *   <li>过长则截断（旁白不应喧宾夺主）。</li>
+     * </ul>
+     *
+     * @param emitter SSE 发射器
+     * @param buffer  过渡语缓冲
+     */
+    private void emitPendingThought(SseEmitter emitter, StringBuilder buffer) {
+        if (buffer == null || buffer.length() == 0) {
+            return;
+        }
+        String raw = buffer.toString();
+        buffer.setLength(0);
+        String text = stripToolCallArtifacts(raw);
+        if (text == null) {
+            return;
+        }
+        text = text.trim();
+        if (text.isEmpty()) {
+            return;
+        }
+        // M4 视觉修正（2）：部分模型会把「最终答案正文」一起流式输出后才调用工具，
+        // 导致旁白里混入完整书目介绍，时间线被长文本淹没。
+        // 旁白本应是「一句话意图」，这里截取到首个分句边界，得到短句意图描述。
+        text = firstClause(text);
+        // 单条旁白上限：避免模型长篇大论淹没时间线
+        if (text.length() > THOUGHT_MAX_LEN) {
+            text = text.substring(0, THOUGHT_MAX_LEN) + "…";
+        }
+        // M4 视觉修正：截断处的未闭合书名号会让旁白显示成「我来帮您查一下《三」，
+        // 观感像渲染错误。此处剔除未闭合的《… 片段，只保留完整语义。
+        if (text.indexOf('》') < 0) {
+            int open = text.lastIndexOf('《');
+            if (open >= 0) {
+                text = text.substring(0, open).trim();
+            }
+        }
+        if (text.isEmpty()) {
+            return;
+        }
+        // 模型在工具调用前会边流式输出边调用工具，缓冲里的旁白往往停在半句
+        // （如「我先帮您查一下这」）。此时补一个省略号，既如实表达「进行中」，
+        // 也避免时间线上出现像被截断的残句。
+        if (!isTerminalPunct(text.charAt(text.length() - 1))) {
+            text = text + "…";
+        }
+        try {
+            emitter.send(SseEmitter.event().name("thought").data(text));
+        } catch (IOException e) {
+            // 客户端已断开，忽略
+        }
+    }
+
+    /**
+     * M4：判断字符是否为句末标点（用于判断旁白是否为完整句子）。
+     */
+    private boolean isTerminalPunct(char c) {
+        return c == '。' || c == '！' || c == '？' || c == '…'
+                || c == ')' || c == '）'
+                || c == '"' || c == '"'
+                || c == '\'' || c == '\'';
+    }
+
+    /**
+     * M4：截取首个分句，作为「一句话意图」旁白。
+     * <p>
+     * 模型在工具轮前可能连同最终答案一起流式输出（先说答案再调工具），
+     * 若原样作为旁白展示，时间线会被整段书目介绍淹没。此处按中文分句边界
+     * （。！？，；：与换行）取首句，保留「我要做什么」的语义，去掉后面的数据罗列。
+     *
+     * @param text 原始旁白文本
+     * @return 首个分句（过短时回退为原文本）
+     */
+    private String firstClause(String text) {
+        if (text == null) {
+            return null;
+        }
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c == '。' || c == '！' || c == '？' || c == '，' || c == '；' || c == '：' || c == '\n') {
+                String head = text.substring(0, i).trim();
+                // 太短说明切在了标点噪声上，保留原文
+                return head.length() >= 4 ? head : text.trim();
+            }
+        }
+        return text.trim();
+    }
 
     /**
      * 执行用户已确认的写操作（授权卡「确认办理」按钮的回调入口）。

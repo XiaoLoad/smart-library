@@ -35,15 +35,22 @@
                 </div>
               </div>
 
-              <!-- 工具调用卡片 -->
-              <div v-if="m.toolEvents && m.toolEvents.length" class="tool-events">
-                <div v-for="(t, ti) in m.toolEvents" :key="ti" class="tool-card" :class="t.phase">
-                  <el-icon class="tool-icon">
-                    <Loading v-if="t.phase === 'start'" />
-                    <Check v-else-if="t.phase === 'end'" />
-                    <Close v-else-if="t.phase === 'error'" />
-                  </el-icon>
-                  <span class="tool-name">{{ toolLabel(t.name) }}</span>
+              <!-- M4：Agent 决策时间线（浮动面板精简版：无序号轴，仅旁白 + 工具节点） -->
+              <div v-if="m.timeline && m.timeline.length" class="timeline">
+                <div v-for="(node, ni) in m.timeline" :key="ni" class="timeline-node" :class="node.kind">
+                  <div v-if="node.kind === 'thought'" class="timeline-thought">{{ node.text }}</div>
+                  <div v-else-if="node.kind === 'tool'" class="tool-card" :class="node.card.phase">
+                    <el-icon class="tool-icon">
+                      <Loading v-if="node.card.phase === 'start'" />
+                      <Check v-else-if="node.card.phase === 'end'" />
+                      <Close v-else-if="node.card.phase === 'error'" />
+                    </el-icon>
+                    <span class="tool-name">{{ toolLabel(node.card.name) }}</span>
+                  </div>
+                  <div v-else-if="node.kind === 'confirm'" class="timeline-confirm">
+                    <el-icon><Lock /></el-icon>
+                    <span>等待你的授权确认</span>
+                  </div>
                 </div>
               </div>
 
@@ -239,6 +246,8 @@ const init = async () => {
         reasoningStreaming: false,
         reasoningSeconds: null,
         pending: false,
+        // M4：thought 旁白不落库，历史消息无时间线
+        timeline: [],
       })).reverse()
     }
     await scrollToBottom()
@@ -306,6 +315,8 @@ const send = async () => {
     pending: true,
     // 写操作授权卡（SSE confirm 事件）
     confirmCard: null,
+    // M4：Agent 决策时间线
+    timeline: [],
     createTime: new Date().toISOString(),
   })
   messages.value.push(assistantMsg)
@@ -357,7 +368,14 @@ const send = async () => {
       }
       const data = dataParts.join('\n')
       const msg = assistantMsg
-      if (event === 'thinking') {
+      if (event === 'thought') {
+        // M4：Agent 决策旁白，作为时间线节点插入
+        msg.pending = false
+        if (data) {
+          msg.timeline.push({ kind: 'thought', text: data })
+          scrollToBottom()
+        }
+      } else if (event === 'thinking') {
         msg.pending = false
         if (data) {
           if (!msg._reasonSegOpen) {
@@ -401,7 +419,10 @@ const send = async () => {
           const info = JSON.parse(data)
           const events = msg.toolEvents
           if (info.phase === 'start') {
-            events.push({ name: info.name || '', phase: 'start' })
+            const card = { name: info.name || '', phase: 'start' }
+            events.push(card)
+            // M4：工具调用记入时间线
+            msg.timeline.push({ kind: 'tool', name: card.name, detail: '', card })
           } else {
             let target = null
             for (let i = events.length - 1; i >= 0; i--) {
@@ -441,6 +462,8 @@ const send = async () => {
             result: null,
             error: '',
           }
+          // M4：授权请求记入时间线
+          msg.timeline.push({ kind: 'confirm', tool: info.tool || '' })
           msg.content = msg.content || '请确认上方授权请求后继续。'
           msg.html = renderMarkdown(msg.content)
           scrollToBottom()
@@ -653,6 +676,34 @@ defineExpose({ init, destroy, send, prefill })
   overflow-y: auto;
 }
 .reason-seg { margin-bottom: 4px; }
+
+/* M4：Agent 决策时间线（浮动面板精简版：无序号轴） */
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.timeline-node { display: flex; flex-direction: column; align-items: flex-start; }
+.timeline-thought {
+  padding-left: 8px;
+  border-left: 2px solid var(--color-divider, #ece6dd);
+  font-size: 12px;
+  font-style: italic;
+  line-height: 1.7;
+  color: var(--color-text-tertiary, #9c958d);
+}
+.timeline-confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px dashed var(--color-warning, #c4904a);
+  color: var(--color-warning, #c4904a);
+  background: var(--color-bg-elevated, #fff);
+  font-size: 12px;
+}
 
 /* 工具卡片（精简版） */
 .tool-events { margin-bottom: 8px; display: flex; flex-wrap: wrap; gap: 6px; }
