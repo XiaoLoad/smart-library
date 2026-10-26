@@ -33,6 +33,20 @@ public abstract class BaseLibraryTools {
         void emit(String toolName, String phase, String detail, String data);
     }
 
+    /**
+     * 授权请求回调：写工具被门禁拦截时，由它把授权请求推给前端。
+     * <p>
+     * 实现方（AiService）负责推 confirm SSE 事件并登记令牌。
+     *
+     * @param toolName 写工具名
+     * @param title    授权卡标题（如「借阅《围城》」）
+     * @param rows     授权卡参数明细（键值表，可为空）
+     * @param args     工具参数（服务端保存，客户端仅拿到不透明令牌）
+     */
+    public interface ConfirmRequestHandler {
+        void request(String toolName, String title, List<Map<String, String>> rows, Map<String, Object> args);
+    }
+
     /** 数据快照最大字符数（避免 SSE 包过大） */
     private static final int DATA_SNAPSHOT_MAX_LEN = 600;
     /** 列表类快照保留的最大条目数（避免长列表爆包） */
@@ -49,6 +63,9 @@ public abstract class BaseLibraryTools {
     /** 当前请求的工具事件发射器，由 AiService 在创建工具实例时注入 */
     private ToolEventEmitter eventEmitter;
 
+    /** 当前请求的写操作授权回调，由 AiService 注入；为 null 时写操作不拦截（退化行为） */
+    private ConfirmRequestHandler confirmHandler;
+
     protected BaseLibraryTools(Long userId, Integer userType, AiToolContext ctx) {
         this.userId = userId;
         this.userType = userType;
@@ -60,8 +77,49 @@ public abstract class BaseLibraryTools {
         this.eventEmitter = emitter;
     }
 
+    /** 注入本次请求的写操作授权回调 */
+    public void setConfirmHandler(ConfirmRequestHandler handler) {
+        this.confirmHandler = handler;
+    }
+
     protected boolean isAdmin() {
         return userType != null && userType == 3;
+    }
+
+    /**
+     * 包裹<b>写操作</b>工具方法体：先过授权门禁，用户确认后才真正执行。
+     * <p>
+     * 与只读工具（{@link #withEvent}）的关键差异：
+     * <ul>
+     *   <li>写工具在执行前先查 {@link AiToolRegistry#WRITE_TOOLS}，命中则<b>不执行</b>，
+     *       改为向 {@link ConfirmRequestHandler} 发起授权请求；</li>
+     *   <li>被拦截时<b>不发 start 事件</b>——start 事件会触发前端 reset 清空正文，
+     *       而授权请求不是工具执行，不能把用户已看到的文字清掉；</li>
+     *   <li>被拦截时返回「等待用户确认」的结构化结果，模型据此知道该等用户点头，
+     *       而不是以为操作已经完成。</li>
+     * </ul>
+     *
+     * @param name       工具名（须在 AiToolRegistry.WRITE_TOOLS 中登记）
+     * @param title      授权卡标题（如「借阅《围城》」）
+     * @param rows       授权卡参数明细
+     * @param args       工具参数（服务端保存，客户端只拿令牌）
+     * @param action     真正的写操作逻辑，仅在用户确认后执行
+     */
+    protected Map<String, Object> withWriteEvent(String name, String title,
+                                                 List<Map<String, String>> rows,
+                                                 Map<String, Object> args,
+                                                 Function<Void, Map<String, Object>> action) {
+        // 未登记写工具时不做拦截，退化为普通执行（保持向后兼容）
+        if (confirmHandler == null || !AiToolRegistry.requiresConfirm(name)) {
+            return withEvent(name, title, action);
+        }
+        // 门禁拦截：不执行，改为发起授权请求
+        confirmHandler.request(name, title, rows, args);
+        Map<String, Object> pending = new LinkedHashMap<>();
+        pending.put("success", false);
+        pending.put("awaitingConfirm", true);
+        pending.put("message", "已向用户发起授权请求，需用户确认后才会执行本操作");
+        return pending;
     }
 
     /**
@@ -158,6 +216,14 @@ public abstract class BaseLibraryTools {
             // 序列化失败不影响主流程
             return null;
         }
+    }
+
+    /** 构造授权卡的一行键值对（key/value） */
+    protected static Map<String, String> row(String key, String value) {
+        Map<String, String> m = new LinkedHashMap<>();
+        m.put("key", key == null ? "" : key);
+        m.put("value", value == null ? "" : value);
+        return m;
     }
 
     // 通用辅助方法

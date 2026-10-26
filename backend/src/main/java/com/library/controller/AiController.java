@@ -2,6 +2,7 @@ package com.library.controller;
 
 import com.library.common.Result;
 import com.library.dto.AiChatRequest;
+import com.library.dto.AiConfirmRequest;
 import com.library.entity.AiConversation;
 import com.library.entity.AiMessage;
 import com.library.mapper.AiConversationMapper;
@@ -86,5 +87,21 @@ public class AiController {
     @PostMapping(value = "/chat", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter chat(@Valid @RequestBody AiChatRequest req) {
         return aiService.chat(req.getConversationId(), req.getContent());
+    }
+
+    /**
+     * 确认执行写操作（授权卡「确认办理」按钮的回调）。
+     * <p>
+     * <b>只传令牌不传参数</b>：服务端按令牌中保存的原始参数执行，
+     * 因此客户端无法篡改要执行的写操作内容。令牌一次性、60 秒过期。
+     *
+     * @param req 令牌与目标工具名
+     * @return 工具执行结果
+     */
+    @PostMapping("/confirm")
+    public Result<Map<String, Object>> confirm(@Valid @RequestBody AiConfirmRequest req) {
+        CurrentUser cu = CurrentUser.get();
+        Map<String, Object> result = aiService.confirmWrite(req.getToken(), cu.getUserId(), req.getTool());
+        return Result.success(result);
     }
 }

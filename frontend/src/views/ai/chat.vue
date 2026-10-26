@@ -137,6 +137,55 @@
                   </div>
                 </div>
 
+                <!-- 写操作授权卡：AI 发起的写操作被代码级门禁拦截，等待用户授权。
+                     形态刻意区别于工具卡片（卡片 vs pill），避免被当成一次普通查询结果 -->
+                <div v-if="m.confirmCard" class="confirm-card" :class="m.confirmCard.state">
+                  <div class="confirm-head">
+                    <span class="confirm-eyebrow">
+                      <el-icon><Lock /></el-icon>
+                      <span>{{ confirmEyebrow(m.confirmCard.state) }}</span>
+                    </span>
+                  </div>
+                  <div class="confirm-title">{{ m.confirmCard.title }}</div>
+                  <div v-if="m.confirmCard.rows && m.confirmCard.rows.length" class="confirm-rows">
+                    <div v-for="(r, ri) in m.confirmCard.rows" :key="ri" class="confirm-row">
+                      <span class="confirm-k">{{ r.key }}</span>
+                      <span class="confirm-v mono">{{ r.value }}</span>
+                    </div>
+                  </div>
+                  <div v-if="m.confirmCard.state === 'pending'" class="confirm-actions">
+                    <button class="confirm-btn primary" @click="onConfirmWrite(m.confirmCard)">
+                      确认办理
+                    </button>
+                    <button class="confirm-btn" @click="onCancelWrite(m.confirmCard)">取消</button>
+                    <span class="confirm-ttl">{{ m.confirmCard.ttlSeconds }} 秒内有效</span>
+                  </div>
+                  <div v-else-if="m.confirmCard.state === 'submitting'" class="confirm-actions">
+                    <span class="confirm-state">
+                      <el-icon class="is-loading"><Loading /></el-icon>
+                      <span>正在办理…</span>
+                    </span>
+                  </div>
+                  <div v-else-if="m.confirmCard.state === 'confirmed'" class="confirm-actions">
+                    <span class="confirm-state ok">
+                      <el-icon><Check /></el-icon>
+                      <span>已确认并执行</span>
+                    </span>
+                  </div>
+                  <div v-else-if="m.confirmCard.state === 'cancelled'" class="confirm-actions">
+                    <span class="confirm-state muted">
+                      <el-icon><Close /></el-icon>
+                      <span>已取消本次操作</span>
+                    </span>
+                  </div>
+                  <div v-else-if="m.confirmCard.state === 'expired'" class="confirm-actions">
+                    <span class="confirm-state err">
+                      <el-icon><Warning /></el-icon>
+                      <span>{{ m.confirmCard.error || '授权已失效，请重新发起' }}</span>
+                    </span>
+                  </div>
+                </div>
+
                 <!-- 参考资料：本轮注入的知识库来源。
                      后端 rag 事件在调用 LLM 之前推送（早于 delta），故参考资料条先出、正文随后流式出现；
                      点击药丸展开片段摘要（后端只回传截断摘要，不落库，历史消息无此块） -->
@@ -251,6 +300,7 @@ import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount } from 'v
 import {
   Plus, ChatDotRound, MagicStick, Promotion, Delete,
   VideoPause, Loading, Check, Close, ArrowDownBold, ArrowUpBold, Connection, Document,
+  Lock, Warning,
 } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import MarkdownIt from 'markdown-it'
@@ -304,6 +354,18 @@ const TOOL_LABELS = {
   adminCounterProcess: '柜台办理业务',
 }
 const toolLabel = (name) => TOOL_LABELS[name] || name
+
+/**
+ * 授权卡的眉标文案：随状态切换，让用户一眼看出「还需要我操作」还是「已经处理完」。
+ */
+const CONFIRM_EYEBROWS = {
+  pending: '需要你的授权',
+  submitting: '正在办理',
+  confirmed: '已确认',
+  cancelled: '已取消',
+  expired: '授权失效',
+}
+const confirmEyebrow = (state) => CONFIRM_EYEBROWS[state] || '需要你的授权'
 
 /**
  * 格式化工具返回的 JSON 数据快照用于展示。
@@ -578,6 +640,47 @@ const sendPrompt = (prompt) => {
   send()
 }
 
+/* —— 写操作授权卡 —— */
+
+// 确认执行：只回传令牌，参数由服务端保存，客户端无法篡改
+const onConfirmWrite = async (card) => {
+  if (!card || card.state !== 'pending') return
+  card.state = 'submitting'
+  try {
+    const res = await aiApi.confirmWrite(card.token, card.tool)
+    card.state = 'confirmed'
+    card.result = res
+    // 依据工具真实返回给出简短回执；完整回答交由模型在下一轮生成
+    const tip = res?.message || '操作已完成'
+    appendAssistantText(tip)
+  } catch (e) {
+    card.state = 'expired'
+    card.error = e?.message || '授权已失效，请重新发起该操作'
+  }
+}
+
+// 用户取消：卡片原地转为静默状态，不跳变
+const onCancelWrite = (card) => {
+  if (!card || card.state !== 'pending') return
+  card.state = 'cancelled'
+}
+
+// 授权过期：卡片灰态保留，说明发生过什么而非凭空消失
+const onConfirmExpired = (card) => {
+  if (!card || card.state !== 'pending') return
+  card.state = 'expired'
+  card.error = '授权已过期，请重新发起该操作'
+}
+
+/** 在当前助手气泡追加一句文本 */
+const appendAssistantText = (text) => {
+  const msg = assistantMsg
+  if (!msg) return
+  msg.content = msg.content ? `${msg.content}\n\n${text}` : text
+  msg.html = renderMarkdown(msg.content)
+  scrollToBottom()
+}
+
 /** 停止生成：中断当前 SSE 请求 */
 const stopGenerate = () => {
   if (abortController) {
@@ -653,6 +756,8 @@ const send = async () => {
     // 降级标记（SSE degrade 事件）：工具循环超限时的优雅收尾提示
     degraded: false,
     degradeMessage: '',
+    // 写操作授权卡（SSE confirm 事件）
+    confirmCard: null,
     createTime: new Date().toISOString(),
   })
   messages.value.push(assistantMsg)
@@ -865,6 +970,30 @@ const send = async () => {
         }
         if (isFirstMsg && conv) {
           conv.title = content.length > 20 ? content.substring(0, 20) + '…' : content
+        }
+      } else if (event === 'confirm') {
+        // 写操作授权请求：模型发起写操作被门禁拦截，改为向用户请求授权。
+        // 卡片渲染在工具卡片之后，正文不受影响（后端拦截时不会发 reset 事件）。
+        const msg = ensureAssistantMsg()
+        msg.pending = false
+        try {
+          const info = JSON.parse(data)
+          msg.confirmCard = {
+            token: info.token,
+            tool: info.tool,
+            title: info.title || '写操作授权',
+            rows: Array.isArray(info.rows) ? info.rows : [],
+            ttlSeconds: info.ttlSeconds || 60,
+            // pending: 等待确认 / confirmed: 已确认 / cancelled: 用户取消 / expired: 已过期
+            state: 'pending',
+            result: null,
+            error: '',
+          }
+          msg.content = msg.content || '请确认上方授权请求后继续。'
+          msg.html = renderMarkdown(msg.content)
+          scrollToBottom()
+        } catch {
+          // 解析失败时不影响对话
         }
       } else if (event === 'degrade') {
         // 工具循环超限降级：非报错样式，提示已完成部分 + 建议继续追问
@@ -1374,6 +1503,113 @@ onMounted(loadConversations)
   opacity: 0;
   transform: translateY(-4px) scaleY(0.96);
 }
+
+/* —— 写操作授权卡 ——
+   形态刻意区别于工具卡片（卡片 + 竖条 vs pill），语义上也区别于降级提示（陶土黄）：
+   这是「用户必须做决策」的唯一入口，需要最强的视觉信号 */
+.confirm-card {
+  margin-bottom: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius);
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-primary);
+  background: var(--color-bg-elevated);
+  transition: all var(--duration) var(--ease-soft);
+}
+.confirm-head { margin-bottom: var(--space-1); }
+.confirm-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--fs-caption);
+  font-weight: 500;
+  letter-spacing: var(--ls-wide);
+  color: var(--color-primary);
+}
+.confirm-title {
+  font-family: var(--font-serif);
+  font-size: var(--fs-h3);
+  font-weight: 600;
+  letter-spacing: var(--ls-tight);
+  color: var(--color-text);
+  line-height: var(--lh-snug);
+}
+/* 参数键值表 */
+.confirm-rows {
+  margin-top: var(--space-3);
+  border-top: 1px solid var(--color-divider);
+}
+.confirm-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--color-divider);
+}
+.confirm-row:last-child { border-bottom: none; }
+.confirm-k {
+  flex-shrink: 0;
+  font-size: var(--fs-caption);
+  color: var(--color-text-tertiary);
+}
+.confirm-v {
+  font-size: var(--fs-caption);
+  color: var(--color-text);
+  text-align: right;
+  word-break: break-all;
+}
+/* 操作区 */
+.confirm-actions {
+  margin-top: var(--space-3);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.confirm-btn {
+  padding: 6px 16px;
+  border-radius: var(--radius);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-elevated);
+  color: var(--color-text-secondary);
+  font-size: var(--fs-small);
+  font-family: var(--font-sans);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-soft);
+}
+.confirm-btn:hover { border-color: var(--color-border-strong); color: var(--color-text); }
+.confirm-btn.primary {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: var(--color-text-inverse);
+}
+.confirm-btn.primary:hover { background: var(--color-primary-hover); }
+.confirm-ttl {
+  margin-left: auto;
+  font-size: var(--fs-caption);
+  color: var(--color-text-tertiary);
+}
+.confirm-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-small);
+  color: var(--color-text-secondary);
+}
+.confirm-state.ok { color: var(--color-success); }
+.confirm-state.muted { color: var(--color-text-tertiary); }
+.confirm-state.err { color: var(--color-danger); }
+
+/* 状态变体：处理完成后收敛视觉重量，竖条与边框转为中性 */
+.confirm-card.confirmed,
+.confirm-card.cancelled,
+.confirm-card.expired {
+  border-left-color: var(--color-border-strong);
+}
+.confirm-card.confirmed .confirm-eyebrow { color: var(--color-success); }
+.confirm-card.cancelled .confirm-eyebrow { color: var(--color-text-tertiary); }
+.confirm-card.expired .confirm-eyebrow { color: var(--color-danger); }
 
 /* —— 降级提示（工具循环超限） ——
    区别于 error 的红色报错：沿用项目陶土黄警示色系（--color-warning），

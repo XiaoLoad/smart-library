@@ -175,31 +175,44 @@ public class AdminTools extends BaseLibraryTools {
      */
     @Tool("【管理员】柜台统一办理一条借阅记录（写操作）：按记录当前状态自动分流——"
             + "待取书(0)→取书确认，借阅中(1)/已逾期(3)→直接归还并自动结算逾期罚款，待确认归还(5)→归还确认。"
-            + "调用前必须与来人核对借阅码并获得管理员明确确认，借阅码必须来自实际核对或 adminQueryBorrows 查询结果，禁止猜测；"
+            + "当管理员要办理某条借阅记录时，应调用本工具；系统会在执行前弹出授权卡，"
+            + "由管理员在卡片上确认后才真正生效——你无需先向管理员索要确认，直接调用即可。"
+            + "借阅码必须来自实际核对或 adminQueryBorrows 查询结果，禁止猜测；"
             + "返回办理动作（pickup=取书/return=归还/confirm=归还确认）和办理结果")
     public Map<String, Object> adminCounterProcess(@P("借阅码（如 BR202609090001），必须实际核对，禁止猜测") String borrowNo) {
         String no = blankToNull(borrowNo);
-        return withEvent("adminCounterProcess", "借阅码：" + no, v -> {
-            if (no == null) {
-                throw new BusinessException("请提供借阅码");
-            }
-            PickupResultVo r = ctx.borrowService.batchProcess(null, List.of(no), userId);
-            Map<String, Object> m = new LinkedHashMap<>();
-            Map<?, ?> first = r.getResults().isEmpty() ? null : (Map<?, ?>) r.getResults().get(0);
-            if (r.getSuccessCount() == 1 && first != null) {
-                m.put("success", true);
-                m.put("borrowNo", first.get("borrowNo"));
-                m.put("bookTitle", first.get("bookTitle"));
-                m.put("userName", first.get("userName"));
-                m.put("action", actionLabel(str(first.get("action"))));
-                m.put("message", actionMessage(str(first.get("action"))));
-            } else {
-                m.put("success", false);
-                m.put("borrowNo", no);
-                m.put("message", first != null ? str(first.get("message")) : "办理失败");
-            }
-            return m;
-        });
+        return withWriteEvent("adminCounterProcess", "柜台办理 " + no,
+                List.of(row("借阅码", no)),
+                Map.of("borrowNo", no == null ? "" : no),
+                v -> doCounterProcess(no));
+    }
+
+    /** 执行已确认的柜台办理（授权卡确认后由 {@link AiService} 调用，绕过门禁） */
+    public Map<String, Object> adminCounterProcessConfirmed(String borrowNo) {
+        return doCounterProcess(blankToNull(borrowNo));
+    }
+
+    /** 柜台办理的实际业务逻辑（门禁与确认后执行共用） */
+    private Map<String, Object> doCounterProcess(String no) {
+        if (no == null) {
+            throw new BusinessException("请提供借阅码");
+        }
+        PickupResultVo r = ctx.borrowService.batchProcess(null, List.of(no), userId);
+        Map<String, Object> m = new LinkedHashMap<>();
+        Map<?, ?> first = r.getResults().isEmpty() ? null : (Map<?, ?>) r.getResults().get(0);
+        if (r.getSuccessCount() == 1 && first != null) {
+            m.put("success", true);
+            m.put("borrowNo", first.get("borrowNo"));
+            m.put("bookTitle", first.get("bookTitle"));
+            m.put("userName", first.get("userName"));
+            m.put("action", actionLabel(str(first.get("action"))));
+            m.put("message", actionMessage(str(first.get("action"))));
+        } else {
+            m.put("success", false);
+            m.put("borrowNo", no);
+            m.put("message", first != null ? str(first.get("message")) : "办理失败");
+        }
+        return m;
     }
 
     private String actionLabel(String action) {

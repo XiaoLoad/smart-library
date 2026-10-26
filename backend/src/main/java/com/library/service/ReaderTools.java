@@ -145,31 +145,61 @@ public class ReaderTools extends BaseLibraryTools {
      * 改以「用户确认的书名」为锚：ISBN 唯一，能拿到就按 ISBN 精确定位；否则按书名匹配，
      * 命中多本时返回候选交由用户选定，绝不自行选取。
      */
-    @Tool("为当前用户提交图书借阅申请（写操作）。bookTitle 必须是用户确认的书名（来自 queryBooks 返回的 title）；"
+    @Tool("【借阅申请·写操作】当用户表达借阅/借书意图时，应调用本工具提交借阅申请。"
+            + "系统会在执行前弹出授权卡，由用户在卡片上确认后才真正生效——你无需先向用户索要确认，直接调用即可。"
+            + "bookTitle 必须是用户要借的书名（来自 queryBooks 返回的 title）；"
             + "若 queryBooks 结果含 isbn，务必一并传入——ISBN 唯一，能精确定位书目，可避免同名多版本借错。"
             + "只传书名且匹配到多本时不会办理，而是返回 candidates 候选清单，"
             + "此时必须把候选书目念给用户、让用户选定，再以选定的书名重新调用，禁止自行挑选。"
-            + "调用本工具前必须已向用户确认具体书名且用户明确回复同意（如「确认」「借吧」）；"
             + "成功后返回借阅码和取书截止时间，需提醒用户在截止时间前到服务台取书")
     public Map<String, Object> applyBorrow(@P("用户确认的书名，来自 queryBooks 返回的 title，禁止猜测") String bookTitle,
                                            @P(value = "图书 ISBN，来自 queryBooks 返回的 isbn；唯一标识，优先于书名，可省略",
                                                    required = false) String isbn) {
-        return withEvent("applyBorrow", borrowDetail(bookTitle, isbn), v -> {
-            BookMatch match = locateBook(bookTitle, isbn);
-            if (match.book() == null) {
-                return ambiguousBorrow(bookTitle, match.candidates());
-            }
-            Borrow b = ctx.borrowService.apply(userId, match.book().getId());
-            Map<String, Object> m = new LinkedHashMap<>();
-            m.put("success", true);
-            m.put("borrowNo", b.getBorrowNo());
-            m.put("bookId", b.getBookId());
-            m.put("bookTitle", b.getBookTitle());
-            m.put("status", statusLabel(b.getStatus()));
-            m.put("pickupDeadline", str(b.getPickupDeadline()));
-            m.put("message", "已借出《" + b.getBookTitle() + "》，请在取书截止时间前到服务台取书");
-            return m;
-        });
+        return withWriteEvent("applyBorrow", "借阅《" + bookTitle + "》",
+                borrowRows(bookTitle, isbn),
+                Map.of("bookTitle", bookTitle == null ? "" : bookTitle,
+                        "isbn", isbn == null ? "" : isbn),
+                v -> doApplyBorrow(bookTitle, isbn));
+    }
+
+    /**
+     * 执行已确认的借阅申请（授权卡确认后由 {@link AiService} 调用，绕过门禁）。
+     * <p>
+     * 与 {@link #applyBorrow} 的区别仅在于：前者是「模型发起」（过门禁），
+     * 本方法是「用户已确认」（直接执行）。实际业务逻辑完全一致，抽取为公共实现避免两处漂移。
+     */
+    public Map<String, Object> applyBorrowConfirmed(String bookTitle, String isbn) {
+        return doApplyBorrow(bookTitle, isbn);
+    }
+
+    /** 借阅的实际业务逻辑（门禁与确认后执行共用） */
+    private Map<String, Object> doApplyBorrow(String bookTitle, String isbn) {
+        BookMatch match = locateBook(bookTitle, isbn);
+        if (match.book() == null) {
+            return ambiguousBorrow(bookTitle, match.candidates());
+        }
+        Borrow b = ctx.borrowService.apply(userId, match.book().getId());
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("success", true);
+        m.put("borrowNo", b.getBorrowNo());
+        m.put("bookId", b.getBookId());
+        m.put("bookTitle", b.getBookTitle());
+        m.put("status", statusLabel(b.getStatus()));
+        m.put("pickupDeadline", str(b.getPickupDeadline()));
+        m.put("message", "已借出《" + b.getBookTitle() + "》，请在取书截止时间前到服务台取书");
+        return m;
+    }
+
+    /**
+     * 借阅授权卡的参数明细：列出 ISBN（唯一标识）与书名，便于用户核对具体版本。
+     */
+    private List<Map<String, String>> borrowRows(String bookTitle, String isbn) {
+        List<Map<String, String>> rows = new ArrayList<>();
+        rows.add(row("书名", bookTitle));
+        if (isbn != null && !isbn.isBlank()) {
+            rows.add(row("ISBN", isbn));
+        }
+        return rows;
     }
 
     /** 定位结果：唯一命中时 book 非空；书名匹配到多本时 candidates 非空且 book 为 null */
@@ -259,38 +289,63 @@ public class ReaderTools extends BaseLibraryTools {
     /**
      * 续借本人借阅中的图书（写操作）。
      */
-    @Tool("为当前用户续借本人借阅中的图书（写操作）。仅状态为「借阅中」且续借次数未用完的记录可续借。"
-            + "调用前必须向用户确认书名/借阅码并获得明确同意；成功后返回新的应还时间")
+    @Tool("【续借·写操作】当用户表达续借/延长借期意图时，应调用本工具提交续借申请。"
+            + "系统会在执行前弹出授权卡，由用户在卡片上确认后才真正生效——你无需先向用户索要确认，直接调用即可。"
+            + "仅状态为「借阅中」且续借次数未用完的记录可续借；成功后返回新的应还时间")
     public Map<String, Object> renewMyBorrow(@P("借阅码（如 BR202609090001），来自 queryMyBorrows 返回，禁止猜测") String borrowNo) {
-        return withEvent("renewMyBorrow", "借阅码：" + borrowNo, v -> {
-            Borrow b = ctx.borrowService.renew(userId, userType, null, borrowNo);
-            Map<String, Object> m = new LinkedHashMap<>();
-            m.put("success", true);
-            m.put("borrowNo", b.getBorrowNo());
-            m.put("bookTitle", b.getBookTitle());
-            m.put("newDueTime", str(b.getDueTime()));
-            m.put("renewCount", b.getRenewCount());
-            m.put("renewMaxCount", b.getRenewMaxCount());
-            m.put("message", "续借成功，已更新应还时间");
-            return m;
-        });
+        return withWriteEvent("renewMyBorrow", "续借 " + borrowNo,
+                List.of(row("借阅码", borrowNo)),
+                Map.of("borrowNo", borrowNo == null ? "" : borrowNo),
+                v -> doRenew(borrowNo));
+    }
+
+    /** 执行已确认的续借（授权卡确认后由 {@link AiService} 调用，绕过门禁） */
+    public Map<String, Object> renewMyBorrowConfirmed(String borrowNo) {
+        return doRenew(borrowNo);
+    }
+
+    /** 续借的实际业务逻辑（门禁与确认后执行共用） */
+    private Map<String, Object> doRenew(String borrowNo) {
+        Borrow b = ctx.borrowService.renew(userId, userType, null, borrowNo);
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("success", true);
+        m.put("borrowNo", b.getBorrowNo());
+        m.put("bookTitle", b.getBookTitle());
+        m.put("newDueTime", str(b.getDueTime()));
+        m.put("renewCount", b.getRenewCount());
+        m.put("renewMaxCount", b.getRenewMaxCount());
+        m.put("message", "续借成功，已更新应还时间");
+        return m;
     }
 
     /**
      * 发起归还申请（写操作）。
      */
-    @Tool("为当前用户发起图书归还申请（写操作）。状态为「借阅中」或「已逾期」的图书提交后进入「待确认归还」，"
-            + "需将图书送至服务台由管理员确认后完成归还。调用前必须向用户确认书名/借阅码并获得明确同意")
+    @Tool("【归还申请·写操作】当用户表达归还/还书意图时，应调用本工具提交归还申请。"
+            + "系统会在执行前弹出授权卡，由用户在卡片上确认后才真正生效——你无需先向用户索要确认，直接调用即可。"
+            + "状态为「借阅中」或「已逾期」的图书提交后进入「待确认归还」，"
+            + "需将图书送至服务台由管理员确认后完成归还")
     public Map<String, Object> requestReturn(@P("借阅码（如 BR202609090001），来自 queryMyBorrows 返回，禁止猜测") String borrowNo) {
-        return withEvent("requestReturn", "借阅码：" + borrowNo, v -> {
-            Borrow b = ctx.borrowService.returnBook(userId, userType, null, borrowNo);
-            Map<String, Object> m = new LinkedHashMap<>();
-            m.put("success", true);
-            m.put("borrowNo", b.getBorrowNo());
-            m.put("bookTitle", b.getBookTitle());
-            m.put("status", statusLabel(b.getStatus()));
-            m.put("message", "归还申请已提交，请将图书送至服务台由管理员确认");
-            return m;
-        });
+        return withWriteEvent("requestReturn", "归还 " + borrowNo,
+                List.of(row("借阅码", borrowNo)),
+                Map.of("borrowNo", borrowNo == null ? "" : borrowNo),
+                v -> doReturn(borrowNo));
+    }
+
+    /** 执行已确认的归还申请（授权卡确认后由 {@link AiService} 调用，绕过门禁） */
+    public Map<String, Object> requestReturnConfirmed(String borrowNo) {
+        return doReturn(borrowNo);
+    }
+
+    /** 归还申请的实际业务逻辑（门禁与确认后执行共用） */
+    private Map<String, Object> doReturn(String borrowNo) {
+        Borrow b = ctx.borrowService.returnBook(userId, userType, null, borrowNo);
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("success", true);
+        m.put("borrowNo", b.getBorrowNo());
+        m.put("bookTitle", b.getBookTitle());
+        m.put("status", statusLabel(b.getStatus()));
+        m.put("message", "归还申请已提交，请将图书送至服务台由管理员确认");
+        return m;
     }
 }

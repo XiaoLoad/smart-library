@@ -108,7 +108,12 @@ public class CommonTools extends BaseLibraryTools {
                 m.put("available", b.getAvailableCount() != null && b.getAvailableCount() > 0);
                 items.add(m);
             }
-            return result(filtered.size(), items);
+            Map<String, Object> r = result(filtered.size(), items);
+            // 下一步引导：用户若表达借阅意图，模型此刻应接着调用 applyBorrow，
+            // 而不是查到书就停下自问自答。工具结果是模型可见的信息，用它显式交代下一步。
+            r.put("nextStep", "若用户想借阅其中某本，请立即调用 applyBorrow 并传入该书的 title 与 isbn"
+                    + "（系统会弹出授权卡由用户确认）；若用户只是想了解书目信息，则直接回答即可。");
+            return r;
         });
     }
 

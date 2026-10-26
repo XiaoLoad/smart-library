@@ -47,6 +47,35 @@
                 </div>
               </div>
 
+              <!-- 写操作授权卡（浮动面板为简化版：空间有限，只留标题与操作区） -->
+              <div v-if="m.confirmCard" class="confirm-card" :class="m.confirmCard.state">
+                <div class="confirm-eyebrow">
+                  <el-icon><Lock /></el-icon>
+                  <span>{{ confirmEyebrow(m.confirmCard.state) }}</span>
+                </div>
+                <div class="confirm-title">{{ m.confirmCard.title }}</div>
+                <div v-if="m.confirmCard.state === 'pending'" class="confirm-actions">
+                  <button class="confirm-btn primary" @click="onConfirmWrite(m.confirmCard)">确认办理</button>
+                  <button class="confirm-btn" @click="onCancelWrite(m.confirmCard)">取消</button>
+                </div>
+                <div v-else-if="m.confirmCard.state === 'submitting'" class="confirm-state">
+                  <el-icon class="is-loading"><Loading /></el-icon>
+                  <span>正在办理…</span>
+                </div>
+                <div v-else-if="m.confirmCard.state === 'confirmed'" class="confirm-state ok">
+                  <el-icon><Check /></el-icon>
+                  <span>已确认并执行</span>
+                </div>
+                <div v-else-if="m.confirmCard.state === 'cancelled'" class="confirm-state muted">
+                  <el-icon><Close /></el-icon>
+                  <span>已取消本次操作</span>
+                </div>
+                <div v-else class="confirm-state err">
+                  <el-icon><Warning /></el-icon>
+                  <span>{{ m.confirmCard.error || '授权已失效，请重新发起' }}</span>
+                </div>
+              </div>
+
               <!-- 等待指示 -->
               <div v-if="m.pending && !m.reasoningSegments.length && !m.toolEvents.length && !m.content" class="thinking">
                 <span class="dot"></span><span class="dot"></span><span class="dot"></span>
@@ -86,7 +115,7 @@
  * 挂载后懒初始化（init），流式期间组件被 v-show 隐藏不销毁——后台继续输出。
  */
 import { ref, reactive, nextTick, onBeforeUnmount } from 'vue'
-import { Loading, Check, Close } from '@element-plus/icons-vue'
+import { Loading, Check, Close, Lock, Warning } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import MarkdownIt from 'markdown-it'
 import hljs from 'highlight.js'
@@ -121,6 +150,44 @@ const TOOL_LABELS = {
   adminCounterProcess: '柜台办理业务',
 }
 const toolLabel = (name) => TOOL_LABELS[name] || name
+
+/* —— 写操作授权卡 —— */
+
+// 授权卡眉标文案（与 /ai/chat 页保持一致）
+const CONFIRM_EYEBROWS = {
+  pending: '需要你的授权',
+  submitting: '正在办理',
+  confirmed: '已确认',
+  cancelled: '已取消',
+  expired: '授权失效',
+}
+const confirmEyebrow = (state) => CONFIRM_EYEBROWS[state] || '需要你的授权'
+
+// 确认执行：只回传令牌，参数由服务端保存，客户端无法篡改
+const onConfirmWrite = async (card) => {
+  if (!card || card.state !== 'pending') return
+  card.state = 'submitting'
+  try {
+    const res = await aiApi.confirmWrite(card.token, card.tool)
+    card.state = 'confirmed'
+    card.result = res
+    const tip = res?.message || '操作已完成'
+    if (assistantMsg) {
+      assistantMsg.content = assistantMsg.content ? `${assistantMsg.content}\n\n${tip}` : tip
+      assistantMsg.html = renderMarkdown(assistantMsg.content)
+      scrollToBottom()
+    }
+  } catch (e) {
+    card.state = 'expired'
+    card.error = e?.message || '授权已失效，请重新发起该操作'
+  }
+}
+
+// 用户取消：卡片原地转为静默状态
+const onCancelWrite = (card) => {
+  if (!card || card.state !== 'pending') return
+  card.state = 'cancelled'
+}
 
 const quickPrompts = ['我当前借了哪些书？', '查找哲学类图书', '本月借阅最多的书是什么？', '我有未缴罚款吗？']
 
@@ -237,6 +304,8 @@ const send = async () => {
     _reasonTimer: null,
     _reasonSegOpen: false,
     pending: true,
+    // 写操作授权卡（SSE confirm 事件）
+    confirmCard: null,
     createTime: new Date().toISOString(),
   })
   messages.value.push(assistantMsg)
@@ -357,6 +426,25 @@ const send = async () => {
           }
         } catch { /* 忽略 */ }
         scrollToBottom()
+      } else if (event === 'confirm') {
+        // 写操作授权请求：模型发起写操作被门禁拦截，改为向用户请求授权
+        msg.pending = false
+        try {
+          const info = JSON.parse(data)
+          msg.confirmCard = {
+            token: info.token,
+            tool: info.tool,
+            title: info.title || '写操作授权',
+            rows: Array.isArray(info.rows) ? info.rows : [],
+            ttlSeconds: info.ttlSeconds || 60,
+            state: 'pending',
+            result: null,
+            error: '',
+          }
+          msg.content = msg.content || '请确认上方授权请求后继续。'
+          msg.html = renderMarkdown(msg.content)
+          scrollToBottom()
+        } catch { /* 解析失败不影响对话 */ }
       } else if (event === 'degrade') {
         // 工具循环超限降级：非报错样式，提示已完成部分 + 建议继续追问
         msg.pending = false
@@ -582,6 +670,66 @@ defineExpose({ init, destroy, send, prefill })
 .tool-card.error .tool-icon { color: var(--color-danger, #c0564a); }
 .tool-card.start .tool-icon { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* 写操作授权卡（浮动面板简化版：卡片 + 靛蓝竖条，与工具 pill 形态区分） */
+.confirm-card {
+  margin-bottom: 8px;
+  padding: 10px 12px;
+  border-radius: 4px;
+  border: 1px solid var(--color-border, #e8e3dc);
+  border-left: 3px solid var(--color-primary, #3a5a6b);
+  background: var(--color-bg-elevated, #fff);
+}
+.confirm-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  color: var(--color-primary, #3a5a6b);
+}
+.confirm-title {
+  margin-top: 4px;
+  font-family: var(--font-serif, serif);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text, #2c2825);
+}
+.confirm-actions { margin-top: 10px; display: flex; align-items: center; gap: 8px; }
+.confirm-btn {
+  padding: 5px 14px;
+  border-radius: 4px;
+  border: 1px solid var(--color-border, #e8e3dc);
+  background: var(--color-bg-elevated, #fff);
+  color: var(--color-text-secondary, #6b6560);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 150ms cubic-bezier(0.25, 0.1, 0.25, 1);
+}
+.confirm-btn:hover { border-color: var(--color-border-strong, #d4cdc2); color: var(--color-text, #2c2825); }
+.confirm-btn.primary {
+  background: var(--color-primary, #3a5a6b);
+  border-color: var(--color-primary, #3a5a6b);
+  color: var(--color-text-inverse, #faf8f5);
+}
+.confirm-btn.primary:hover { background: var(--color-primary-hover, #2f4a59); }
+.confirm-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--color-text-secondary, #6b6560);
+}
+.confirm-state.ok { color: var(--color-success, #5d8a6b); }
+.confirm-state.muted { color: var(--color-text-tertiary, #9c958d); }
+.confirm-state.err { color: var(--color-danger, #a85a4a); }
+.confirm-card.confirmed,
+.confirm-card.cancelled,
+.confirm-card.expired { border-left-color: var(--color-border-strong, #d4cdc2); }
+.confirm-card.confirmed .confirm-eyebrow { color: var(--color-success, #5d8a6b); }
+.confirm-card.cancelled .confirm-eyebrow { color: var(--color-text-tertiary, #9c958d); }
+.confirm-card.expired .confirm-eyebrow { color: var(--color-danger, #a85a4a); }
 
 /* 等待指示 */
 .thinking {

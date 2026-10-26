@@ -87,6 +87,8 @@ export const aiApi = {
   messageList: (conversationId, params) => get('/ai/message/list', { conversationId, ...(params || {}) }),
   createConversation: () => post('/ai/conversation/create'),
   deleteConversation: (id) => service.delete(`/ai/conversation/${id}`),
+  // 确认执行写操作：只传令牌，参数由服务端保存，客户端无法篡改
+  confirmWrite: (token, tool) => post('/ai/confirm', { token, tool }),
 }
 
 // 知识库（RAG，仅管理员）

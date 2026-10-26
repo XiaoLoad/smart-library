@@ -99,6 +99,7 @@ public class AiService {
     @Autowired private CacheManager cacheManager;
     @Autowired private LibraryConfigService libraryConfigService;
     @Autowired private RagIndexService ragIndexService;
+    @Autowired private AiConfirmService aiConfirmService;
 
     /** 缓存最近构建的流式模型，配置未变时复用，避免重复创建 OkHttpClient */
     private volatile OpenAiStreamingChatModel cachedModel;
@@ -124,6 +125,8 @@ public class AiService {
                  即使刚刚查询过，执行取书/归还/归还确认/续借/罚款缴纳/增删改时仍必须重新调用对应工具；
                - 未调用写操作工具并拿到返回前，禁止说出"办理成功""已归还""已缴纳""已取消"等结果性表述；
                - 未调用查询工具前，禁止报出任何数量、状态或明细（数据随时变化，必须现查）。
+               - 写工具返回 awaitingConfirm=true 时，说明授权卡已弹出、正在等待用户点击，
+                 此时不要重复调用该写工具（会重复弹卡），应结束本轮回复并告知用户确认。
                理由：AI 曾凭上下文脑补"归还成功"造成虚假承诺，数据时效与真实性只能由工具调用保证。
 
             3. 工具数据完整呈现：工具返回的字段必须完整呈现给用户，禁止阉割。
@@ -148,15 +151,29 @@ public class AiService {
             5. 空结果如实告知：工具返回空结果时如实说明"未查询到相关记录"，禁止编造。
                理由：防幻觉，保证回答可信。
 
-            6. 写操作强制确认：applyBorrow（借阅申请）、renewMyBorrow（续借）、requestReturn（归还申请）、
-               adminCounterProcess（柜台办理）等会改变业务数据的工具，调用前必须先向用户复述关键信息
-               （书名、借阅码、办理动作）并得到用户明确确认（如"确认""是的""办理吧"）；
-               参数（书名、ISBN、借阅码）必须来自工具查询结果或用户明确给出，禁止凭猜测填写；用户未确认时禁止调用。
-               applyBorrow 必须传用户确认的书名；queryBooks 结果里带了 isbn 就一并传入——ISBN 唯一，
-               是唯一能确定"借出的就是这一本"的凭据，只凭书名会有同名多版本借错的风险。
-               若 applyBorrow 返回 candidates 候选清单（书名命中多本），必须把候选念给用户选定后再以选定书名办理，
-               禁止自行挑选；办理成功后必须把返回的 bookTitle 复述给用户核对。
-               理由：写操作直接影响库存与借阅状态，误调用代价高；曾发生只传图书ID导致确认《围城》却借出《理想国》的事故。
+            6. 写操作由系统授权卡把关：applyBorrow（借阅申请）、renewMyBorrow（续借）、requestReturn（归还申请）、
+               adminCounterProcess（柜台办理）等会改变业务数据的工具，请直接调用它们——
+               系统会在执行前拦截并弹出授权卡，由用户点击确认后才真正执行，你无需自行向用户索要确认。
+               你的职责是：
+               - 调用前把关键信息（书名、ISBN、借阅码）复述给用户，让用户知道要确认什么；
+               - 参数必须来自工具查询结果或用户明确给出，禁止凭猜测填写；
+               - 工具返回 awaitingConfirm=true 表示授权卡已弹出、正在等待用户点击，
+                 此时你应停止后续操作并结束本轮回复，简单告知用户「已发起，请确认」；
+               - 用户未在授权卡上确认前，禁止说出"办理成功""已归还""已缴纳""已取消"等结果性表述；
+               - applyBorrow 必须传用户确认的书名；queryBooks 结果里带了 isbn 就一并传入——ISBN 唯一，
+                 是唯一能确定"借出的就是这一本"的凭据，只凭书名会有同名多版本借错的风险。
+               - 若 applyBorrow 返回 candidates 候选清单（书名命中多本），必须把候选念给用户选定后再以选定书名办理，
+                 禁止自行挑选；办理成功后必须把返回的 bookTitle 复述给用户核对。
+               理由：写操作由代码级门禁强制拦截，模型无权绕过；授权卡是用户唯一能看到参数并出决策的入口，
+               模型提前宣称结果会造成「界面显示未办理、模型却说已办理」的虚假承诺。
+               注：不要因为「还没拿到用户确认」就不调用写工具——直接调用即可，拦截与确认由系统完成。
+
+            6b. 写操作必须真的调用工具，不得只用语言答复：用户表达借阅/续借/归还意图时，
+                必须实际调用对应写工具（applyBorrow / renewMyBorrow / requestReturn），
+                不要只回答「好的，我来帮你借阅」就结束，也不要只查书就停下。
+                正确流程是：先 queryBooks 拿到书名与 ISBN，再调用 applyBorrow 提交申请，
+                系统会自动弹出授权卡，由用户在卡片上点击确认。
+                例外：仅当工具返回明确的业务错误（如额度已满、该书不可借、找不到书目）时才停下并转告用户。
 
             7. 业务错误如实转告：工具返回权限或业务错误（如"借阅额度已满""该记录非待取书状态""续借次数已用完"）时，
                把错误原话转告用户并给出可行建议，不得假装操作成功。
@@ -363,6 +380,28 @@ public class AiService {
         commonTools.setEventEmitter(emitterCb);
         roleTools.setEventEmitter(emitterCb);
 
+        // 写操作授权回调：写工具被门禁拦截时（不执行），改为向用户发起授权请求。
+        // 令牌在服务端登记，客户端只拿到不透明 token，确认时回传 token 而非参数——参数无法被篡改。
+        BaseLibraryTools.ConfirmRequestHandler confirmCb = (toolName, title, rows, args) -> {
+            try {
+                String token = aiConfirmService.issue(cu.getUserId(), conversationId, toolName, args, title, rows);
+                Map<String, Object> payload = new java.util.LinkedHashMap<>();
+                payload.put("token", token);
+                payload.put("tool", toolName);
+                payload.put("title", title);
+                payload.put("rows", rows == null ? List.of() : rows);
+                payload.put("ttlSeconds", 60);
+                emitter.send(SseEmitter.event().name("confirm")
+                        .data(objectMapper.writeValueAsString(payload)));
+            } catch (IOException e) {
+                // 客户端已断开，忽略
+            } catch (Exception e) {
+                log.warn("[AI] 授权请求推送失败 tool={}: {}", toolName, e.getMessage());
+            }
+        };
+        commonTools.setConfirmHandler(confirmCb);
+        roleTools.setConfirmHandler(confirmCb);
+
         try {
             // RAG：知识库启用且索引就绪时挂载检索增强；retriever 每请求构造以携带当前用户的可见范围
             RetrievalAugmentor augmentor = buildAugmentor(admin);
@@ -514,6 +553,83 @@ public class AiService {
     }
 
     // 内部方法
+
+    /**
+     * 执行用户已确认的写操作（授权卡「确认办理」按钮的回调入口）。
+     * <p>
+     * 流程：消费令牌（一次性、校验过期/用户/摘要）→ 按令牌中保存的原始参数执行工具
+     * → 把工具真实结果回填给模型，由模型基于真实返回生成最终回答。
+     * <p>
+     * 关键安全点：<b>客户端只回传令牌，不回传参数</b>。参数始终取自服务端保存的副本，
+     * 因此不存在「用户改一下参数就借了别的书」的可能。
+     *
+     * @param token    授权令牌
+     * @param userId   当前登录用户
+     * @param toolName 待执行的工具名
+     * @return 工具执行结果；令牌无效时抛出业务异常（前端提示原因）
+     */
+    public Map<String, Object> confirmWrite(String token, Long userId, String toolName) {
+        AiConfirmService.PendingConfirm pc = aiConfirmService.consume(token, userId, toolName);
+        if (pc == null) {
+            throw new BusinessException(400, "授权已失效或已被处理，请重新发起该操作");
+        }
+        // 按令牌中保存的原始参数执行，忽略任何外部传入的参数
+        Map<String, Object> args = pc.args();
+        Object result = switch (pc.toolName()) {
+            case "applyBorrow" -> applyBorrowConfirmed(userId, args);
+            case "renewMyBorrow" -> renewConfirmed(userId, args);
+            case "requestReturn" -> returnConfirmed(userId, args);
+            case "adminCounterProcess" -> counterConfirmed(userId, args);
+            default -> throw new BusinessException(400, "不支持的授权操作：" + pc.toolName());
+        };
+        @SuppressWarnings("unchecked")
+        Map<String, Object> map = (Map<String, Object>) result;
+        return map;
+    }
+
+    /** 执行已确认的借阅申请（复用 ReaderTools 的实际办理逻辑） */
+    private Object applyBorrowConfirmed(Long userId, Map<String, Object> args) {
+        AiToolContext toolCtx = buildToolContext();
+        ReaderTools tools = new ReaderTools(userId, currentUserType(), toolCtx);
+        String title = str(args.get("bookTitle"), "");
+        String isbn = str(args.get("isbn"), "");
+        return tools.applyBorrowConfirmed(title, isbn.isBlank() ? null : isbn);
+    }
+
+    /** 执行已确认的续借 */
+    private Object renewConfirmed(Long userId, Map<String, Object> args) {
+        AiToolContext toolCtx = buildToolContext();
+        ReaderTools tools = new ReaderTools(userId, currentUserType(), toolCtx);
+        return tools.renewMyBorrowConfirmed(str(args.get("borrowNo"), ""));
+    }
+
+    /** 执行已确认的归还申请 */
+    private Object returnConfirmed(Long userId, Map<String, Object> args) {
+        AiToolContext toolCtx = buildToolContext();
+        ReaderTools tools = new ReaderTools(userId, currentUserType(), toolCtx);
+        return tools.requestReturnConfirmed(str(args.get("borrowNo"), ""));
+    }
+
+    /** 执行已确认的柜台办理 */
+    private Object counterConfirmed(Long userId, Map<String, Object> args) {
+        AiToolContext toolCtx = buildToolContext();
+        AdminTools tools = new AdminTools(userId, currentUserType(), toolCtx);
+        return tools.adminCounterProcessConfirmed(str(args.get("borrowNo"), ""));
+    }
+
+    /** 构造工具依赖上下文 */
+    private AiToolContext buildToolContext() {
+        return new AiToolContext(
+                borrowMapper, bookMapper, fineMapper, announcementMapper,
+                borrowLimitMapper, userMapper, categoryMapper, notificationMapper,
+                categoryService, borrowService, statsService, objectMapper);
+    }
+
+    /** 当前登录用户的类型（3=管理员） */
+    private Integer currentUserType() {
+        CurrentUser cu = CurrentUser.get();
+        return cu == null ? null : cu.getUserType();
+    }
 
     /**
      * 判断异常是否为「工具循环超限」。
