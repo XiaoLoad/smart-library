@@ -1,6 +1,8 @@
 package com.library.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.nio.charset.StandardCharsets;
@@ -27,6 +29,8 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 @Service
 public class AiConfirmService {
+
+    private static final Logger log = LoggerFactory.getLogger(AiConfirmService.class);
 
     /** 令牌有效期（秒）：超过即失效，需用户重新发起 */
     private static final long TOKEN_TTL_SECONDS = 60L;
@@ -79,9 +83,16 @@ public class AiConfirmService {
                         List<Map<String, String>> rows) {
         purgeExpired();
         String token = TOKEN_PREFIX + randomToken();
-        String digest = digest(args);
+        // 先固化参数副本，再对副本算摘要：
+        // Map.copyOf 的迭代顺序与原 Map 可能不同，若摘要基于原 Map 计算、
+        // 校验时基于副本计算，JSON 序列化结果会不一致，导致合法确认被误判为篡改。
+        // 这里用 TreeMap 做规范化排序，保证「同一组参数」在任何时候序列化结果一致。
+        Map<String, Object> frozen = args == null
+                ? Map.of()
+                : new java.util.TreeMap<>(args);
+        String digest = digest(frozen);
         pending.put(token, new PendingConfirm(token, userId, conversationId, toolName,
-                args == null ? Map.of() : Map.copyOf(args), digest, title, rows,
+                frozen, digest, title, rows,
                 System.currentTimeMillis()));
         return token;
     }
@@ -106,28 +117,32 @@ public class AiConfirmService {
         }
         PendingConfirm pc = pending.get(token);
         if (pc == null) {
+            log.warn("[confirm] 令牌不存在: {}", token);
             return null;
         }
         // 过期：直接清除（无价值了）
         if (isExpired(pc.createdAt())) {
+            log.warn("[confirm] 令牌已过期: {}", token);
             pending.remove(token);
             return null;
         }
         // 用户身份不匹配：拒绝但不消费，让 rightful 用户仍能确认
         if (pc.userId() == null || !pc.userId().equals(userId)) {
+            log.warn("[confirm] 用户不匹配: tokenUser={} curUser={}", pc.userId(), userId);
             return null;
         }
         // 工具名不匹配：拒绝但不消费（可能是前端传错工具名，不应让 rightful 用户丢失授权）
         if (expectedTool != null && !expectedTool.equals(pc.toolName())) {
+            log.warn("[confirm] 工具不匹配: expected={} actual={}", expectedTool, pc.toolName());
+            return null;
+        }
+        // 参数摘要二次校验：防止存储侧数据被意外篡改
+        if (!pc.argsDigest().equals(digest(pc.args()))) {
+            log.warn("[confirm] 参数摘要不匹配，疑似存储被篡改");
             return null;
         }
         // 走到这里说明本次消费合法，移除令牌实现一次性语义
         pending.remove(token);
-
-        // 参数摘要二次校验：防止存储侧数据被意外篡改
-        if (!pc.argsDigest().equals(digest(pc.args()))) {
-            return null;
-        }
         return pc;
     }
 
