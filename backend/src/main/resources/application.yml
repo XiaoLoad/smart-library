@@ -10,9 +10,9 @@ server:
 spring:
   datasource:
     # createDatabaseIfNotExist：库不存在时自动建库（字符集跟随连接，仍建议服务端默认 utf8mb4）
-    url: jdbc:mysql://localhost:3306/library_db?useUnicode=true&characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&zeroDateTimeBehavior=CONVERT_TO_NULL&createDatabaseIfNotExist=true
-    username: root
-    password: REPLACE_WITH_YOUR_DB_PASSWORD
+    url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/library_db?useUnicode=true&characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&zeroDateTimeBehavior=CONVERT_TO_NULL&createDatabaseIfNotExist=true
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD}        # 机密项：缺失即启动失败，真实值通过环境变量 / application-local.yml 注入
     driver-class-name: com.mysql.cj.jdbc.Driver
 
   # 本地默认激活 dev profile（见 application-dev.yml，恢复 mapper SQL 调试日志）
@@ -49,13 +49,13 @@ app:
 
 # 自定义 JWT 配置
 jwt:
-  secret: REPLACE_WITH_YOUR_JWT_SECRET
-  expire-ms: 604800000
+  secret: ${JWT_SECRET}            # 机密项：HS256 要求 ≥32 字节随机串，缺失即启动失败
+  expire-ms: ${JWT_EXPIRE_MS:86400000}   # 默认 24 小时
 
 # 微信小程序登录（code2session）
 wechat:
-  appid: touristappid        # ← 替换为小程序 AppID
-  secret: REPLACE_WITH_YOUR_WECHAT_SECRET  # ← 小程序后台获取，生产建议用环境变量注入
+  appid: ${WECHAT_APPID}           # 机密项：小程序 AppID
+  secret: ${WECHAT_SECRET}         # 机密项：小程序后台获取，生产建议用环境变量注入
 
 logging:
   level:
