@@ -63,11 +63,13 @@ public class AiService {
     /** 单会话保留的最大历史消息条数（窗口记忆） */
     private static final int MAX_MEMORY_MESSAGES = 40;
     /** SSE 超时时间（毫秒） */
-    private static final long SSE_TIMEOUT_MS = 180_000L;
+    private static final long SSE_TIMEOUT_MS = 300_000L;
     /** 首条消息生成标题的最大字符数 */
     private static final int TITLE_MAX_LEN = 20;
     /** 模型调用超时（秒），避免长时间无响应卡死 SSE */
-    private static final long MODEL_TIMEOUT_SECONDS = 60L;
+    // 模型流式调用总时长上限（OkHttp call timeout 覆盖整个流式过程，含深度思考阶段；
+    // 60s 会在思考型模型长回复中途掐断流导致末尾断字，故放宽至 5 分钟，与 SSE 容器超时对齐）
+    private static final long MODEL_TIMEOUT_SECONDS = 300L;
     /** RAG 来源回传给前端的单个片段摘要最大字符数 */
     private static final int RAG_SNIPPET_MAX_LEN = 120;
 
@@ -169,6 +171,12 @@ public class AiService {
                 资料中的数量、状态类数字（在馆数、可借数、当前罚款金额等）只是录入时的快照，
                 一律不得当作实时数据播报，此类问题必须按规则 2 调用工具现查。
                 理由：制度性内容最容易被模型用通用常识替代，来源标注才能追溯；资料是静态文本，当实时数据用会答错。
+
+            11. 推荐/找书类请求必须调用工具：当用户请求「推荐书籍」「有什么好书」「帮我找书」「大家都在看什么」
+                「最近借得最多的书」「热门/畅销的书」等需要给出具体图书的请求时，必须调用查询工具获取真实馆藏数据
+                （无明确主题偏好时调 queryHotBooks 取热门排行；有明确分类/主题时先 queryCategories 再 queryBooks），
+                禁止凭空编造书单、禁止照搬通用书店畅销榜或训练数据里的书名。
+                理由：推荐也属于馆藏事实查询，只有工具返回的数据才能驱动前端「AI 检索结果」视图与真实库存展示。
             """;
 
     /**
@@ -179,7 +187,7 @@ public class AiService {
         TokenStream chat(String userMessage);
     }
 
-    // ===== 会话管理 =====
+    // 会话管理
 
     /**
      * 创建新会话。标题暂为「新对话」，首条消息后自动更新。
@@ -214,7 +222,7 @@ public class AiService {
         evictMemory(id);
     }
 
-    // ===== 流式对话 =====
+    // 流式对话
 
     /**
      * 流式对话：返回 SseEmitter。
@@ -298,11 +306,16 @@ public class AiService {
 
         SseEmitter emitter = new SseEmitter(SSE_TIMEOUT_MS);
 
+        // <think> 标签兜底过滤器：部分本地模型/中转网关不返回 reasoning_content 字段，
+        // 而是把思维链以 <think>...</think> 包裹在正文流中输出。此过滤器把标签内
+        // 内容改道为 thinking 事件（与字段路径归一），正文只保留最终回答。
+        ThinkTagStreamFilter thinkFilter = new ThinkTagStreamFilter(emitter);
+
         // 本次回复实际执行完成的工具调用（按顺序记录工具名），随助手消息落库为摘要
         java.util.List<String> toolCalls = new java.util.concurrent.CopyOnWriteArrayList<>();
 
         // 工具事件发射器：将工具调用过程通过 SSE 推送给前端
-        // P2.10 结构化输出：end 阶段携带 data 字段（工具返回的精简 JSON 快照）
+        // 结构化输出：end 阶段携带 data 字段（工具返回的精简 JSON 快照）
         BaseLibraryTools.ToolEventEmitter emitterCb = (toolName, phase, detail, data) -> {
             try {
                 // 工具开始执行标志着一轮工具调用开始：此前流式输出的文本都是
@@ -366,12 +379,26 @@ public class AiService {
                     })
                     .onPartialResponse(partial -> {
                         try {
-                            emitter.send(SseEmitter.event().name("delta").data(partial));
+                            // 经 <think> 标签过滤器分流：标签内 → thinking 事件，标签外 → delta
+                            String routed = thinkFilter.feed(partial);
+                            if (routed != null && !routed.isEmpty()) {
+                                emitter.send(SseEmitter.event().name("delta").data(routed));
+                            }
                         } catch (IOException e) {
                             // 客户端已断开，忽略
                         }
                     })
                     .onCompleteResponse(response -> {
+                        // 冲刷 <think> 过滤器缓冲：pending 中滞留的末尾正文增量补发为 delta，
+                        // 否则回答结尾会缺字（残片滞留缓冲从未被发出）
+                        try {
+                            String tail = thinkFilter.flush();
+                            if (tail != null && !tail.isEmpty()) {
+                                emitter.send(SseEmitter.event().name("delta").data(tail));
+                            }
+                        } catch (IOException ignored) {
+                            // 客户端已断开
+                        }
                         // 落库最终 AI 回答：取最终一轮模型响应的文本（不含工具轮过渡语），
                         // 并剔除模型误输出到正文的工具调用代码块/函数调用片段
                         AiMessage finalAi = response.aiMessage();
@@ -455,7 +482,7 @@ public class AiService {
         return emitter;
     }
 
-    // ===== 内部方法 =====
+    // 内部方法
 
     /**
      * 构造 RAG 检索增强器；知识库关闭或索引未就绪时返回 null（调用方跳过挂载，行为与接入前一致）。
@@ -553,6 +580,14 @@ public class AiService {
     private static final java.util.regex.Pattern STANDALONE_CALL =
             java.util.regex.Pattern.compile("^\\s*([a-zA-Z_]\\w*)\\s*\\(.*\\)\\s*;?\\s*$");
 
+    /** 思维链标签（部分本地模型/网关把思维链以 <think> 包裹输出在正文流中），兼容常见变体 */
+    private static final java.util.regex.Pattern THINK_OPEN_TAG =
+            java.util.regex.Pattern.compile("<(think|thinking|reason|reasoning|thought)>");
+
+    /** 完整的 <tag>...</tag> 思维链段（含空白），用于落库前的正文消毒 */
+    private static final java.util.regex.Pattern THINK_BLOCK =
+            java.util.regex.Pattern.compile("(?s)<(?:think|thinking|reason|reasoning|thought)>[\\s\\S]*?</(?:think|thinking|reason|reasoning|thought)>\\s*");
+
     /**
      * 剔除模型误输出到回答正文中的工具调用痕迹：
      * <ol>
@@ -567,6 +602,8 @@ public class AiService {
             return text;
         }
         String s = text;
+        // 0. 完整思维链标签段（<think>...</think> 等）：兜底剔除未流式截获的残留
+        s = THINK_BLOCK.matcher(s).replaceAll("");
         // 1. 特殊函数调用标记
         s = s.replaceAll("(?s)<\\|?FunctionCallBegin\\|?>.*?<\\|?FunctionCallEnd\\|?>", "");
         s = s.replaceAll("(?s)</?tool_call>", "");
@@ -634,7 +671,7 @@ public class AiService {
         return CORE_RULES + "\n\n" + roleLine + "\n\n" + customizable;
     }
 
-    // ===== 对话记忆缓存 =====
+    // 对话记忆缓存
 
     private static final String MEMORY_CACHE_NAME = "chatMemory";
 
@@ -762,7 +799,7 @@ public class AiService {
         return o == null || o.toString().isBlank() ? def : o.toString();
     }
 
-    // ===== 模型列表动态拉取 =====
+    // 模型列表动态拉取
 
     /**
      * 从 AI 服务商 API 动态拉取可用模型列表。
@@ -863,4 +900,124 @@ public class AiService {
             default -> null;
         };
     }
+
+    /**
+     * 正文流中的思维链标签过滤器（有状态，单次回复生命周期）。
+     * 流式增量可能把 "<think>"、"</think>" 拆在任意两个分片里，因此跨分片缓冲：
+     * 常态直通；遇到可能是标签开头的尾部残片时暂存，等下一分片拼接后判定；
+     * 进入标签后把内容作为 thinking 事件发出，直到遇到闭合标签。
+     */
+    private static class ThinkTagStreamFilter {
+        private final org.springframework.web.servlet.mvc.method.annotation.SseEmitter emitter;
+        /** true = 当前处于标签内（思维链），false = 正文直通 */
+        private boolean inThink = false;
+        /** 跨分片缓冲：可能是未完标签开头的尾部字符 */
+        private String pending = "";
+
+        ThinkTagStreamFilter(org.springframework.web.servlet.mvc.method.annotation.SseEmitter emitter) {
+            this.emitter = emitter;
+        }
+
+        /** 喂入一个正文增量，返回应作为正文（delta）发出的部分；思维链部分直接以 thinking 事件转发 */
+        String feed(String chunk) {
+            if (chunk == null || chunk.isEmpty()) {
+                return "";
+            }
+            StringBuilder out = new StringBuilder();
+            String buf = pending + chunk;
+            pending = "";
+            int i = 0;
+            while (i < buf.length()) {
+                if (inThink) {
+                    int close = findTag(buf, i, true);
+                    if (close >= 0) {
+                        emitThinking(buf.substring(i, close));
+                        i = close + endTagLen(buf, close);
+                        inThink = false;
+                    } else {
+                        // 标签未闭合：尾部可能是 "</thi" 残片，留待下个分片
+                        int hold = holdbackLen(buf, i, true);
+                        int emitUpTo = Math.max(i, buf.length() - hold);
+                        if (emitUpTo > i) {
+                            emitThinking(buf.substring(i, emitUpTo));
+                        }
+                        pending = buf.substring(emitUpTo);
+                        i = buf.length();
+                    }
+                } else {
+                    int open = findTag(buf, i, false);
+                    if (open >= 0) {
+                        out.append(buf, i, open);
+                        i = open + openTagLen(buf, open);
+                        inThink = true;
+                    } else {
+                        // 尾部可能是 "<thi" 残片，留待下个分片判定
+                        int hold = holdbackLen(buf, i, false);
+                        int emitUpTo = Math.max(i, buf.length() - hold);
+                        out.append(buf, i, emitUpTo);
+                        pending = buf.substring(emitUpTo);
+                        i = buf.length();
+                    }
+                }
+            }
+            return out.toString();
+        }
+
+        /**
+         * 流结束时冲刷缓冲：把 pending 中残留的正文增量返回（此时不可能再有标签开头，
+         * 残片是普通文本），或标签内残留以 thinking 事件发出。必须在 onCompleteResponse 调用，
+         * 否则末尾 1~4 个字符会滞留在缓冲中丢失。
+         */
+        String flush() {
+            if (pending.isEmpty()) {
+                return "";
+            }
+            String rest = pending;
+            pending = "";
+            if (inThink) {
+                emitThinking(rest);
+                return "";
+            }
+            return rest;
+        }
+
+        /** 从 from 开始查找下一个思维链开/闭标签，返回下标或 -1（跳过 pending 逻辑由调用方保证 buf 完整性） */
+        private int findTag(String s, int from, boolean closing) {
+            java.util.regex.Matcher m = (closing ? THINK_CLOSE_TAG : THINK_OPEN_TAG)
+                    .matcher(s).region(from, s.length());
+            return m.find() ? m.start() : -1;
+        }
+
+        private int openTagLen(String s, int at) {
+            java.util.regex.Matcher m = THINK_OPEN_TAG.matcher(s).region(at, s.length());
+            return m.find() && m.start() == at ? m.group().length() : 0;
+        }
+
+        private int endTagLen(String s, int at) {
+            java.util.regex.Matcher m = THINK_CLOSE_TAG.matcher(s).region(at, s.length());
+            return m.find() && m.start() == at ? m.group().length() : 0;
+        }
+
+        /** 需要暂存等待下一分片的最大尾部长度（"<think".length() 与 "</think>".length() 取最大） */
+        private int holdbackLen(String s, int from, boolean closing) {
+            int maxTag = closing ? "</thinking>".length() : "<thinking>".length();
+            return Math.min(maxTag - 1, s.length() - from);
+        }
+
+        private void emitThinking(String text) {
+            if (text == null || text.isEmpty()) {
+                return;
+            }
+            try {
+                emitter.send(org.springframework.web.servlet.mvc.method.annotation.SseEmitter
+                        .event().name("thinking").data(text));
+            } catch (java.io.IOException ignored) {
+                // 客户端已断开
+            }
+        }
+    }
+
+    /** 思维链闭合标签 */
+    private static final java.util.regex.Pattern THINK_CLOSE_TAG =
+            java.util.regex.Pattern.compile("</(?:think|thinking|reason|reasoning|thought)>");
 }

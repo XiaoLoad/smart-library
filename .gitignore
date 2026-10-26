@@ -1,4 +1,4 @@
-# ===== IDE =====
+# IDE
 .idea/
 *.iml
 .vscode/
@@ -8,21 +8,24 @@
 *.sln
 *.sw?
 
-# ==== 论文 ====
+# 论文
 /论文
 
-# ==== workBuddy ===
+# 比赛资料
+/比赛资料/
+
+# workBuddy
 /.workbuddy
 
-# ==== zip ====
+# zip
 *.zip
 
-# ===== OS =====
+# OS
 .DS_Store
 Thumbs.db
 desktop.ini
 
-# ===== Java / Maven 后端 =====
+# Java / Maven 后端
 backend/target/
 # 运行时生成的外部 AI 人设文件（前端在线编辑写出；出厂默认在 src/main/resources/prompts/）
 backend/prompts/
@@ -33,46 +36,46 @@ backend/prompts/
 hs_err_pid*.log
 replay_pid*.log
 
-# ===== 前端 =====
+# 前端
 frontend/node_modules/
 frontend/dist/
 frontend/dist-ssr/
 frontend/*.local
 
-# ===== 日志 =====
+# 日志
 *.log
 logs/
 npm-debug.log*
 yarn-debug.log*
 pnpm-debug.log*
 
-# ===== 环境配置 / 敏感信息 =====
+# 环境配置 / 敏感信息
 .env
 .env.local
 .env.*.local
 application-local.yml
 application-local.properties
 
-# ===== Trae / 工具临时文件 =====
+# Trae / 工具临时文件
 .trae/
 fix_system_path.ps1
 
-# ===== Python =====
+# Python
 __pycache__/
 *.pyc
 
-# ===== 爬虫（私有，不开源） =====
+# 爬虫（私有，不开源）
 spider/
 
-# ===== 运行时上传数据（封面等，由爬虫/用户上传生成，非源码） =====
+# 运行时上传数据（封面等，由爬虫/用户上传生成，非源码）
 backend/uploads/
 
-# ===== 前端 =====
+# 前端
 # 包管理器统一用 pnpm，屏蔽其他锁文件
 frontend/yarn.lock
 frontend/package-lock.json
 
-# ===== 微信小程序 =====
+# 微信小程序
 # 代码上传密钥（miniprogram-ci 用），属私钥，绝不入库
 .wx-upload-key/
 # 开发者工具的个人设置与本地编译产物（miniprogram_npm/ 由「工具 → 构建 npm」再生，不入库）
@@ -82,12 +85,12 @@ miniprogram-reader/miniprogram_npm/
 miniprogram-reader/packageExtra/miniprogram_npm/
 project.private.config.json
 
-# ===== 手工建库脚本镜像 =====
+# 手工建库脚本镜像
 # sql/ 与 backend/src/main/resources/db/ 同构，仅供手改工作区内核账，正式脚本以后者为准
 /sql/
 
 
-# ===== DOC =====
+# DOC
 # 文档与方案不进版本库，仅保留在工作区（docs/、论文/ 等）
 *.md
 # 开源必需的根文档与变更日志例外
@@ -95,3 +98,4 @@ project.private.config.json
 !CONTRIBUTING.md
 !CHANGELOG.md
 !SECURITY.md
+.git.broken/

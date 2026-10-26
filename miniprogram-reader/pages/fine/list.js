@@ -90,7 +90,7 @@ Page({
     return Math.max(0, Math.round(this._winH - this._dockH))
   },
 
-  /* —— 分段（swiper） —— */
+  /* 分段（swiper） */
   onTab(e) {
     const i = TABS.findIndex((t) => t.value === Number(e.currentTarget.dataset.value))
     if (i < 0 || i === this.data.current) return
@@ -103,7 +103,7 @@ Page({
     this.setData({ current: i }, () => this.fitPanes())
   },
 
-  /* —— 列表 —— */
+  /* 列表 */
   async load() {
     this.setData({ loading: true })
     try {

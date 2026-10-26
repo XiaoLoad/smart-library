@@ -90,7 +90,7 @@ public class StatsService {
         Map<String, Object> data = new HashMap<>();
         data.put("stats", buildStats(type, allBooks, allUsers, allBorrows, myBorrows, allFines, myFines));
         data.put("borrowTrend", buildBorrowTrend(type, allBorrows, myBorrows));
-        data.put("hotBooks", buildHotBooks(type, allBorrows, myBorrows, allBooks));
+        data.put("hotBooks", buildHotBooks(allBorrows, allBooks));
         // 注意：categoryDist 是「真实借阅次数」分布（基于借阅记录），不是藏书量
         data.put("categoryDist", buildCategoryDist(type, allBorrows, myBorrows, allBooks, categories));
         // 馆藏口径数据：分类藏书分布（基于图书）+ 馆藏总量汇总
@@ -112,7 +112,7 @@ public class StatsService {
         LocalDateTime monthAgo = now.minusDays(30);
 
         if (type == 3) {
-            // —— 管理员：全馆待办与运营 ——
+            // 管理员：全馆待办与运营
             m.put("pendingPickup", allBorrows.stream().filter(b -> b.getStatus() != null && b.getStatus() == 0).count());
             m.put("pendingReturnConfirm", allBorrows.stream().filter(b -> b.getStatus() != null && b.getStatus() == 5).count());
             m.put("overdue", allBorrows.stream().filter(b -> b.getStatus() != null && b.getStatus() == 3).count());
@@ -132,7 +132,7 @@ public class StatsService {
                     statusSlice("已逾期", allBorrows, 3),
                     statusSlice("待确认归还", allBorrows, 5)));
         } else {
-            // —— 读者：个人待办 ——
+            // 读者：个人待办
             m.put("pendingPickup", myBorrows.stream().filter(b -> b.getStatus() != null && b.getStatus() == 0).count());
             m.put("pendingReturnConfirm", myBorrows.stream().filter(b -> b.getStatus() != null && b.getStatus() == 5).count());
             m.put("overdue", myBorrows.stream().filter(b -> b.getStatus() != null && b.getStatus() == 3).count());
@@ -210,7 +210,7 @@ public class StatsService {
                                                   List<Fine> allFines, List<Fine> myFines) {
         List<Map<String, Object>> stats = new ArrayList<>();
         if (type == 3) {
-            // —— 管理员：全局统计 ——
+            // 管理员：全局统计
             long totalCopies = allBooks.stream()
                     .mapToLong(b -> b.getTotalCount() == null ? 0 : b.getTotalCount()).sum();
             long outside = allBorrows.stream().filter(b -> isOutsideLibrary(b.getStatus())).count();
@@ -229,7 +229,7 @@ public class StatsService {
             stats.add(statItem("fine", "未缴罚款", new java.math.BigDecimal(sumUnpaidFine(allFines)), "元", "Coin",
                     "全馆待缴合计"));
         } else {
-            // —— 教师/学生：个人统计 ——
+            // 教师/学生：个人统计
             long outside = myBorrows.stream().filter(b -> isOutsideLibrary(b.getStatus())).count();
             long overdue = myBorrows.stream().filter(b -> b.getStatus() != null && b.getStatus() == 3).count();
             long borrowed = myBorrows.stream().filter(this::isActuallyBorrowed).count();
@@ -302,8 +302,8 @@ public class StatsService {
      * 构建热门图书（真实借阅次数 Top8）。
      * 仅统计实际取过书的记录（borrowTime 不为空），排除待取书/已取消。
      */
-    private List<Map<String, Object>> buildHotBooks(int type, List<Borrow> allBorrows, List<Borrow> myBorrows, List<Book> allBooks) {
-        List<Borrow> trendBorrows = (type == 3 ? allBorrows : myBorrows).stream()
+    private List<Map<String, Object>> buildHotBooks(List<Borrow> allBorrows, List<Book> allBooks) {
+        List<Borrow> trendBorrows = allBorrows.stream()
                 .filter(this::isActuallyBorrowed)
                 .collect(Collectors.toList());
         Map<Long, Long> bookCount = new HashMap<>();
@@ -321,8 +321,12 @@ public class StatsService {
             Book book = bookMap.get(e.getKey());
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("rank", rank++);
+            m.put("bookId", e.getKey());
             m.put("title", book != null ? book.getTitle() : "未知");
             m.put("author", book != null ? book.getAuthor() : "");
+            m.put("coverUrl", book != null ? book.getCoverUrl() : null);
+            m.put("availableCount", book != null ? book.getAvailableCount() : 0);
+            m.put("totalCount", book != null ? book.getTotalCount() : 0);
             m.put("count", e.getValue());
             result.add(m);
         }

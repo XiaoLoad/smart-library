@@ -329,7 +329,7 @@ const submit = async () => {
 </script>
 
 <style>
-/* ===== 图书新增/编辑弹窗（Editorial · 日式极简） ===== */
+/* 图书新增/编辑弹窗（Editorial · 日式极简） */
 .book-form-dialog {
   border-radius: var(--radius-lg);
   border: 1px solid var(--color-border);
@@ -354,7 +354,7 @@ const submit = async () => {
   border-top: 1px solid var(--color-divider);
 }
 
-/* —— 头部 —— */
+/* 头部 */
 .book-form-dialog .bf-head .eyebrow {
   display: block;
   margin-bottom: 6px;
@@ -373,7 +373,7 @@ const submit = async () => {
   color: var(--color-text-tertiary);
 }
 
-/* —— 主体两栏 —— */
+/* 主体两栏 */
 .book-form-dialog .bf-body {
   display: grid;
   grid-template-columns: 172px minmax(0, 1fr);
@@ -390,7 +390,7 @@ const submit = async () => {
   to { opacity: 1; transform: translateY(0); }
 }
 
-/* —— 封面区 —— */
+/* 封面区 */
 .book-form-dialog .cover-frame {
   position: relative;
   width: 100%;
@@ -459,7 +459,7 @@ const submit = async () => {
   color: var(--color-primary);
 }
 
-/* —— 模式切换 —— */
+/* 模式切换 */
 .book-form-dialog .cover-tabs {
   display: flex;
   gap: 16px;
@@ -485,7 +485,7 @@ const submit = async () => {
   border-bottom-color: var(--color-primary);
 }
 
-/* —— 上传拖拽区 / 链接输入 —— */
+/* 上传拖拽区 / 链接输入 */
 .book-form-dialog .cover-upload .el-upload { width: 100%; }
 .book-form-dialog .cover-upload .el-upload-dragger {
   width: 100%;
@@ -519,7 +519,7 @@ const submit = async () => {
   color: var(--color-text-tertiary);
 }
 
-/* —— 表单 —— */
+/* 表单 */
 .book-form-dialog .bf-form .bf-section {
   display: flex;
   align-items: center;
@@ -561,7 +561,7 @@ const submit = async () => {
   color: var(--color-text-tertiary);
 }
 
-/* —— 底部 —— */
+/* 底部 */
 .book-form-dialog .bf-footer {
   display: flex;
   justify-content: flex-end;

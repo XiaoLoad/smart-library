@@ -1,4 +1,4 @@
-﻿name: Release
+name: Release
 
 on:
   push:
@@ -8,7 +8,7 @@ permissions:
   contents: write
 
 jobs:
-  # ---------- 版本一致性校验：tag == VERSION == pom.xml == frontend/package.json ----------
+  # 版本一致性校验：tag == VERSION == pom.xml == frontend/package.json
   verify-version:
     runs-on: ubuntu-latest
     outputs:
@@ -31,7 +31,7 @@ jobs:
           [ "$TAG" != "$FE_VERSION" ] && { echo "::error::frontend/package.json($FE_VERSION) != tag($TAG)"; MISMATCH=1; }
           exit $MISMATCH
 
-  # ---------- 全量构建三端 ----------
+  # 全量构建三端
   build:
     needs: verify-version
     runs-on: ubuntu-latest
@@ -77,7 +77,7 @@ jobs:
             library-miniprogram-*.zip
             checksums.txt
 
-  # ---------- 生成 CHANGELOG 并创建 GitHub Release ----------
+  # 生成 CHANGELOG 并创建 GitHub Release
   github-release:
     needs: [verify-version, build]
     runs-on: ubuntu-latest

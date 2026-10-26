@@ -21,7 +21,7 @@ public class RagSegment {
     private byte[] embedding;
     private LocalDateTime createTime;
 
-    // ===== 以下为非表字段：检索/加载时由 rag_documents 关联带出，用于拼 TextSegment metadata =====
+    // 以下为非表字段：检索/加载时由 rag_documents 关联带出，用于拼 TextSegment metadata
     private String docTitle;
     private String docScope;
 }

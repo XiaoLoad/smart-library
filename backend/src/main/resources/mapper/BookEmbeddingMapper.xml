@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.library.mapper.BookEmbeddingMapper">
+
+    <resultMap id="map" type="com.library.entity.BookEmbedding">
+        <id property="id" column="id"/>
+        <result property="bookId" column="book_id"/>
+        <result property="content" column="content"/>
+        <result property="createTime" column="create_time"/>
+        <result property="updateTime" column="update_time"/>
+    </resultMap>
+
+    <!-- 加载索引用：含 embedding 与书目展示字段（仅启用状态的图书） -->
+    <resultMap id="mapWithEmbedding" type="com.library.entity.BookEmbedding" extends="map">
+        <result property="embedding" column="embedding"/>
+        <result property="title" column="title"/>
+        <result property="author" column="author"/>
+        <result property="coverUrl" column="cover_url"/>
+        <result property="availableCount" column="available_count"/>
+        <result property="totalCount" column="total_count"/>
+    </resultMap>
+
+    <select id="selectAllWithEmbedding" resultMap="mapWithEmbedding">
+        SELECT e.id, e.book_id, e.content, e.embedding, e.create_time, e.update_time,
+               b.title, b.author, b.cover_url, b.available_count, b.total_count
+        FROM book_embeddings e
+        JOIN books b ON b.id = e.book_id AND b.status = 1
+    </select>
+
+    <select id="selectByBookId" resultMap="mapWithEmbedding">
+        SELECT id, book_id, content, embedding, create_time, update_time
+        FROM book_embeddings
+        WHERE book_id = #{bookId}
+    </select>
+
+    <insert id="insert" parameterType="com.library.entity.BookEmbedding" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO book_embeddings (book_id, content, embedding, create_time, update_time)
+        VALUES (#{bookId}, #{content}, #{embedding}, NOW(), NOW())
+    </insert>
+
+    <update id="updateByBookId" parameterType="com.library.entity.BookEmbedding">
+        UPDATE book_embeddings
+        SET content = #{content}, embedding = #{embedding}, update_time = NOW()
+        WHERE book_id = #{bookId}
+    </update>
+
+    <delete id="deleteByBookId">
+        DELETE FROM book_embeddings WHERE book_id = #{bookId}
+    </delete>
+
+    <delete id="deleteAll">
+        DELETE FROM book_embeddings
+    </delete>
+
+    <select id="count" resultType="int">
+        SELECT COUNT(*) FROM book_embeddings
+    </select>
+
+</mapper>

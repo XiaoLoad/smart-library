@@ -183,7 +183,7 @@ const categories = ref([])
 const filter = ref('')
 const pulseId = ref(null)
 
-/* ---------- 分类搜索：过滤树 + 命中路径 + 定位 ---------- */
+/* 分类搜索：过滤树 + 命中路径 + 定位 */
 const normalized = (s) => (s || '').toString().toLowerCase()
 
 // 递归过滤：保留命中节点及其完整祖先链
@@ -269,7 +269,7 @@ const locateNode = (item) => {
   }, 1600)
 }
 
-/* ---------- 分类启用状态切换 ---------- */
+/* 分类启用状态切换 */
 // 统计子孙分类数量（含自身），用于禁用前的级联提示
 const countDescendants = (targetId) => {
   let count = 0
@@ -440,7 +440,7 @@ onMounted(load)
 </script>
 
 <style scoped>
-/* ===== 布局：与馆藏图书页（book/list.vue）同款的表格内滚模式 =====
+/* 布局：与馆藏图书页（book/list.vue）同款的表格内滚模式
    表格 max-height=calc(100vh - 290px)：分类多时表格内部滚动，
    搜索框、展开/收起工具、新增按钮固定在表格上方始终可用。 */
 

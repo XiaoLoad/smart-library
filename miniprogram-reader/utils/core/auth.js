@@ -1,4 +1,4 @@
-/* ===== 登录态存取 ===== */
+/* 登录态存取 */
 const TOKEN_KEY = 'library_token'
 const USER_KEY = 'library_user'
 const REMEMBER_KEY = 'library_remember_user'

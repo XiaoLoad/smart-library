@@ -1,4 +1,4 @@
-/* ===== 登录页 · 素笺扉页（Editorial 扉页式排版） =====
+/* 登录页 · 素笺扉页（Editorial 扉页式排版）
  * 暖纸底 + 巨型水印「書」+ 编号下划线输入；
  * 落款沿用 AI 空态的 EX LIBRIS 母题（✦ 用 --secondary 松绿）。
  */
@@ -10,7 +10,7 @@
   overflow: hidden; /* 裁切水印出血 */
 }
 
-/* —— 水印「書」 —— */
+/* 水印「書」 */
 .mark {
   position: absolute;
   top: -90rpx;
@@ -25,7 +25,7 @@
 
 .content { position: relative; z-index: 1; }
 
-/* —— 扉页刊头 —— */
+/* 扉页刊头 */
 .masthead { margin-top: 20rpx; }
 .mast-row { display: flex; align-items: center; gap: 20rpx; }
 .seal {
@@ -48,7 +48,7 @@
 }
 .hl-line { display: block; }
 
-/* —— 细线 + 元信息 —— */
+/* 细线 + 元信息 */
 .rule { height: 1rpx; background: var(--border-strong); margin-top: 32rpx; }
 .meta-row {
   display: flex;
@@ -57,7 +57,7 @@
 }
 .meta { font-size: 22rpx; letter-spacing: 4rpx; color: var(--text-3); }
 
-/* —— 编号下划线式表单 —— */
+/* 编号下划线式表单 */
 .field { margin-top: 40rpx; }
 .field-label {
   font-size: 22rpx;
@@ -79,7 +79,7 @@
 }
 .ph { color: var(--text-3); opacity: 0.7; }
 
-/* —— 记住账号 —— */
+/* 记住账号 */
 .remember-row { margin-top: 36rpx; }
 .remember { gap: 14rpx; }
 .check-box {
@@ -93,7 +93,7 @@
 }
 .check-box.checked { background: var(--primary); border-color: var(--primary); }
 
-/* —— 登录按钮 —— */
+/* 登录按钮 */
 .login-btn {
   margin-top: 36rpx;
   height: 92rpx;
@@ -102,7 +102,7 @@
   text-indent: 12rpx; /* 抵消末字字距，视觉居中 */
 }
 
-/* —— 或 · 分割 —— */
+/* 或 · 分割 */
 .or-row {
   display: flex;
   align-items: center;
@@ -112,7 +112,7 @@
 .or-line { flex: 1; height: 1rpx; background: var(--border); }
 .or-txt { font-size: 22rpx; letter-spacing: 4rpx; text-indent: 4rpx; color: var(--text-3); }
 
-/* —— 微信一键登录 · 无框文字按钮 —— */
+/* 微信一键登录 · 无框文字按钮 */
 .btn-wx {
   display: flex;
   align-items: center;
@@ -131,7 +131,7 @@
 
 .tip { text-align: center; margin-top: 8rpx; letter-spacing: 1rpx; }
 
-/* —— 落款 —— */
+/* 落款 */
 .foot-row {
   display: flex;
   align-items: center;
@@ -142,7 +142,7 @@
 .foot-star { font-size: 22rpx; color: var(--secondary); }
 .foot-txt { font-size: 22rpx; letter-spacing: 3rpx; color: var(--text-3); }
 
-/* —— 入场：错峰上浮 —— */
+/* 入场：错峰上浮 */
 .rise { animation: login-rise 0.5s cubic-bezier(0.16, 1, 0.3, 1) both; }
 .d1 { animation-delay: 0.06s; }
 .d2 { animation-delay: 0.12s; }

@@ -1,4 +1,4 @@
-/* ===== 日期格式化（后端 LocalDateTime 序列化为 ISO 字符串） ===== */
+/* 日期格式化（后端 LocalDateTime 序列化为 ISO 字符串） */
 function fmtDateTime(v) {
   if (!v) return '—'
   return String(v).replace('T', ' ').substring(0, 16)

@@ -48,7 +48,7 @@ public class LibraryConfigService {
     /** 默认逾期罚款费率（元/天），与历史硬编码值保持一致 */
     public static final BigDecimal DEFAULT_FINE_RATE = new BigDecimal("0.50");
 
-    // ===== Prompt 热加载（从 AiService 迁移至此统一管理） =====
+    // Prompt 热加载
     /** Prompt 模板文件名（classpath 内置 + 外部覆盖） */
     private static final String PROMPT_RESOURCE_PATH = "prompts/library-system-prompt.txt";
     /** 外部 Prompt 文件路径（运行目录下 prompts/，优先于 classpath，支持热更新与在线保存） */
@@ -59,14 +59,14 @@ public class LibraryConfigService {
     @Autowired
     private ObjectMapper objectMapper;
 
-    // ===== 内存缓存 =====
+    // 内存缓存
     private volatile List<Channel> cachedChannels;
     private volatile BigDecimal cachedFineRate;
     private volatile String cachedPromptTemplate;
     private volatile long cachedPromptLastModified;
     private volatile long cachedPromptLength;
 
-    // ==================== AI 渠道 ====================
+    // AI 渠道
 
     /**
      * AI 渠道（可变 POJO，便于 Jackson 序列化与控制器读取）。
@@ -341,7 +341,7 @@ public class LibraryConfigService {
         }
     }
 
-    // ==================== 馆内规则 ====================
+    // 馆内规则
 
     /**
      * 逾期罚款费率（元/天）。未配置或解析失败时返回默认值 0.50。
@@ -388,7 +388,7 @@ public class LibraryConfigService {
         }
     }
 
-    // ==================== RAG 知识库配置 ====================
+    // RAG 知识库配置
 
     public static final String KEY_RAG_CONFIG = "rag_config";
     /** 当前使用的本地中文 embedding 模型标识（启动校验用：与配置不符则强制重建索引） */
@@ -503,7 +503,7 @@ public class LibraryConfigService {
         }
     }
 
-    // ==================== AI 可调整 Prompt 段 ====================
+    // AI 可调整 Prompt 段
 
     /**
      * 加载可调整 Prompt 段（人设/语气/称呼，热加载）。
@@ -585,7 +585,7 @@ public class LibraryConfigService {
         }
     }
 
-    // ==================== 工具 ====================
+    // 工具
 
     private String blankToEmpty(String s) {
         return s == null ? "" : s.trim();

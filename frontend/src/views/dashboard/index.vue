@@ -121,10 +121,10 @@
       <div class="card hot-books-card">
         <div class="chart-header">
           <div>
-            <span class="eyebrow">{{ userStore.isAdmin ? '热门 · POPULAR' : '推荐 · RECOMMEND' }}</span>
-            <h3 class="chart-title">{{ userStore.isAdmin ? '借阅排行' : '推荐阅读' }}</h3>
+            <span class="eyebrow">热门 · POPULAR</span>
+            <h3 class="chart-title">借阅热门</h3>
           </div>
-          <span class="chart-note" v-if="userStore.isAdmin">按实际取书次数</span>
+          <span class="chart-note">按实际取书次数</span>
         </div>
         <ul class="hot-list">
           <li v-for="book in data.hotBooks" :key="book.rank" class="hot-item">
@@ -450,7 +450,7 @@ onMounted(loadData)
   color: var(--color-danger);
 }
 
-/* —— 待办印章卡 —— */
+/* 待办印章卡 */
 .todo-row {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr 1.2fr;
@@ -573,7 +573,7 @@ onMounted(loadData)
   background: var(--color-divider);
 }
 
-/* —— 图表 —— */
+/* 图表 */
 .chart-row {
   display: grid;
   grid-template-columns: 2fr 1fr;

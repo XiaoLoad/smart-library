@@ -1,10 +1,10 @@
-/* ===== 通用层：卡片 / 标签 / 按钮 / 单元格 / 表单 =====
+/* 通用层：卡片 / 标签 / 按钮 / 单元格 / 表单
  * 由 app.wxss @import 引入，依赖 base.wxss 中的设计令牌。
  */
 
 .page { padding: 36rpx 28rpx calc(var(--tabbar-h) + env(safe-area-inset-bottom)); }
 
-/* —— 卡片 · 细边框无重阴影 —— */
+/* 卡片 · 细边框无重阴影 */
 .card {
   background: var(--bg-elevated);
   border: 1rpx solid var(--border);
@@ -13,7 +13,7 @@
   margin-bottom: 24rpx;
 }
 
-/* —— 标题 · 宋体 —— */
+/* 标题 · 宋体 */
 .section-title {
   font-family: 'Songti SC', 'STSong', 'SimSun', 'Noto Serif CJK SC', serif;
   font-size: 34rpx;
@@ -21,7 +21,7 @@
   margin-bottom: 20rpx;
 }
 
-/* —— 细分割线 —— */
+/* 细分割线 */
 .hr { height: 1rpx; background: var(--border); margin: 24rpx 0; }
 
 /* —— 标签 · 克制方角（对齐 el-tag） ——
@@ -47,7 +47,7 @@
 /* 中性进行态：与 badge-blue（靛蓝）区分，避免与「待取书」的陶土黄同色异义 */
 .badge-info { background: #eef1f3; color: #5a7a8c; border-color: #dbe3e7; }
 
-/* —— 按钮 · 无满屏主按钮 —— */
+/* 按钮 · 无满屏主按钮 */
 .btn {
   display: inline-flex;
   align-items: center;
@@ -71,7 +71,7 @@
 .btn-mini { height: 56rpx; font-size: 24rpx; padding: 0 24rpx; }
 .btn-block { display: flex; width: 100%; }
 
-/* —— 单元格 —— */
+/* 单元格 */
 .cells {
   background: var(--bg-elevated);
   border: 1rpx solid var(--border);
@@ -90,7 +90,7 @@
 .cell-arrow { color: var(--text-3); }
 .cell-label { flex: 1; }
 
-/* —— 表单 —— */
+/* 表单 */
 .field { margin-bottom: 28rpx; }
 .field-label {
   font-size: 24rpx;

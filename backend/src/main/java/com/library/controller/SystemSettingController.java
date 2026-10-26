@@ -85,7 +85,7 @@ public class SystemSettingController {
         }
     }
 
-    // ==================== 账户安全 ====================
+    // 账户安全
 
     /**
      * 修改密码
@@ -107,7 +107,7 @@ public class SystemSettingController {
         return Result.success("密码修改成功", null);
     }
 
-    // ==================== AI 渠道 ====================
+    // AI 渠道
 
     /**
      * 渠道列表（apiKey 脱敏，仅返回是否已配置）。
@@ -226,7 +226,7 @@ public class SystemSettingController {
         return Result.success("连接正常，共拉取 " + models.size() + " 个可用模型", data);
     }
 
-    // ==================== 借阅规则 ====================
+    // 借阅规则
 
     /**
      * 各身份借阅额度规则（教师/学生）。仅管理员可查看详情。
@@ -275,7 +275,7 @@ public class SystemSettingController {
         return Result.success("馆内规则已保存", null);
     }
 
-    // ==================== AI 人设（可调整 Prompt 段） ====================
+    // AI 人设（可调整 Prompt 段）
 
     /**
      * 读取可调整 Prompt 段（人设/语气/称呼）。
@@ -300,7 +300,7 @@ public class SystemSettingController {
         return Result.success("AI 人设已保存并即时生效", null);
     }
 
-    // ==================== 催还通知 ====================
+    // 催还通知
 
     /**
      * 通知规则列表（即将逾期与各类逾期事件，管理员可整表读写）。

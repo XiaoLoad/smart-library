@@ -141,9 +141,20 @@
         <view class="bubble bubble-ai">
           <text class="ai-label">馆员 AI</text>
 
+          <!-- 等待指示：尚无任何产出时显示跳动点，避免「发出后长时间无动静」的空窗 -->
+          <view wx:if="{{item.waiting && !item.thinking && !item.toolEvents.length && !item.ragSources.length}}" class="thinking">
+            <view class="wait-dots">
+              <view class="wait-dot" />
+              <view class="wait-dot" />
+              <view class="wait-dot" />
+              <text class="wait-text">正在思考…</text>
+            </view>
+          </view>
+
           <!-- 深度思考（折叠可展开） -->
           <view wx:if="{{item.thinking}}" class="thinking" data-id="{{item.id}}" bindtap="toggleThinking">
             <text class="eyebrow">THOUGHT</text>
+            <text wx:if="{{item.thinkingSeconds}}" class="thinking-time">{{item.thinkingSeconds}}s</text>
             <view class="thinking-body">{{item.thinkingOpen ? item.thinking : '深度思考已折叠，点击展开'}}</view>
           </view>
 

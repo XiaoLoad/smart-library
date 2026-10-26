@@ -1,4 +1,4 @@
-/* ===== wx.request 封装：token 注入 + {code,message,data} 信封解析 =====
+/* wx.request 封装：token 注入 + {code,message,data} 信封解析
  * 与后端约定：业务成功 code===200；401 也走 HTTP 200 + body.code=401（JwtInterceptor 行为）
  */
 const { BASE_URL } = require('./config')

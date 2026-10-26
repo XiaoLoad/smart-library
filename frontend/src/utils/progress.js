@@ -1,4 +1,4 @@
-/* ===== 顶部进度条 · 轻量实现（NProgress 风格） ===== */
+/* 顶部进度条 · 轻量实现（NProgress 风格） */
 
 let started = false
 let current = 0

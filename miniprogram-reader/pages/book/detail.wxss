@@ -9,7 +9,7 @@
 .kv .k,
 .kv .v { line-height: 1.5; }
 
-/* —— 藏书票 · 书影 + 定价 + 库存刻度 —— */
+/* 藏书票 · 书影 + 定价 + 库存刻度 */
 .plate {
   background: var(--bg-elevated);
   border: 1rpx solid var(--border);
@@ -81,7 +81,7 @@
 .tick { flex: 1; border-radius: 4rpx; background: var(--bg-muted); }
 .tick.on { background: var(--primary); }
 
-/* —— 信息行 · 目录式点状引线 —— */
+/* 信息行 · 目录式点状引线 */
 .kv {
   display: flex;
   align-items: baseline;
@@ -109,7 +109,7 @@
 .mono { font-family: Consolas, 'Cascadia Mono', 'Courier New', monospace; }
 .kv .v.mono { font-size: 25rpx; }
 
-/* —— 简介 · 首字下沉 —— */
+/* 简介 · 首字下沉 */
 .desc { display: block; font-size: 27rpx; color: var(--text-2); line-height: 1.9; }
 .dropcap {
   float: left;
@@ -120,7 +120,7 @@
   color: var(--primary);
 }
 
-/* —— 底部操作条 —— */
+/* 底部操作条 */
 .footer-bar {
   position: fixed;
   left: 0;

@@ -1,4 +1,4 @@
-/* —— 页头 —— */
+/* 页头 */
 .page-header { margin-bottom: 28rpx; }
 .page-title { font-size: 56rpx; font-weight: 600; letter-spacing: 4rpx; margin-top: 8rpx; }
 
@@ -15,7 +15,7 @@
 /* 吸附中只补一道极浅投影——发丝线由 .tabs 自带的下划线充当 */
 .dock.stuck { box-shadow: 0 12rpx 18rpx -16rpx rgba(44, 40, 37, 0.3); }
 
-/* —— 分段 · 下划线 —— */
+/* 分段 · 下划线 */
 .tabs {
   display: flex;
   border-bottom: 1rpx solid var(--border);
@@ -60,7 +60,7 @@
 .readall-bar { margin-bottom: 16rpx; padding: 0 4rpx; }
 .link { color: var(--primary); font-size: 26rpx; }
 
-/* —— 通知条目 —— */
+/* 通知条目 */
 .notice { padding: 26rpx 28rpx; }
 .notice-unread { border-left: 3rpx solid var(--primary); }
 .notice-head { gap: 16rpx; flex: 1; min-width: 0; }
@@ -68,6 +68,6 @@
 .dot { width: 12rpx; height: 12rpx; border-radius: 50%; background: var(--danger); flex-shrink: 0; }
 .notice-content { margin: 10rpx 0; font-size: 26rpx; }
 
-/* —— 公告条目 —— */
+/* 公告条目 */
 .announce-title { font-size: 31rpx; font-weight: 600; }
 .badge-inline { margin-right: 14rpx; }

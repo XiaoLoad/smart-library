@@ -1,4 +1,4 @@
-/* ===== 内容区遮罩 loading ===== */
+/* 内容区遮罩 loading */
 /* 覆盖 .app-content 区域（侧边栏除外），适合页面首次加载 */
 import { ElLoading } from 'element-plus'
 

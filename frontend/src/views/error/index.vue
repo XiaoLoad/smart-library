@@ -114,7 +114,7 @@ const goBack = () => router.back()
   max-width: 560px;
 }
 
-/* —— 眉题 · 旧朱红短刻线是页面上唯一一抹朱色 —— */
+/* 眉题 · 旧朱红短刻线是页面上唯一一抹朱色 */
 .error-eyebrow {
   display: flex;
   align-items: center;
@@ -152,7 +152,7 @@ const goBack = () => router.back()
   margin-bottom: var(--space-6);
 }
 
-/* —— 索书单 —— */
+/* 索书单 */
 .call-slip {
   position: relative;
   background: var(--color-bg-elevated);
@@ -207,7 +207,7 @@ const goBack = () => router.back()
   word-break: break-all;
 }
 
-/* —— 印章 · 页面唯一的重音，落纸时盖下 —— */
+/* 印章 · 页面唯一的重音，落纸时盖下 */
 .slip-seal {
   position: absolute;
   top: calc(var(--space-4) * -1);
@@ -232,7 +232,7 @@ const goBack = () => router.back()
   to { opacity: 0.9; transform: rotate(-8deg) scale(1); }
 }
 
-/* —— 操作 —— */
+/* 操作 */
 .error-actions {
   display: flex;
   align-items: center;

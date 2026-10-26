@@ -58,7 +58,7 @@ public class RagController {
         }
     }
 
-    // ==================== 文档 ====================
+    // 文档
 
     /**
      * 文档列表（分页）。
@@ -160,7 +160,7 @@ public class RagController {
         return Result.success(segmentMapper.listByDocumentId(id));
     }
 
-    // ==================== 检索测试 ====================
+    // 检索测试
 
     /**
      * 检索测试：输入 query，返回 Top N 片段与相似度分数。
@@ -190,7 +190,7 @@ public class RagController {
         return Result.success(list);
     }
 
-    // ==================== 参数配置 ====================
+    // 参数配置
 
     /**
      * 读取 RAG 参数（含当前索引状态）。
@@ -232,7 +232,7 @@ public class RagController {
         return Result.success("参数已保存", cfg);
     }
 
-    // ==================== 工具 ====================
+    // 工具
 
     /** 按 UTF-8 读取上传文本（去掉可能的 BOM 头） */
     private static String readAsText(MultipartFile file) {

@@ -101,6 +101,7 @@ public class CommonTools extends BaseLibraryTools {
                 m.put("isbn", b.getIsbn());
                 m.put("category", b.getCategoryId() == null ? null : cateNames.get(b.getCategoryId()));
                 m.put("location", b.getLocation());
+                m.put("coverUrl", b.getCoverUrl());
                 m.put("description", b.getDescription());
                 m.put("availableCount", b.getAvailableCount());
                 m.put("totalCount", b.getTotalCount());
@@ -126,8 +127,12 @@ public class CommonTools extends BaseLibraryTools {
                     if (item instanceof Map<?, ?> b) {
                         Map<String, Object> m = new LinkedHashMap<>();
                         m.put("rank", b.get("rank"));
+                        m.put("id", b.get("bookId"));
                         m.put("title", b.get("title"));
                         m.put("author", b.get("author"));
+                        m.put("coverUrl", b.get("coverUrl"));
+                        m.put("availableCount", b.get("availableCount"));
+                        m.put("totalCount", b.get("totalCount"));
                         m.put("borrowCount", b.get("count"));
                         items.add(m);
                     }

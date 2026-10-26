@@ -81,6 +81,7 @@
                       <AppIcon v-else name="sparkles" :size="13" />
                     </span>
                     <span class="reason-title">{{ m.reasoningStreaming ? '深度思考中' : '已深度思考' }}</span>
+                    <span v-if="m.reasoningSeconds != null" class="reason-time">{{ m.reasoningSeconds }}s</span>
                     <span class="reason-chevron" :class="{ open: m.reasoningOpen }">
                       <AppIcon name="chevron-down" :size="12" />
                     </span>
@@ -169,20 +170,26 @@
                 </div>
 
                 <div class="msg-content markdown" v-html="m.html"></div>
+
+                <!-- 等待中：已建消息占位但尚无任何可见产出（思考未开始/检索中/工具间隙），
+                     点状跳动提示避免「参考资料之后就没动静」的空窗；有正文或思考流后立即消失 -->
+                <div
+                  v-if="m.pending && !m.reasoningSegments.length && !m.toolEvents.length && !(m.ragSources && m.ragSources.length)"
+                  class="msg-content thinking"
+                >
+                  <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+                  <span class="thinking-text">正在思考…</span>
+                </div>
+                <div
+                  v-else-if="m.pending && (m.ragSources && m.ragSources.length) && !m.reasoningSegments.length && !m.toolEvents.length && !m.content"
+                  class="msg-content thinking"
+                >
+                  <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+                  <span class="thinking-text">正在结合参考资料思考…</span>
+                </div>
               </div>
             </div>
           </template>
-
-          <!-- 思考中占位 -->
-          <div v-if="thinking" class="msg-row assistant">
-            <div class="msg-avatar"><span>智</span></div>
-            <div class="msg-body">
-              <div class="msg-content thinking">
-                <span class="dot"></span><span class="dot"></span><span class="dot"></span>
-                <span class="thinking-text">正在思考…</span>
-              </div>
-            </div>
-          </div>
 
           <!-- 底部留白，保证最后一条不被输入框遮挡 -->
           <div class="msg-bottom-gap"></div>
@@ -243,6 +250,7 @@ import MarkdownIt from 'markdown-it'
 import hljs from 'highlight.js'
 import 'highlight.js/styles/github.css'
 import { aiApi } from '@/api'
+import { useAiSearchStore } from '@/stores/aiSearch'
 import ConversationNav from '@/components/ConversationNav.vue'
 import AppIcon from '@/components/AppIcon.vue'
 
@@ -331,7 +339,7 @@ const enrichMsg = (m) => ({
   ragOpenIndex: -1,
 })
 
-// ===== 日期分隔（历史导航锚点） =====
+// 日期分隔（历史导航锚点）
 const dayKey = (t) => (t ? String(t).slice(0, 10) : '')
 const dayLabel = (t) => {
   const key = dayKey(t)
@@ -356,6 +364,11 @@ const messages = ref([])
 const input = ref('')
 const thinking = ref(false)
 const msgListRef = ref(null)
+
+// AI 检索联动：与悬浮球面板一致，queryBooks/queryHotBooks 结果广播到 aiSearchStore，
+// 图书检索页 watch 到后切换为「AI 检索结果」视图
+const aiSearchStore = useAiSearchStore()
+const lastUserText = ref('')
 // 历史分页加载状态
 const oldestLoadedId = ref(null)   // 当前已加载消息中最老的 id（更早一页的游标）
 const loadedCount = ref(0)         // 已加载消息数
@@ -364,8 +377,10 @@ const hasMore = ref(false)         // 是否还有更早消息
 const loadingOlder = ref(false)    // 防重复拉取守卫
 // 当前流式请求的 AbortController（用于取消）
 let abortController = null
+// 当前流式回复的助手消息引用（send 中创建，stopGenerate/catch/finally 中复用）
+let assistantMsg = null
 
-// ===== 智能滚动控制 =====
+// 智能滚动控制
 const isAutoFollow = ref(true)
 const showJumpBtn = ref(false)
 
@@ -426,7 +441,7 @@ const quickPrompts = [
   '我有未缴罚款吗？',
 ]
 
-// ===== 对话锚点导航 =====
+// 对话锚点导航
 // 一轮提问 = 一个锚点：序号 + 完整问题（卡片内按行截断展示）+ 时间
 const anchorTime = (t) => (t ? String(t).slice(5, 16).replace('T', ' ') : '')
 const anchors = computed(() => {
@@ -570,6 +585,7 @@ const send = async () => {
   if (!input.value.trim()) return
   const content = input.value.trim()
   input.value = ''
+  lastUserText.value = content
 
   // 无会话时先创建
   if (!currentConvId.value) {
@@ -603,7 +619,45 @@ const send = async () => {
 
   // SSE 流式请求
   abortController = new AbortController()
-  let assistantMsg = null
+
+  // 立即创建助手消息气泡（pending=true 显示「正在思考…」跳动），
+  // 不等首个 SSE 事件——避免首事件前的空窗期没有任何反馈
+  assistantMsg = reactive({
+    id: Date.now() + 1,
+    conversationId: convId,
+    role: 'assistant',
+    content: '',
+    html: '',
+    toolEvents: [],
+    // 深度思考：reasoningSegments 按「思考轮次」分段（工具调用会产生多段）；
+    // reasoningStreaming 控制头部「思考中/已思考」与脉冲；reasoningOpen 控制折叠
+    reasoningSegments: [],
+    reasoningOpen: false,
+    reasoningStreaming: false,
+    reasoningSeconds: null,
+    _reasonStartAt: 0,
+    _reasonTimer: null,
+    _reasonSegOpen: false,
+    // 等待指示：true 期间显示「正在思考…」跳动；首个可见产出（思考/工具/正文）到达后置 false
+    pending: true,
+    // 知识库来源（SSE rag 事件），ragOpenIndex 为当前展开的片段序号，-1 表示全部收起
+    ragSources: [],
+    ragOpenIndex: -1,
+    createTime: new Date().toISOString(),
+  })
+  messages.value.push(assistantMsg)
+  scrollToBottom()
+
+  // 思考耗时收尾：最后一段时间写入 reasoningSeconds 后停止计时（耗时保留展示）。
+  // 定义在 try 之外：catch/finally 兜底路径也要调用（否则流中断时计时器泄漏）
+  const stopReasonTimer = (msg) => {
+    if (!msg?._reasonTimer) return
+    clearInterval(msg._reasonTimer)
+    msg._reasonTimer = null
+    if (msg._reasonStartAt) {
+      msg.reasoningSeconds = ((Date.now() - msg._reasonStartAt) / 1000).toFixed(1)
+    }
+  }
   try {
     const token = localStorage.getItem('library_token') || ''
     const resp = await fetch('/api/ai/chat', {
@@ -634,28 +688,10 @@ const send = async () => {
     let buffer = ''
 
     const ensureAssistantMsg = () => {
-      if (!assistantMsg) {
+      // 气泡已在发送时创建（pending=true），这里只是返回引用；
+      // 首个实际事件到达时关闭单独的「思考中」占位
+      if (thinking.value) {
         thinking.value = false
-        // 用 reactive 包装：局部变量引用 Proxy，修改其属性能触发响应式更新
-        assistantMsg = reactive({
-          id: Date.now() + 1,
-          conversationId: convId,
-          role: 'assistant',
-          content: '',
-          html: '',
-          toolEvents: [],
-          // 深度思考：reasoningSegments 按「思考轮次」分段（工具调用会产生多段）；
-          // reasoningStreaming 控制头部「思考中/已思考」与脉冲；reasoningOpen 控制折叠
-          reasoningSegments: [],
-          reasoningOpen: false,
-          reasoningStreaming: false,
-          _reasonSegOpen: false,
-          // 知识库来源（SSE rag 事件），ragOpenIndex 为当前展开的片段序号，-1 表示全部收起
-          ragSources: [],
-          ragOpenIndex: -1,
-          createTime: new Date().toISOString(),
-        })
-        messages.value.push(assistantMsg)
       }
       return assistantMsg
     }
@@ -677,21 +713,31 @@ const send = async () => {
       if (event === 'thinking') {
         // 深度思考思维链增量：流式追加到当前思考段，面板保持展开
         const msg = ensureAssistantMsg()
+        msg.pending = false
         if (data) {
           if (!msg._reasonSegOpen) {
             // 上一段思维链已被工具调用/正文截断 → 新开一段（多轮工具调用场景）
             msg.reasoningSegments.push('')
             msg._reasonSegOpen = true
           }
+          if (!msg.reasoningStreaming) {
+            // 本段思考开始：启动耗时计时（0.1s 粒度，避免 setData 高频）
+            msg.reasoningStreaming = true
+            msg.reasoningOpen = true
+            msg._reasonStartAt = Date.now()
+            clearInterval(msg._reasonTimer)
+            msg._reasonTimer = setInterval(() => {
+              msg.reasoningSeconds = ((Date.now() - msg._reasonStartAt) / 1000).toFixed(1)
+            }, 100)
+          }
           const segs = msg.reasoningSegments
           segs[segs.length - 1] += data
-          msg.reasoningStreaming = true
-          msg.reasoningOpen = true
           scrollToBottom()
         }
       } else if (event === 'rag') {
         // 知识库来源：在调用 LLM 之前推送（早于 delta），气泡内先出「参考资料」条
         const msg = ensureAssistantMsg()
+        msg.pending = false
         try {
           const list = JSON.parse(data)
           if (Array.isArray(list)) {
@@ -710,7 +756,9 @@ const send = async () => {
         }
       } else if (event === 'delta') {
         const msg = ensureAssistantMsg()
-        // 正文开始：思维链阶段结束，自动折叠面板（DeepSeek 式交互）
+        msg.pending = false
+        // 正文开始：思维链阶段结束，停止耗时并自动折叠面板（DeepSeek 式交互）
+        stopReasonTimer(msg)
         msg._reasonSegOpen = false
         msg.reasoningStreaming = false
         msg.reasoningOpen = false
@@ -719,8 +767,9 @@ const send = async () => {
         scrollToBottom()
       } else if (event === 'reset') {
         // 进入工具调用轮：清空工具调用前的过渡文本（正文只保留最终回答，
-        // 工具调用过程由工具卡片承载）；本段思维链结束，面板折叠
+        // 工具调用过程由工具卡片承载）；本段思维链结束，停止耗时并折叠面板
         const msg = ensureAssistantMsg()
+        stopReasonTimer(msg)
         msg._reasonSegOpen = false
         msg.reasoningStreaming = false
         msg.reasoningOpen = false
@@ -734,6 +783,7 @@ const send = async () => {
         scrollToBottom()
       } else if (event === 'tool') {
         const msg = ensureAssistantMsg()
+        msg.pending = false
         try {
           const info = JSON.parse(data)
           const events = msg.toolEvents
@@ -764,7 +814,7 @@ const send = async () => {
                   ? `${target.detail} · ${endDetail}`
                   : endDetail
               }
-              // P2.10 结构化输出：end 阶段携带数据快照，可展开查看
+              // 结构化输出：end 阶段携带数据快照，可展开查看
               if (info.phase === 'end' && info.data) {
                 target.data = info.data
               }
@@ -777,6 +827,18 @@ const send = async () => {
                 expanded: false,
               })
             }
+            // AI 检索联动：工具返回的图书列表广播到 aiSearchStore，
+            // 图书检索页 watch 到后切换为「AI 检索结果」视图（与悬浮球面板逻辑一致）。
+            // 不限定工具名：只要快照含图书条目（items 数组且元素带 title）即广播
+            if (info.phase === 'end' && info.data) {
+              try {
+                const snap = JSON.parse(info.data)
+                const items = snap.items
+                if (Array.isArray(items) && items.length && items[0]?.title) {
+                  aiSearchStore.setResult(lastUserText.value || '', items, snap.total)
+                }
+              } catch { /* 快照异常不影响对话 */ }
+            }
           }
         } catch {
           // 忽略解析失败的 tool 事件
@@ -785,6 +847,8 @@ const send = async () => {
       } else if (event === 'done') {
         thinking.value = false
         if (assistantMsg) {
+          assistantMsg.pending = false
+          stopReasonTimer(assistantMsg)
           assistantMsg._reasonSegOpen = false
           assistantMsg.reasoningStreaming = false
           assistantMsg.reasoningOpen = false
@@ -795,6 +859,8 @@ const send = async () => {
       } else if (event === 'error') {
         thinking.value = false
         const msg = ensureAssistantMsg()
+        msg.pending = false
+        stopReasonTimer(msg)
         msg._reasonSegOpen = false
         msg.reasoningStreaming = false
         msg.reasoningOpen = false
@@ -835,8 +901,10 @@ const send = async () => {
         if (t.phase === 'start') t.phase = 'end'
       })
     }
-    // 思维链状态兜底：中断/异常时停止「思考中」脉冲并折叠
+    // 思维链状态兜底：中断/异常时停止计时、停止「思考中」脉冲并折叠
     if (assistantMsg) {
+      assistantMsg.pending = false
+      stopReasonTimer(assistantMsg)
       assistantMsg._reasonSegOpen = false
       assistantMsg.reasoningStreaming = false
     }
@@ -856,7 +924,7 @@ onMounted(loadConversations)
 </script>
 
 <style scoped>
-/* ===== 布局：高度钉死，仅消息区滚动 ===== */
+/* 布局：高度钉死，仅消息区滚动 */
 .ai-page {
   display: grid;
   grid-template-columns: 280px 1fr;
@@ -865,7 +933,7 @@ onMounted(loadConversations)
   overflow: hidden;
 }
 
-/* —— 会话侧栏 —— */
+/* 会话侧栏 */
 .conv-side {
   background: var(--color-bg-elevated);
   border-right: 1px solid var(--color-border);
@@ -938,7 +1006,7 @@ onMounted(loadConversations)
   color: var(--color-text-tertiary);
 }
 
-/* —— 对话主区 —— */
+/* 对话主区 */
 .chat-main {
   display: flex;
   flex-direction: column;
@@ -978,7 +1046,7 @@ onMounted(loadConversations)
   color: var(--color-text-tertiary);
 }
 
-/* —— 消息滚动区（唯一滚动容器） —— */
+/* 消息滚动区（唯一滚动容器） */
 .msg-scroll {
   flex: 1;
   min-height: 0;                    /* flex 滚动关键：允许收缩触发 overflow */
@@ -996,7 +1064,7 @@ onMounted(loadConversations)
 
 .msg-bottom-gap { height: var(--space-4); }
 
-/* —— 欢迎屏 —— */
+/* 欢迎屏 */
 .welcome {
   text-align: center;
   padding: var(--space-8) var(--space-5) var(--space-6);
@@ -1065,7 +1133,7 @@ onMounted(loadConversations)
   opacity: 0.5;
 }
 
-/* —— 日期分隔线 —— */
+/* 日期分隔线 */
 .day-divider {
   display: flex;
   align-items: center;
@@ -1085,7 +1153,7 @@ onMounted(loadConversations)
   font-family: var(--font-serif);
 }
 
-/* —— 消息行 —— */
+/* 消息行 */
 .msg-row {
   display: flex;
   margin-bottom: var(--space-5);
@@ -1171,7 +1239,7 @@ onMounted(loadConversations)
   40% { transform: scale(1); opacity: 1; }
 }
 
-/* —— 深度思考（思维链）面板 —— */
+/* 深度思考（思维链）面板 */
 .reason-panel {
   margin-bottom: var(--space-2);
   border: 1px solid var(--color-border);
@@ -1208,6 +1276,13 @@ onMounted(loadConversations)
   font-family: var(--font-serif);
   font-weight: 600;
   letter-spacing: 0.02em;
+}
+/* 思考耗时（如 12.4s）：等宽数字避免跳动 */
+.reason-time {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-secondary);
+  opacity: 0.85;
 }
 .reason-chevron {
   margin-left: auto;
@@ -1337,7 +1412,7 @@ onMounted(loadConversations)
   word-break: break-word;
 }
 
-/* —— 工具调用卡片 —— */
+/* 工具调用卡片 */
 .tool-events {
   display: flex;
   flex-direction: column;
@@ -1495,7 +1570,7 @@ onMounted(loadConversations)
   transform: translateY(-4px) scaleY(0.96);
 }
 
-/* —— Markdown 排版 —— */
+/* Markdown 排版 */
 .msg-content.markdown :deep(p) { margin: 0 0 var(--space-2); }
 .msg-content.markdown :deep(p:last-child) { margin-bottom: 0; }
 .msg-content.markdown :deep(h1),
@@ -1552,7 +1627,7 @@ onMounted(loadConversations)
 .msg-content.markdown :deep(a:hover) { text-decoration: underline; }
 .msg-content.markdown :deep(strong) { font-weight: 600; color: var(--color-text); }
 
-/* —— 「回到最新」浮动按钮 —— */
+/* 「回到最新」浮动按钮 */
 .jump-latest {
   position: absolute;
   left: 50%;
@@ -1587,7 +1662,7 @@ onMounted(loadConversations)
   transform: translateX(-50%) translateY(8px);
 }
 
-/* —— 输入区（固定底部） —— */
+/* 输入区（固定底部） */
 .composer {
   flex-shrink: 0;
   padding: var(--space-3) var(--space-6) var(--space-4);
@@ -1653,7 +1728,7 @@ onMounted(loadConversations)
   margin-top: var(--space-2);
 }
 
-/* —— 响应式 —— */
+/* 响应式 */
 @media (max-width: 768px) {
   .ai-page { grid-template-columns: 1fr; grid-template-rows: 1fr; }
   .conv-side { display: none; }

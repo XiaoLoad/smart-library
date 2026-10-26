@@ -1,4 +1,4 @@
-/* ===== 路由配置 ===== */
+/* 路由配置 */
 import { createRouter, createWebHistory } from "vue-router";
 import { reactive } from "vue";
 import { useUserStore } from "@/stores/user";

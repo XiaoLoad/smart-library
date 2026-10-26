@@ -1,4 +1,4 @@
-/* ===== axios 实例 + 拦截器 ===== */
+/* axios 实例 + 拦截器 */
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import { startProgress, doneProgress } from '@/utils/progress.js'

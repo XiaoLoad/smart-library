@@ -1,4 +1,4 @@
-/* ===== 列表缓存 · stale-while-revalidate =====
+/* 列表缓存 · stale-while-revalidate
  * 冷启动先把上一次的这一屏铺上（stale），再静默向服务端要新数据替换（revalidate），
  * 免掉「白屏 → 数据」的跳变。缓存只是先手的占位，权威数据永远是服务端那一份。
  *

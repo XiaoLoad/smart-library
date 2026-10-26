@@ -123,7 +123,7 @@ Page({
     return Math.max(0, Math.round(this._winH - this._dockH - this._minBase))
   },
 
-  /* —— 分段（swiper） —— */
+  /* 分段（swiper） */
   onSegment(e) {
     const i = SEGMENTS.findIndex((s) => s.value === Number(e.currentTarget.dataset.value))
     if (i < 0 || i === this.data.current) return
@@ -142,7 +142,7 @@ Page({
     this.reload(i, !this.data.panes[i].firstLoad)
   },
 
-  /* —— 列表 —— */
+  /* 列表 */
   // 缓存键跟着分段走：切到「逾期」看到的就是逾期那一屏的旧数据
   cacheKey(i) {
     return 'borrow:' + SEGMENTS[i].value

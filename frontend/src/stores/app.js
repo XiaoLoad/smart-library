@@ -1,4 +1,4 @@
-/* ===== 应用 store · 主题/侧边栏折叠 ===== */
+/* 应用 store · 主题/侧边栏折叠 */
 import { defineStore } from 'pinia'
 
 export const useAppStore = defineStore('app', {

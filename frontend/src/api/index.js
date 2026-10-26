@@ -1,4 +1,4 @@
-/* ===== 各模块 API 封装 ===== */
+/* 各模块 API 封装 */
 import { get, post, default as service } from './request.js'
 
 // 认证

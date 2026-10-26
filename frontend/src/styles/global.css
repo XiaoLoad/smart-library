@@ -1,10 +1,10 @@
-/* ===== 全局补充样式 · 通用工具与组件外观 ===== */
+/* 全局补充样式 · 通用工具与组件外观 */
 
 #app {
   min-height: 100vh;
 }
 
-/* —— 数据淡入动画 —— */
+/* 数据淡入动画 */
 @keyframes fade-in-up {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
@@ -14,7 +14,7 @@
   animation: fade-in-up 0.4s var(--ease-out) both;
 }
 
-/* —— 路由切换动画 —— */
+/* 路由切换动画 */
 .route-enter-active {
   animation: fade-in-up 0.3s var(--ease-out) both;
 }
@@ -25,7 +25,7 @@
   opacity: 0;
 }
 
-/* —— 页面容器 —— */
+/* 页面容器 */
 .page {
   padding: var(--space-6) var(--space-6) var(--space-8);
   max-width: var(--content-max-width);
@@ -75,7 +75,7 @@
   font-size: var(--fs-small);
 }
 
-/* —— 卡片 —— */
+/* 卡片 */
 .card {
   background: var(--color-bg-elevated);
   border: 1px solid var(--color-border);
@@ -90,7 +90,7 @@
   border-color: var(--color-border-strong);
 }
 
-/* —— 统计卡片 —— */
+/* 统计卡片 */
 .stat-card {
   display: flex;
   flex-direction: column;
@@ -141,7 +141,7 @@
   color: var(--color-primary);
 }
 
-/* —— 数据表格 —— */
+/* 数据表格 */
 .data-table {
   background: var(--color-bg-elevated);
   border: 1px solid var(--color-border);
@@ -196,7 +196,7 @@
   border-top: 1px solid var(--color-divider);
 }
 
-/* —— 状态标签 —— */
+/* 状态标签 */
 .status-tag {
   display: inline-flex;
   align-items: center;
@@ -223,7 +223,7 @@
 .status-tag.cancelled { color: var(--color-text-tertiary); background: var(--color-bg-subtle); }
 .status-tag.disabled { color: var(--color-text-tertiary); background: var(--color-bg-subtle); }
 
-/* —— 进度条/库存条 —— */
+/* 进度条/库存条 */
 .stock-bar {
   height: 4px;
   background: var(--color-bg-muted);
@@ -242,19 +242,19 @@
 .stock-bar__fill.warning { background: var(--color-warning); }
 .stock-bar__fill.danger { background: var(--color-danger); }
 
-/* —— 搜索框 —— */
+/* 搜索框 */
 .search-input {
   width: 280px;
 }
 
-/* —— 空状态 —— */
+/* 空状态 */
 .empty-state {
   padding: var(--space-8) var(--space-5);
   text-align: center;
   color: var(--color-text-tertiary);
 }
 
-/* —— 分割线 —— */
+/* 分割线 */
 .divider {
   height: 1px;
   background: var(--color-border);
@@ -262,14 +262,14 @@
   margin: var(--space-5) 0;
 }
 
-/* —— 页脚标识 —— */
+/* 页脚标识 */
 .brand-mark {
   font-family: var(--font-serif);
   font-weight: 600;
   letter-spacing: var(--ls-tight);
 }
 
-/* —— 入场动画 —— */
+/* 入场动画 */
 .fade-enter-active,
 .fade-leave-active {
   transition: opacity var(--duration) var(--ease-soft);
@@ -280,7 +280,7 @@
   opacity: 0;
 }
 
-/* —— 路由切换动画 —— */
+/* 路由切换动画 */
 .route-enter-active {
   transition: opacity var(--duration-slow) var(--ease-out),
     transform var(--duration-slow) var(--ease-out);
@@ -291,7 +291,7 @@
   transform: translateY(8px);
 }
 
-/* —— 响应式 —— */
+/* 响应式 */
 @media (max-width: 768px) {
   .page { padding: var(--space-4); }
   .page-header h1 { font-size: var(--fs-h1); }

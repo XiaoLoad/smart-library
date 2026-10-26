@@ -161,12 +161,15 @@
           </div>
         </div>
       </el-drawer>
+
+      <!-- 全局 AI 悬浮球（AI 管理页与永久关闭时自动隐藏；内部自行管理开关状态） -->
+      <AiFloatingBall v-if="aiFloatEnabled" />
     </div>
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onBeforeUnmount, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useAppStore } from '@/stores/app'
@@ -175,13 +178,22 @@ import { notificationApi } from '@/api'
 import { formatDateTime } from '@/utils/datetime.js'
 import AppIcon from '@/components/AppIcon.vue'
 import AppBreadcrumb from '@/components/AppBreadcrumb.vue'
+import AiFloatingBall from '@/components/ai/AiFloatingBall.vue'
+
+// AI 悬浮球总开关（用户级偏好，设置页/个人中心通过自定义事件同步）
+const aiFloatEnabled = ref(true)
+const onAiFloatToggle = (e) => {
+  if (e.detail && typeof e.detail.enabled === 'boolean') aiFloatEnabled.value = e.detail.enabled
+}
+window.addEventListener('ai-float-toggle', onAiFloatToggle)
+onBeforeUnmount(() => window.removeEventListener('ai-float-toggle', onAiFloatToggle))
 
 const route = useRoute()
 const router = useRouter()
 const appStore = useAppStore()
 const userStore = useUserStore()
 
-/* ===== 目次式菜单配置 =====
+/* 目次式菜单配置
  * 与路由结构解耦：容器路由已拍平（"用户管理>读者列表"这类单子项层级去除），
  * 按"藏书 / 借阅 / 服务 / 平台"四个心智分节组织，roles 控制可见性。
  * 角色码：1=教师 2=学生 3=管理员 */
@@ -239,7 +251,7 @@ const loadNotifications = async () => {
   } catch (e) {}
 }
 
-/* ===== 通知抽屉 ===== */
+/* 通知抽屉 */
 const notifyDrawerVisible = ref(false)
 const notifyList = ref([])
 const notifyLoading = ref(false)
@@ -304,7 +316,7 @@ onMounted(() => {
   background: var(--color-bg);
 }
 
-/* —— 侧边栏 —— */
+/* 侧边栏 */
 .app-sidebar {
   width: var(--sidebar-width);
   background: var(--color-bg-elevated);
@@ -373,7 +385,7 @@ onMounted(() => {
   text-transform: uppercase;
 }
 
-/* —— 目次导航 —— */
+/* 目次导航 */
 .sidebar-nav {
   flex: 1;
   padding: var(--space-4) 0 var(--space-2);
@@ -528,7 +540,7 @@ onMounted(() => {
   letter-spacing: var(--ls-wide);
 }
 
-/* —— 主区 —— */
+/* 主区 */
 .app-main {
   flex: 1;
   display: flex;

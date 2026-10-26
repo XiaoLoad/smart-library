@@ -1,4 +1,4 @@
-/* ===== SSE 流式解析（配合 wx.request enableChunked） =====
+/* SSE 流式解析（配合 wx.request enableChunked）
  * 后端帧格式（SseEmitter）：`event: <type>\ndata: <payload>\n\n`
  * 事件类型（与 AiService 对齐）：
  *   thinking 思维链增量 / delta 正文增量 / reset 清空已输出正文（工具开始执行）

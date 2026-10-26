@@ -1,7 +1,7 @@
-/* —— 页面容器 · 三列网格比默认多留两侧余量 —— */
+/* 页面容器 · 三列网格比默认多留两侧余量 */
 .page { padding: 32rpx 36rpx calc(var(--tabbar-h) + env(safe-area-inset-bottom)); }
 
-/* —— 页头 · Editorial（保留完整三行，不做压缩） —— */
+/* 页头 · Editorial（保留完整三行，不做压缩） */
 .page-header { margin-bottom: 20rpx; } /* 20 + .dock 的 12rpx 顶部内边距 = 原来的 32rpx */
 .page-title {
   font-size: 56rpx;
@@ -28,7 +28,7 @@
    走 box-shadow 而不是 border——切进切出时高度不变，不会把下方书架推一下。 */
 .dock.stuck { box-shadow: 0 1rpx 0 var(--border), 0 12rpx 18rpx -16rpx rgba(44, 40, 37, 0.3); }
 
-/* —— 检索条 · 分类按钮内嵌在右端 —— */
+/* 检索条 · 分类按钮内嵌在右端 */
 .searchbar {
   display: flex;
   align-items: center;
@@ -74,7 +74,7 @@
 .page-header { animation: bk-rise 0.52s cubic-bezier(0.16, 1, 0.3, 1) both; }
 .searchbar { animation: bk-rise 0.52s cubic-bezier(0.16, 1, 0.3, 1) 70ms both; }
 
-/* —— 书目 · 每排三本立在一条架线上，书名/位置/状态作架签挂在台板下 —— */
+/* 书目 · 每排三本立在一条架线上，书名/位置/状态作架签挂在台板下 */
 .shelf-row { position: relative; margin-top: 36rpx; }
 .shelf-row + .shelf-row { margin-top: 44rpx; }
 .grid { display: flex; flex-wrap: wrap; column-gap: 30rpx; }
@@ -137,7 +137,7 @@
 
 .status-line { text-align: center; padding: 48rpx 0; }
 
-/* —— 分类树抽屉 —— */
+/* 分类树抽屉 */
 .cat-mask {
   position: fixed;
   top: 0;

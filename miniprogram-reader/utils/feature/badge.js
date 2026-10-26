@@ -1,4 +1,4 @@
-/* ===== tabBar 未读角标 =====
+/* tabBar 未读角标
  * 未读数只有一个出口：谁拿到它都往这里送，避免多处各自 setTabBarBadge 导致状态打架。
  * 三条约束：
  * 1) 未登录时清角标且不发请求——/notification/unread-count 返 401 时 request.js 会清会话

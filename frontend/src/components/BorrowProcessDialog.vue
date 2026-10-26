@@ -233,7 +233,7 @@ const close = () => {
 .dot.return { background: var(--color-success); }
 .dot.confirm { background: var(--color-info); }
 
-/* —— 办理单 · 收据式清单 —— */
+/* 办理单 · 收据式清单 */
 .slip {
   max-height: 52vh;
   overflow-y: auto;

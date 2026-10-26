@@ -37,6 +37,10 @@ public abstract class BaseLibraryTools {
     private static final int DATA_SNAPSHOT_MAX_LEN = 600;
     /** 列表类快照保留的最大条目数（避免长列表爆包） */
     private static final int LIST_SNAPSHOT_LIMIT = 3;
+    /** 检索类工具快照条数上限（queryBooks 的结果会驱动图书页面 AI 检索视图，需全量） */
+    private static final int BOOK_SEARCH_SNAPSHOT_LIMIT = 15;
+    /** 检索类工具快照独立字符上限（豁免全局 600 截断；15 条精简条目约 3~5KB） */
+    private static final int BOOK_SEARCH_SNAPSHOT_MAX_LEN = 8000;
 
     protected final Long userId;
     protected final Integer userType;
@@ -71,7 +75,7 @@ public abstract class BaseLibraryTools {
         try {
             R r = action.apply(null);
             if (eventEmitter != null) {
-                eventEmitter.emit(name, "end", describeResult(r), snapshotData(r));
+                eventEmitter.emit(name, "end", describeResult(r), snapshotData(r, name));
             }
             return r;
         } catch (RuntimeException e) {
@@ -109,27 +113,45 @@ public abstract class BaseLibraryTools {
     /**
      * 生成工具返回值的精简 JSON 快照。
      * 列表类结果（含 items）只保留前 {@link #LIST_SNAPSHOT_LIMIT} 条；
-     * 整体序列化后截断到 {@link #DATA_SNAPSHOT_MAX_LEN} 字符。
+     * {@code queryBooks} 例外：保留全部条目（上限 {@link #BOOK_SEARCH_SNAPSHOT_LIMIT}），
+     * 剔除 description 长文本，并按 {@link #BOOK_SEARCH_SNAPSHOT_MAX_LEN} 独立截断——
+     * 前端用该快照驱动图书页面的 AI 检索结果视图，需要完整的图书列表而非前 3 条摘要，
+     * 全局 600 字符上限会把 15 条结果截成非法 JSON 导致前端解析失败。
      */
-    private String snapshotData(Object r) {
+    private String snapshotData(Object r, String toolName) {
         if (r == null) return null;
         try {
+            int maxLen = DATA_SNAPSHOT_MAX_LEN;
             Object toSerialize = r;
             if (r instanceof Map<?, ?> m && m.get("items") instanceof List<?> list) {
+                boolean fullList = "queryBooks".equals(toolName) || "queryHotBooks".equals(toolName);
+                if (fullList) {
+                    maxLen = BOOK_SEARCH_SNAPSHOT_MAX_LEN;
+                }
+                int limit = Math.min(list.size(), fullList ? BOOK_SEARCH_SNAPSHOT_LIMIT : LIST_SNAPSHOT_LIMIT);
+                List<Object> head = new ArrayList<>();
+                for (int i = 0; i < limit; i++) {
+                    if (fullList && list.get(i) instanceof Map<?, ?> item) {
+                        Map<String, Object> slim = new LinkedHashMap<>();
+                        for (Map.Entry<?, ?> e : item.entrySet()) {
+                            if (!"description".equals(e.getKey())) {
+                                slim.put(String.valueOf(e.getKey()), e.getValue());
+                            }
+                        }
+                        head.add(slim);
+                    } else {
+                        head.add(list.get(i));
+                    }
+                }
                 Map<String, Object> slim = new LinkedHashMap<>();
                 slim.put("total", m.get("total"));
-                List<Object> head = new ArrayList<>();
-                int limit = Math.min(list.size(), LIST_SNAPSHOT_LIMIT);
-                for (int i = 0; i < limit; i++) {
-                    head.add(list.get(i));
-                }
                 slim.put("items", head);
                 slim.put("truncated", list.size() > limit);
                 toSerialize = slim;
             }
             String json = ctx.objectMapper.writeValueAsString(toSerialize);
-            if (json.length() > DATA_SNAPSHOT_MAX_LEN) {
-                return json.substring(0, DATA_SNAPSHOT_MAX_LEN) + "…";
+            if (json.length() > maxLen) {
+                return json.substring(0, maxLen) + "…";
             }
             return json;
         } catch (Exception e) {
@@ -138,7 +160,7 @@ public abstract class BaseLibraryTools {
         }
     }
 
-    // ===== 通用辅助方法 =====
+    // 通用辅助方法
 
     protected Map<String, Object> result(int total, List<Map<String, Object>> items) {
         Map<String, Object> m = new LinkedHashMap<>();

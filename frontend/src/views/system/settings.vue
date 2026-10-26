@@ -32,7 +32,7 @@
 
       <!-- 右侧 · 设置面板 -->
       <div class="settings-body">
-        <!-- ===== 账户安全 ===== -->
+        <!-- 账户安全 -->
         <section v-show="active === 'account'" class="setting-panel">
           <div class="card panel-card fade-in">
             <div class="card-head">
@@ -47,7 +47,27 @@
           </div>
         </section>
 
-        <!-- ===== AI 渠道 ===== -->
+        <!-- 界面偏好：AI 悬浮球 -->
+        <section v-show="active === 'account'" class="setting-panel">
+          <div class="card panel-card fade-in">
+            <div class="card-head">
+              <div class="card-head__icon"><AppIcon name="sparkles" :size="22" /></div>
+              <div>
+                <h2 class="card-title">AI 悬浮球</h2>
+                <p class="card-sub">在任意页面右下角显示 AI 助手悬浮球，点击即可展开对话（不影响 AI 助手页面）。</p>
+              </div>
+            </div>
+            <div class="float-switch-row">
+              <div>
+                <div class="switch-label">启用 AI 悬浮球</div>
+                <div class="switch-desc">关闭后所有页面不再显示悬浮球入口</div>
+              </div>
+              <el-switch v-model="aiFloatOn" @change="onAiFloatChange" />
+            </div>
+          </div>
+        </section>
+
+        <!-- AI 渠道 -->
         <section v-show="active === 'ai'" class="setting-panel">
           <div class="card panel-card fade-in">
             <div class="card-head card-head--between">
@@ -161,7 +181,7 @@
           </div>
         </section>
 
-        <!-- ===== 借阅规则 ===== -->
+        <!-- 借阅规则 -->
         <section v-show="active === 'rules'" class="setting-panel">
           <!-- 逾期罚款 -->
           <div class="card panel-card fade-in">
@@ -232,7 +252,7 @@
           </div>
         </section>
 
-        <!-- ===== AI 人设 ===== -->
+        <!-- AI 人设 -->
         <section v-show="active === 'prompt'" class="setting-panel">
           <div class="card panel-card fade-in">
             <div class="card-head">
@@ -269,7 +289,7 @@
           </div>
         </section>
 
-        <!-- ===== 催还通知 · 渠道配置 ===== -->
+        <!-- 催还通知 · 渠道配置 -->
         <section v-show="active === 'notify'" class="setting-panel">
           <!-- 催还通知规则 -->
           <div class="card panel-card fade-in">
@@ -395,7 +415,7 @@
           </div>
         </section>
 
-        <!-- ===== 催还通知 · 通知管理 ===== -->
+        <!-- 催还通知 · 通知管理 -->
         <section v-show="active === 'notify-manage'" class="setting-panel">
           <div class="card panel-card fade-in">
             <div class="card-head">
@@ -614,7 +634,7 @@ import ChangePasswordForm from '@/components/ChangePasswordForm.vue'
 import { systemApi } from '@/api'
 import { formatDateTime } from '@/utils/datetime.js'
 
-/* ===== 目次导航 ===== */
+/* 目次导航 */
 // 按业务域分组：AI 渠道与 AI 人设归到「AI 配置」组，不再被借阅规则隔断
 const navGroups = [
   {
@@ -650,6 +670,15 @@ const navGroups = [
 ]
 const active = ref('account')
 
+/* AI 悬浮球开关（localStorage 持久化，事件同步给 layout 挂载点） */
+const FLOAT_KEY = 'ai_float_disabled'
+const aiFloatOn = ref(localStorage.getItem(FLOAT_KEY) !== '1')
+const onAiFloatChange = (val) => {
+  if (val) localStorage.removeItem(FLOAT_KEY)
+  else localStorage.setItem(FLOAT_KEY, '1')
+  window.dispatchEvent(new CustomEvent('ai-float-toggle', { detail: { enabled: !!val } }))
+}
+
 // 切换目次：AI 渠道面板上次加载失败时自动重试（后端可能刚重启完成）
 const onNav = (key) => {
   active.value = key
@@ -661,7 +690,7 @@ const onNav = (key) => {
   }
 }
 
-/* ===== AI 渠道 ===== */
+/* AI 渠道 */
 const channels = ref([])
 const channelsLoading = ref(false)
 // 加载失败标记：区分"后端不可达/无权限"与"真的没有渠道"，避免空状态误导
@@ -754,7 +783,7 @@ const onRemove = (ch) => {
     .catch(() => {})
 }
 
-/* ===== 借阅规则 ===== */
+/* 借阅规则 */
 const fineRate = ref(0.5)
 const fineSaving = ref(false)
 const limitsLoading = ref(false)
@@ -841,7 +870,7 @@ const saveLimits = async () => {
   }
 }
 
-/* ===== AI 人设 ===== */
+/* AI 人设 */
 const promptContent = ref('')
 const promptLoading = ref(false)
 const promptSaving = ref(false)
@@ -874,7 +903,7 @@ const savePrompt = async () => {
   }
 }
 
-/* ===== 催还通知 · 渠道配置 ===== */
+/* 催还通知 · 渠道配置 */
 const EVENT_LABELS = {
   DUE_SOON: '即将到期提醒',
   OVERDUE_D1: '逾期第 1 天',
@@ -978,7 +1007,7 @@ const saveMail = async () => {
   }
 }
 
-/* ===== 催还通知 · 通知管理 ===== */
+/* 催还通知 · 通知管理 */
 const logs = ref([])
 const logLoading = ref(false)
 const logTotal = ref(0)
@@ -1056,7 +1085,7 @@ onMounted(() => {
 </script>
 
 <style scoped>
-/* ===== 布局：左侧目次 + 右侧面板 ===== */
+/* 布局：左侧目次 + 右侧面板 */
 .settings-layout {
   display: grid;
   grid-template-columns: 232px minmax(0, 1fr);
@@ -1153,7 +1182,7 @@ onMounted(() => {
   opacity: 0.7;
 }
 
-/* ===== 卡片通用 ===== */
+/* 卡片通用 */
 .panel-card {
   padding: var(--space-6);
   margin-bottom: var(--space-5);
@@ -1220,7 +1249,7 @@ onMounted(() => {
   flex-shrink: 0;
 }
 
-/* ===== AI 渠道 ===== */
+/* AI 渠道 */
 .channel-hint {
   display: flex;
   align-items: flex-start;
@@ -1504,7 +1533,7 @@ onMounted(() => {
   gap: 6px;
 }
 
-/* ===== 借阅规则 ===== */
+/* 借阅规则 */
 .fine-row {
   display: flex;
   align-items: center;
@@ -1611,7 +1640,7 @@ onMounted(() => {
   min-width: 240px;
 }
 
-/* ===== AI 人设 ===== */
+/* AI 人设 */
 .prompt-notice {
   display: flex;
   align-items: flex-start;
@@ -1666,7 +1695,7 @@ onMounted(() => {
   font-family: var(--font-mono);
 }
 
-/* ===== 催还通知 · 规则 ===== */
+/* 催还通知 · 规则 */
 .rule-list {
   display: flex;
   flex-direction: column;
@@ -2025,7 +2054,7 @@ onMounted(() => {
 }
 
 
-/* ===== 响应式 ===== */
+/* 响应式 */
 @media (max-width: 1100px) {
   .limit-fields {
     grid-template-columns: repeat(3, 1fr);
@@ -2075,5 +2104,24 @@ onMounted(() => {
   .panel-card {
     padding: var(--space-4);
   }
+}
+
+/* AI 悬浮球开关行 */
+.float-switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-3) 0;
+}
+.switch-label {
+  font-size: var(--fs-body);
+  font-weight: 500;
+  color: var(--color-text);
+}
+.switch-desc {
+  font-size: var(--fs-caption);
+  color: var(--color-text-tertiary);
+  margin-top: 2px;
 }
 </style>

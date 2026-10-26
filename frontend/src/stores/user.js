@@ -1,4 +1,4 @@
-/* ===== 用户 store ===== */
+/* 用户 store */
 import { defineStore } from 'pinia'
 import { authApi } from '@/api'
 

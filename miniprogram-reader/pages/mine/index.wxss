@@ -1,4 +1,4 @@
-/* —— 名片 —— */
+/* 名片 */
 .profile-card { display: flex; align-items: center; gap: 28rpx; padding: 36rpx 30rpx; }
 .avatar {
   width: 112rpx;

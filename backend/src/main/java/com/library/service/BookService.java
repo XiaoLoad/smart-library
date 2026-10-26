@@ -23,6 +23,9 @@ public class BookService {
     @Autowired
     private CategoryService categoryService;
 
+    @Autowired
+    private BookEmbeddingService bookEmbeddingService;
+
     /**
      * 图书详情
      */
@@ -63,6 +66,11 @@ public class BookService {
         if (book.getPublisher() == null) book.setPublisher("");
         if (book.getLocation() == null) book.setLocation("");
         bookMapper.insert(book);
+        // 增量维护图书向量索引（智能检索语义召回用），失败不影响新增主流程
+        try {
+            bookEmbeddingService.indexBook(book.getId());
+        } catch (Exception ignored) {
+        }
         return book;
     }
 
@@ -93,6 +101,11 @@ public class BookService {
         if (book.getPublisher() == null) book.setPublisher("");
         if (book.getLocation() == null) book.setLocation("");
         bookMapper.update(book);
+        // 图书元数据变更后同步向量索引，失败不影响更新主流程
+        try {
+            bookEmbeddingService.indexBook(book.getId());
+        } catch (Exception ignored) {
+        }
         return bookMapper.selectById(book.getId());
     }
 }

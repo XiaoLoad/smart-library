@@ -1,4 +1,4 @@
-/* —— 页头 —— */
+/* 页头 */
 .page-header { margin-bottom: 28rpx; }
 .page-title { font-size: 56rpx; font-weight: 600; letter-spacing: 4rpx; margin-top: 8rpx; }
 
@@ -15,7 +15,7 @@
 /* 吸附中只补一道极浅投影——发丝线由 .tabs 自带的下划线充当 */
 .dock.stuck { box-shadow: 0 12rpx 18rpx -16rpx rgba(44, 40, 37, 0.3); }
 
-/* —— 分段 · 下划线 —— */
+/* 分段 · 下划线 */
 .tabs {
   display: flex;
   border-bottom: 1rpx solid var(--border);
@@ -50,7 +50,7 @@
   transition: height 260ms ease-out;
 }
 
-/* —— 罚款条目 —— */
+/* 罚款条目 */
 .fine-title { font-size: 32rpx; font-weight: 600; }
 .amount { font-size: 48rpx; font-weight: 600; color: var(--danger); line-height: 1.2; }
 .pay-tip { text-align: right; margin-top: 12rpx; }

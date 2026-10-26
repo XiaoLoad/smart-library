@@ -1,4 +1,4 @@
-/* ===== Markdown → rich-text HTML（AI 对话气泡渲染） =====
+/* Markdown → rich-text HTML（AI 对话气泡渲染）
  * 依赖 npm 包 marked（工具 → 构建 npm）；缺失时降级为纯文本
  *
  * 移动端表格策略：rich-text 对 <td>/<th> 的 border、padding 等内联样式支持不可靠（已知问题），

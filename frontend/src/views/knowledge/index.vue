@@ -7,7 +7,7 @@
     </header>
 
     <div class="data-table">
-      <!-- ===== 工具条：检索筛选 + 文档录入 + 索引维护 ===== -->
+      <!-- 工具条：检索筛选 + 文档录入 + 索引维护 -->
       <div class="table-toolbar">
         <div class="left">
           <el-input
@@ -60,7 +60,7 @@
         </div>
       </div>
 
-      <!-- ===== 检索参数 + 索引状态 ===== -->
+      <!-- 检索参数 + 索引状态 -->
       <div v-loading="configLoading" class="config-bar">
         <div class="cfg-fields">
           <div class="cfg-field">
@@ -129,7 +129,7 @@
         </p>
       </div>
 
-      <!-- ===== 文档列表 ===== -->
+      <!-- 文档列表 -->
       <el-table
         v-loading="loading"
         :data="documents"
@@ -199,7 +199,7 @@
       </div>
     </div>
 
-    <!-- ===== 片段明细抽屉 ===== -->
+    <!-- 片段明细抽屉 -->
     <el-drawer
       v-model="segDrawerVisible"
       :title="segDoc ? `片段明细 · ${segDoc.title}` : '片段明细'"
@@ -218,7 +218,7 @@
       </div>
     </el-drawer>
 
-    <!-- ===== 检索测试抽屉 ===== -->
+    <!-- 检索测试抽屉 -->
     <el-drawer v-model="searchVisible" title="检索测试" size="620px" direction="rtl" :append-to-body="true">
       <div class="search-form">
         <el-input
@@ -284,7 +284,7 @@
       </div>
     </el-drawer>
 
-    <!-- ===== 粘贴文本录入弹窗 ===== -->
+    <!-- 粘贴文本录入弹窗 -->
     <el-dialog v-model="textVisible" title="粘贴文本录入" width="600px" align-center :append-to-body="true">
       <el-form ref="textFormRef" :model="textForm" :rules="textRules" label-width="80px">
         <el-form-item label="文档标题" prop="title">
@@ -321,7 +321,7 @@ import EllipsisText from '@/components/EllipsisText.vue'
 import { ragApi } from '@/api'
 import { formatDateTime } from '@/utils/datetime.js'
 
-/* ===== 文档列表 ===== */
+/* 文档列表 */
 const documents = ref([])
 const total = ref(0)
 const page = ref(1)
@@ -363,7 +363,7 @@ const onSizeChange = () => {
 const sourceLabel = (t) => (t === 'manual' ? '人工录入' : t || '—')
 const scopeLabel = (s) => (s === 'admin' ? '内部' : '公开')
 
-/* ===== 文档入库（上传 / 粘贴） ===== */
+/* 文档入库（上传 / 粘贴） */
 const uploading = ref(false)
 // 上传目标范围：内部（admin）文档只在管理员会话中可被检索到
 const uploadScope = ref('public')
@@ -429,7 +429,7 @@ const submitText = async () => {
   })
 }
 
-/* ===== RAG 参数与索引状态 ===== */
+/* RAG 参数与索引状态 */
 const configLoading = ref(false)
 const configSaving = ref(false)
 const switchLoading = ref(false)
@@ -494,7 +494,7 @@ const saveConfigParams = async () => {
   }
 }
 
-/* ===== 索引维护 ===== */
+/* 索引维护 */
 const rebuildLoading = ref(false)
 
 // 重建含逐片向量化，耗时随文档量增长，先二次确认再执行
@@ -533,7 +533,7 @@ const onReindex = async (row) => {
   }
 }
 
-/* ===== 状态启停 / 删除 ===== */
+/* 状态启停 / 删除 */
 const onStatusChange = async (row, next) => {
   row._statusLoading = true
   try {
@@ -573,7 +573,7 @@ const onDelete = async (row) => {
   }
 }
 
-/* ===== 片段明细 ===== */
+/* 片段明细 */
 const segDrawerVisible = ref(false)
 const segLoading = ref(false)
 const segDoc = ref(null)
@@ -594,7 +594,7 @@ const openSegments = async (row) => {
   }
 }
 
-/* ===== 检索测试 ===== */
+/* 检索测试 */
 const searchVisible = ref(false)
 const searching = ref(false)
 const searched = ref(false)
@@ -670,7 +670,7 @@ onMounted(() => {
   width: 130px;
 }
 
-/* ===== 参数区：与工具栏同卡，用浅底区分「配置」与「数据」 ===== */
+/* 参数区：与工具栏同卡，用浅底区分「配置」与「数据」 */
 .config-bar {
   display: flex;
   flex-wrap: wrap;
@@ -743,7 +743,7 @@ onMounted(() => {
   color: var(--color-text-tertiary);
 }
 
-/* ===== 表格单元 ===== */
+/* 表格单元 */
 .cell-sub {
   font-size: var(--fs-small);
   color: var(--color-text-secondary);
@@ -761,7 +761,7 @@ onMounted(() => {
   color: var(--color-text-secondary);
 }
 
-/* ===== 片段明细 ===== */
+/* 片段明细 */
 .seg-list {
   display: flex;
   flex-direction: column;
@@ -801,7 +801,7 @@ onMounted(() => {
   color: var(--color-text-tertiary);
 }
 
-/* ===== 检索测试 ===== */
+/* 检索测试 */
 .search-form {
   margin-bottom: var(--space-4);
 }
@@ -890,7 +890,7 @@ onMounted(() => {
   word-break: break-word;
 }
 
-/* ===== 响应式 ===== */
+/* 响应式 */
 @media (max-width: 768px) {
   .config-bar {
     padding: var(--space-3);

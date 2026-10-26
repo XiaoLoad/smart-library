@@ -105,7 +105,7 @@ Page({
     return Math.max(0, Math.round(this._winH - this._dockH - this._minBase))
   },
 
-  /* —— 分段（swiper） —— */
+  /* 分段（swiper） */
   onSegment(e) {
     const i = SEGMENTS.findIndex((s) => s.key === e.currentTarget.dataset.key)
     if (i < 0 || i === this.data.current) return
@@ -124,7 +124,7 @@ Page({
     this.reload(i, !this.pane(i).firstLoad)
   },
 
-  /* —— 列表 —— */
+  /* 列表 */
   pane(i) {
     return this.data.panes[i]
   },
@@ -150,7 +150,7 @@ Page({
     this.loadAnnounces(i)
   },
 
-  // ===== 通知 =====
+  // 通知
   async loadNotices(i) {
     this.setPane(i, { loading: true })
     try {
@@ -206,7 +206,7 @@ Page({
     })
   },
 
-  // ===== 公告 =====
+  // 公告
   async loadAnnounces(i, silent) {
     const { page } = this.pane(i)
     this.setPane(i, { loading: true })

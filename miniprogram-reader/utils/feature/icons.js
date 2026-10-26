@@ -1,4 +1,4 @@
-/* ===== 日式极简线性图标库（内联 SVG · 无 emoji） =====
+/* 日式极简线性图标库（内联 SVG · 无 emoji）
  * 描边风格：24 网格 / 1.6 线宽 / 圆端点，与 Web 端克制美学一致
  * 用法：const { getIcon } = require('./icons'); getIcon('search', '#9c958d')
  */

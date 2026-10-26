@@ -1,4 +1,4 @@
-﻿name: CI
+name: CI
 
 on:
   push:
@@ -10,7 +10,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # ---------- 变更路径检测：决定后续 job 是否运行 ----------
+  # 变更路径检测：决定后续 job 是否运行
   paths:
     runs-on: ubuntu-latest
     outputs:
@@ -28,9 +28,9 @@ jobs:
             frontend:
               - 'frontend/**'
             miniprogram:
-              - 'miniprogram/**'
+              - 'miniprogram-reader/**'
 
-  # ---------- 后端：编译 + 测试 ----------
+  # 后端：编译 + 测试
   backend:
     needs: paths
     if: needs.paths.outputs.backend == 'true'
@@ -46,7 +46,7 @@ jobs:
         working-directory: backend
         run: mvn -B verify
 
-  # ---------- Web 前端：构建 ----------
+  # Web 前端：构建
   frontend:
     needs: paths
     if: needs.paths.outputs.frontend == 'true'
@@ -68,7 +68,7 @@ jobs:
         working-directory: frontend
         run: pnpm build
 
-  # ---------- 微信小程序：Node 语法检查（无密钥无法编译） ----------
+  # 微信小程序：Node 语法检查（无密钥无法编译）
   miniprogram:
     needs: paths
     if: needs.paths.outputs.miniprogram == 'true'
@@ -84,7 +84,7 @@ jobs:
             | xargs -0 -n1 node --check
           echo "✓ 小程序 JS 语法检查通过"
 
-  # ---------- 仓库卫生：禁止爬虫目录/运行时数据/冗余锁文件入库 ----------
+  # 仓库卫生：禁止爬虫目录/运行时数据/冗余锁文件入库
   repo-hygiene:
     runs-on: ubuntu-latest
     steps:
@@ -103,7 +103,7 @@ jobs:
           done
           exit $ERR
 
-  # ---------- 提交信息规范（PR 标题需符合 Conventional Commits） ----------
+  # 提交信息规范（PR 标题需符合 Conventional Commits）
   commit-lint:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest

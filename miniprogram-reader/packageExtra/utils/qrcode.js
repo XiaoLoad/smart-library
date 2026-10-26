@@ -1,4 +1,4 @@
-/* ===== 取书二维码绘制（canvas 2d + qrcode-generator） =====
+/* 取书二维码绘制（canvas 2d + qrcode-generator）
  * 使用前请在开发者工具执行：工具 → 构建 npm
  */
 let qrcodeGen = null

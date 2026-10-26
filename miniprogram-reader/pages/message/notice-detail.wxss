@@ -1,4 +1,4 @@
-/* —— 文章排版 · 纸面直排（不套卡片） —— */
+/* 文章排版 · 纸面直排（不套卡片） */
 .article {
   background: var(--bg-elevated);
   border: 1rpx solid var(--border);

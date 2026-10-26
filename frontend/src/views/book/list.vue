@@ -67,6 +67,17 @@
       <!-- 图书列表 -->
       <section class="book-main fade-in">
         <div class="data-table">
+          <!-- AI 检索结果横幅：AI 助手 queryBooks 结果联动展示 -->
+          <div v-if="aiResult" class="smart-banner">
+            <span class="smart-badge">
+              <el-icon><MagicStick /></el-icon>
+              AI 检索结果
+            </span>
+            <span class="smart-tags">「{{ aiResult.query }}」 · {{ aiResult.total }} 本（库存以下单时为准）</span>
+            <el-button text size="small" class="smart-exit" @click="clearAiResult"
+              >返回普通检索</el-button
+            >
+          </div>
           <div class="table-toolbar">
             <div class="left">
               <el-input
@@ -79,6 +90,17 @@
                 @clear="loadBooks"
               />
               <el-button @click="loadBooks">搜索</el-button>
+              <el-tooltip
+                content="试试对右下角的 AI 助手说「帮我找几本科幻小说」，检索结果会同步到这里"
+                placement="bottom"
+                effect="dark"
+                :show-after="300"
+              >
+                <button type="button" class="ai-guide-btn" @click="openAiForSearch">
+                  <el-icon><ChatDotRound /></el-icon>
+                  让 AI 帮我找书
+                </button>
+              </el-tooltip>
             </div>
             <div class="right">
               <span v-if="!userStore.isAdmin && quota" class="quota-tip">
@@ -225,7 +247,7 @@
             </template>
           </el-table>
 
-          <div class="table-pagination">
+          <div class="table-pagination" v-if="!aiResult">
             <el-pagination
               v-model:current-page="page"
               v-model:page-size="size"
@@ -267,10 +289,11 @@
 <script setup>
 import { ref, computed, onMounted, watch, nextTick } from "vue";
 import { useRouter } from "vue-router";
-import { Search, Plus, Collection, Notebook, Expand, Fold } from "@element-plus/icons-vue";
+import { Search, Plus, Collection, Notebook, Expand, Fold, MagicStick, ChatDotRound } from "@element-plus/icons-vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { bookApi, borrowApi } from "@/api";
 import { useUserStore } from "@/stores/user";
+import { useAiSearchStore } from "@/stores/aiSearch";
 import BorrowCodeDialog from "@/components/BorrowCodeDialog.vue";
 import BookFormDialog from "@/components/BookFormDialog.vue";
 import { useScrollRestore } from "@/composables/useScrollRestore";
@@ -397,6 +420,31 @@ const { reload: loadBooks } = useSnapshotRefresh({
   apply: applySnapshot,
 });
 
+// ---------- AI 检索联动 ----------
+// AI 助手中 queryBooks 工具的返回结果会写入 aiSearchStore；
+// 本页 watch 到新结果后切换为「AI 检索结果」视图（横幅 + 列表覆盖）
+const aiSearchStore = useAiSearchStore();
+const aiResult = computed(() => aiSearchStore.result);
+
+watch(aiResult, (val) => {
+  if (!val) return;
+  // 用 AI 返回的图书列表覆盖当前表格数据
+  books.value = val.books;
+  total.value = val.total;
+  page.value = 1;
+});
+
+const clearAiResult = () => {
+  aiSearchStore.clear();
+  page.value = 1;
+  loadBooks();
+};
+
+// 引导入口：唤起 AI 悬浮球并预填检索话术
+const openAiForSearch = () => {
+  aiSearchStore.requestOpen("帮我找几本好看的图书，我想看看馆藏有什么推荐");
+};
+
 const onSizeChange = () => {
   page.value = 1;
   loadBooks();
@@ -481,11 +529,84 @@ const checkEllipsis = (e, row, flagKey) => {
 
 onMounted(async () => {
   await loadBooks();
+  // 若 AI 检索结果在进入本页之前已产生（如在 AI 助手页聊完再切过来），直接应用
+  if (aiSearchStore.result) {
+    books.value = aiSearchStore.result.books;
+    total.value = aiSearchStore.result.total;
+    page.value = 1;
+  }
   nextTick(updateTreeScroll);
 });
 </script>
 
 <style scoped>
+/* AI 智能检索提示条 */
+.smart-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 10px 14px;
+  margin-bottom: var(--space-3);
+  border-radius: var(--radius-md);
+  background: linear-gradient(
+    135deg,
+    var(--color-primary-light),
+    var(--color-secondary-light)
+  );
+  border: 1px solid var(--color-divider);
+}
+
+.smart-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--fs-small);
+  font-weight: 600;
+  color: var(--color-primary);
+  white-space: nowrap;
+}
+
+.smart-tags {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-small);
+  color: var(--color-text-secondary);
+  min-width: 0;
+  overflow: hidden;
+}
+
+.smart-tag {
+  flex-shrink: 0;
+}
+
+.smart-exit {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+/* AI 引导入口按钮 */
+.ai-guide-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 12px;
+  height: 32px;
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-primary);
+  font-size: var(--fs-small);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all var(--duration-fast) var(--ease-soft);
+}
+
+.ai-guide-btn:hover {
+  background: var(--color-primary-light);
+  border-color: var(--color-primary);
+}
+
 .book-layout {
   display: grid;
   grid-template-columns: 260px minmax(0, 1fr);

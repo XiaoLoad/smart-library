@@ -163,7 +163,7 @@ Page({
     if (this._revealTimer) clearTimeout(this._revealTimer)
   },
 
-  // ===== 会话 =====
+  // 会话
   async fetchConversations() {
     try {
       const res = await request.get('/ai/conversation/list', undefined, { silent: true })
@@ -245,7 +245,7 @@ Page({
     this.setData({ drawerOpen: !this.data.drawerOpen })
   },
 
-  // ===== 历史消息（游标向上翻页） =====
+  // 历史消息（游标向上翻页）
   async loadHistory(reset) {
     const conv = this.data.currentConv
     if (!conv || this.data.loadingHistory) return
@@ -315,7 +315,7 @@ Page({
     this.loadHistory(false)
   },
 
-  // ===== 目录定位条：tick 点击直接跳；目录按钮展开面板（面板把对话推下去，不遮挡） =====
+  // 目录定位条：tick 点击直接跳；目录按钮展开面板（面板把对话推下去，不遮挡）
   onToggleToc() {
     const open = !this.data.tocOpen
     // 面板常驻渲染（靠 .open 类做展开动画），元素已在 DOM，锚点一次设置即可生效
@@ -337,7 +337,7 @@ Page({
     this.send()
   },
 
-  // ===== 滚动跟随（scrollspy）：以「顶部已越过的最近一轮」为当前轮，驱动 tick 高亮 =====
+  // 滚动跟随（scrollspy）：以「顶部已越过的最近一轮」为当前轮，驱动 tick 高亮
   onMsgsScroll(e) {
     const st = e.detail.scrollTop || 0
     this._msgsTop = st
@@ -373,7 +373,7 @@ Page({
       })
   },
 
-  // ===== 发送 & 流式渲染 =====
+  // 发送 & 流式渲染
   onInput(e) {
     this.setData({ input: e.detail.value })
   },
@@ -410,6 +410,7 @@ Page({
       segments: [],
       thinking: '',
       thinkingOpen: false,
+      thinkingSeconds: null, // 思考耗时（秒），完成后保留展示
       toolEvents: [],
       toolChips: [], // 流式期间保持空（卡片展示），finalize 后由 toolEvents 收拢为徽章
       // 知识库来源（SSE rag 事件）：在调用 LLM 前推送，故先出「参考资料」行、正文随后流式出现；
@@ -419,6 +420,7 @@ Page({
       refTitle: '', // 展开中的来源标题与摘要（wxml 不做嵌套下标取值，展开时就近取好）
       refSnippet: '',
       pending: true,
+      waiting: true, // 等待指示：尚无思考/工具/参考资料/正文产出时显示「正在思考…」跳动
       _done: false,
     }
     this._streamIdx = this.data.messages.length + 1
@@ -454,11 +456,27 @@ Page({
   onStreamEvent({ event, data }) {
     const msg = this._streamMsg
     if (!msg) return
+    // 任一实际产出到达即结束等待指示
+    if (msg.waiting && ['thinking', 'delta', 'tool', 'rag', 'final'].includes(event) && data) {
+      msg.waiting = false
+      this.setData({ ['messages[' + this._streamIdx + '].waiting']: false })
+    }
     if (event === 'thinking') {
       if (!data) return
+      // 首个思考增量：启动耗时计时（0.1s 粒度），与 Web 端一致
+      if (!msg._thinkingStart) {
+        msg._thinkingStart = Date.now()
+        this._thinkTimer = setInterval(() => {
+          if (!this._streamMsg) { clearInterval(this._thinkTimer); return }
+          const sec = ((Date.now() - this._streamMsg._thinkingStart) / 1000).toFixed(1)
+          this.setData({ ['messages[' + this._streamIdx + '].thinkingSeconds']: sec })
+        }, 100)
+      }
       msg.thinking += data
+      this.scheduleFlush()
     } else if (event === 'delta') {
       if (!data) return
+      this.stopThinkTimer()
       msg.content += data
       this.ensureReveal()
       this.scheduleFlush()
@@ -646,7 +664,7 @@ Page({
     })
   },
 
-  // ===== 打字机：shown 是已揭示的文本，按 ~24ms/2 字从 content 增长 =====
+  // 打字机：shown 是已揭示的文本，按 ~24ms/2 字从 content 增长
   ensureReveal() {
     if (this._revealTimer) return
     this._revealTimer = setTimeout(() => this.revealTick(), 24)
@@ -689,6 +707,17 @@ Page({
     }
   },
 
+  stopThinkTimer() {
+    if (!this._thinkTimer) return
+    clearInterval(this._thinkTimer)
+    this._thinkTimer = null
+    const msg = this._streamMsg
+    if (msg && msg._thinkingStart) {
+      const sec = ((Date.now() - msg._thinkingStart) / 1000).toFixed(1)
+      this.setData({ ['messages[' + this._streamIdx + '].thinkingSeconds']: sec })
+    }
+  },
+
   scheduleFlush() {
     if (this._renderTimer) return
     this._renderTimer = setTimeout(() => {
@@ -712,6 +741,7 @@ Page({
   finishStream() {
     clearTimeout(this._renderTimer)
     this._renderTimer = null
+    this.stopThinkTimer()
     const msg = this._streamMsg
     if (msg) {
       // 残留 start 工具卡 → end（停止旋转）
@@ -721,6 +751,10 @@ Page({
       msg._done = true
     }
     this.setData({ streaming: false })
+    if (msg && msg.waiting) {
+      msg.waiting = false
+      this.setData({ ['messages[' + this._streamIdx + '].waiting']: false })
+    }
     const failed = this._streamFailed
     this._streamFailed = false
     if (!msg) return
@@ -749,6 +783,7 @@ Page({
         ['messages[' + this._streamIdx + '].shown']: msg.content,
         ['messages[' + this._streamIdx + '].content']: msg.content,
         ['messages[' + this._streamIdx + '].pending']: false,
+        ['messages[' + this._streamIdx + '].waiting']: false,
         ['messages[' + this._streamIdx + '].html']: '',
       })
       this._streamMsg = null

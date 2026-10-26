@@ -83,7 +83,7 @@ public class UserController {
         return Result.success(user);
     }
 
-    // ==================== 本人档案（自助） ====================
+    // 本人档案（自助）
 
     /**
      * 查看本人完整档案。与管理员的 /user/detail 不同，此处恒取 token 里的本人 id，

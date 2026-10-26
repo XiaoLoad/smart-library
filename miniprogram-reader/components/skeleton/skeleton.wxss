@@ -1,4 +1,4 @@
-/* ===== 骨架屏 · 灰块 =====
+/* 骨架屏 · 灰块
  * 组件样式默认隔离，app.wxss 里的全局类在组件内不生效，故这里的排版类自成一套；
  * 只有颜色借 page 上的 CSS 变量（自定义属性会穿过组件边界继承）。
  * 尺寸对齐真实版式：封面 287rpx、栏宽 (100% - 60rpx) / 3、卡片与 app.wxss 的 .card 同规格，
@@ -18,7 +18,7 @@
   to { background-position: 0 0; }
 }
 
-/* —— 书库 —— */
+/* 书库 */
 .sk-grid { display: flex; flex-wrap: wrap; column-gap: 30rpx; }
 .sk-cell { width: calc((100% - 60rpx) / 3); box-sizing: border-box; }
 .sk-cover { height: 287rpx; }
@@ -29,7 +29,7 @@
 .sk-shelf-line { position: absolute; left: 0; right: 0; top: 287rpx; height: 1rpx; background: var(--border-strong); }
 .sk-shelf-edge { position: absolute; left: 0; right: 0; top: 288rpx; height: 8rpx; background: var(--bg-muted); }
 
-/* —— 记录卡 / 通知 / 公告 —— */
+/* 记录卡 / 通知 / 公告 */
 .sk-card {
   background: var(--bg-elevated);
   border: 1rpx solid var(--border);

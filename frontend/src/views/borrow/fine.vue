@@ -222,7 +222,7 @@ onMounted(load)
 .stat-value.danger { color: var(--color-danger); }
 .stat-value.success { color: var(--color-success); }
 
-/* —— 馆内规则卡：编辑风三栏，serif 序号 + 左色条 —— */
+/* 馆内规则卡：编辑风三栏，serif 序号 + 左色条 */
 .rules-card {
   background: var(--color-bg-elevated);
   border: 1px solid var(--color-border);

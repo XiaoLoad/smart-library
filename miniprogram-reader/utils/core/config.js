@@ -1,15 +1,15 @@
-/* ===== 环境配置 =====
+/* 环境配置
  * dev：开发者工具勾选「不校验合法域名」可用 http 本地后端
  * prod：必须 HTTPS + 备案域名，并登记到小程序后台「服务器域名」
  */
 const IS_DEV = true
 
-const DEV_ORIGIN = 'http://192.168.1.146:8080'
+const DEV_ORIGIN = 'http://192.168.1.200:8080'
 const PROD_ORIGIN = 'https://api.your-library.example.com'
 
 const ORIGIN = IS_DEV ? DEV_ORIGIN : PROD_ORIGIN
 
-/* ===== 封面加载通道 =====
+/* 封面加载通道
  * 真机上 <image> 加载 http 资源会被微信客户端拦截，开发者工具的「不校验合法域名」对图片不生效
  * （那个开关只管 wx.request 一类的 API 请求），因此接口数据能出来、封面却一片空白。
  * 四条通道：A 直连 <image> / B 背景图 / C base64 <image> / D 外链 https。

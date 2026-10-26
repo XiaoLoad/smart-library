@@ -162,7 +162,7 @@ Page({
     this.reload()
   },
 
-  /* —— 分类树 —— */
+  /* 分类树 */
   async openCat() {
     if (!this.data.catLoaded) await this.loadCategories()
     if (!this.data.catLoaded) return
@@ -253,7 +253,7 @@ Page({
     }
   },
 
-  /* —— 书目 —— */
+  /* 书目 */
   /** 列表上屏的唯一出口：书本、排、总数、计数文案一起落地，中间态不会被渲染出去。
    *  from 为这批之前已渲染的排数——缓存回填时是 0，翻页时是当前排数（新排从 0 起算错峰）。 */
   applyList(list, total, from) {

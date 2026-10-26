@@ -267,7 +267,7 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-/* ===== 加载 / 空态 ===== */
+/* 加载 / 空态 */
 .detail-loading,
 .detail-empty {
   display: flex;
@@ -289,7 +289,7 @@ onMounted(async () => {
   line-height: 1;
 }
 
-/* ===== 主体两栏 ===== */
+/* 主体两栏 */
 .detail-grid {
   display: grid;
   grid-template-columns: 300px minmax(0, 1fr);
@@ -297,7 +297,7 @@ onMounted(async () => {
   align-items: start;
 }
 
-/* —— 藏书票卡 —— */
+/* 藏书票卡 */
 .plate {
   position: sticky;
   top: calc(var(--header-height) + var(--space-4));
@@ -425,7 +425,7 @@ onMounted(async () => {
   color: var(--color-text-tertiary);
 }
 
-/* —— 目录档案 —— */
+/* 目录档案 */
 .catalog { min-width: 0; }
 
 .catalog-head { margin-bottom: var(--space-5); }

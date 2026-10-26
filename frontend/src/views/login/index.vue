@@ -155,7 +155,7 @@ const handleLogin = async () => {
   background: var(--color-bg);
 }
 
-/* —— 左侧视觉区 —— */
+/* 左侧视觉区 */
 .login-visual {
   position: relative;
   background: linear-gradient(180deg, #2c2825 0%, #1a1815 100%);
@@ -253,7 +253,7 @@ const handleLogin = async () => {
   font-weight: 500;
 }
 
-/* —— 右侧表单区 —— */
+/* 右侧表单区 */
 .login-form-section {
   display: flex;
   align-items: center;
@@ -368,7 +368,7 @@ const handleLogin = async () => {
   40% { transform: scale(1); opacity: 1; }
 }
 
-/* —— 演示账号 —— */
+/* 演示账号 */
 .demo-accounts {
   margin-top: var(--space-6);
   padding-top: var(--space-5);
@@ -433,7 +433,7 @@ const handleLogin = async () => {
   color: var(--color-primary);
 }
 
-/* —— 响应式 —— */
+/* 响应式 */
 @media (max-width: 968px) {
   .login-page {
     grid-template-columns: 1fr;

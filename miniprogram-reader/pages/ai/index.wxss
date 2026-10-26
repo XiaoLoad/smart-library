@@ -12,7 +12,7 @@
   overflow: hidden;
 }
 
-/* —— 顶栏 · 细线 · 固定不滚 —— */
+/* 顶栏 · 细线 · 固定不滚 */
 .topbar {
   flex: 0 0 auto;
   display: flex;
@@ -26,7 +26,7 @@
 .topbar-btn:active { opacity: 0.55; }
 .topbar-title { text-align: center; font-size: 32rpx; font-weight: 600; }
 
-/* —— 消息区 —— */
+/* 消息区 */
 /* flex:1 + min-height:0 是 scroll-view 能被压缩、内部滚动的前提；
    缺 min-height:0 时它会按内容撑大、把底部输入条顶出视口 */
 /* 输入条是 in-flow 的 flex 子项（非 fixed 浮层），消息区底部本就贴其顶部，
@@ -66,8 +66,23 @@
   margin-bottom: 10rpx;
 }
 .typing { color: var(--primary); margin-left: 2rpx; }
+/* 等待指示：三点跳动 + 文案，任一产出到达即由 JS 置 waiting=false 移除 */
+.wait-dots { display: flex; align-items: center; }
+.wait-dot {
+  width: 10rpx; height: 10rpx; border-radius: 50%;
+  background: var(--text-tertiary);
+  margin-right: 8rpx;
+  animation: wait-pulse 1.4s infinite ease-in-out both;
+}
+.wait-dot:nth-child(2) { animation-delay: 0.16s; }
+.wait-dot:nth-child(3) { animation-delay: 0.32s; }
+.wait-text { font-size: 24rpx; color: var(--text-tertiary); margin-left: 4rpx; }
+@keyframes wait-pulse {
+  0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+  40% { transform: scale(1); opacity: 1; }
+}
 
-/* —— 表格片段：原生 WXML 网格 + 卡片内横向滑动（rich-text 的 border/padding 不可靠，改用 CSS 类） —— */
+/* 表格片段：原生 WXML 网格 + 卡片内横向滑动（rich-text 的 border/padding 不可靠，改用 CSS 类） */
 .table-scroll {
   width: 100%;
   margin: 10rpx 0;
@@ -109,11 +124,18 @@
 }
 
 
-/* —— 思维链 · 纸面脚注风 —— */
+/* 思维链 · 纸面脚注风 */
 .thinking {
   border-left: 3rpx solid var(--border-strong);
   padding: 8rpx 0 8rpx 18rpx;
   margin-bottom: 16rpx;
+}
+/* 思考耗时徽标：THOUGHT 右侧（如 12.4s），等宽数字避免跳动 */
+.thinking-time {
+  margin-left: 12rpx;
+  font-size: 20rpx;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
 }
 .thinking-body {
   font-size: 24rpx;
@@ -122,7 +144,7 @@
   white-space: pre-wrap;
 }
 
-/* —— 工具调用链 · 卡片化（移动端适配） —— */
+/* 工具调用链 · 卡片化（移动端适配） */
 .tools { margin: 6rpx 0 14rpx; display: flex; flex-direction: column; gap: 10rpx; }
 
 /* 多工具时的链头说明：细小眉标 + 圆点，不再是大虚线药丸 */
@@ -212,7 +234,7 @@
 .tool-card.start .tool-icon { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* —— 工具徽章行：回复完成后工具卡片收拢为一排徽章（虚线页脚分隔，呼应手稿批注风） —— */
+/* 工具徽章行：回复完成后工具卡片收拢为一排徽章（虚线页脚分隔，呼应手稿批注风） */
 .chips {
   margin-top: 16rpx;
   padding-top: 12rpx;
@@ -254,7 +276,7 @@
   overflow: auto;
 }
 
-/* —— 参考资料行：知识库检索命中的来源（正文之前，虚线页脚分隔，与工具徽章同一套纸面药丸） —— */
+/* 参考资料行：知识库检索命中的来源（正文之前，虚线页脚分隔，与工具徽章同一套纸面药丸） */
 .refs {
   margin-bottom: 14rpx;
   padding-bottom: 12rpx;
@@ -320,7 +342,7 @@
   word-break: break-all;
 }
 
-/* —— 输入区 · 圆角书写条（固定底部） —— */
+/* 输入区 · 圆角书写条（固定底部） */
 .input-bar {
   flex: 0 0 auto;
   display: flex;
@@ -361,7 +383,7 @@
 .send-btn.disabled { background: var(--bg-muted); }
 .send-btn.stop { background: var(--danger); }
 
-/* —— 会话抽屉 —— */
+/* 会话抽屉 */
 .drawer-mask {
   position: fixed;
   inset: 0;
@@ -402,7 +424,7 @@
 .conv-title { font-size: 27rpx; }
 .conv-del { padding: 8rpx 12rpx; display: flex; align-items: center; }
 
-/* —— 目录定位条 · 在流细条（面板展开把对话推下去，绝不遮挡） —— */
+/* 目录定位条 · 在流细条（面板展开把对话推下去，绝不遮挡） */
 .navstrip {
   flex: 0 0 auto;
   background: var(--bg-elevated);
@@ -527,7 +549,7 @@
 .toc-row.cur .toc-no { color: var(--secondary); font-weight: 600; }
 .toc-row.cur .toc-ex { color: var(--text); }
 
-/* —— 轮次眉标（用户消息上方：№ · 时间 问） —— */
+/* 轮次眉标（用户消息上方：№ · 时间 问） */
 .rnd {
   display: flex;
   justify-content: flex-end;
@@ -543,7 +565,7 @@
 }
 .rnd-time { font-size: 22rpx; color: var(--text-3); }
 
-/* —— 跨天日期戳：细线夹注 —— */
+/* 跨天日期戳：细线夹注 */
 .day-sep {
   display: flex;
   align-items: center;
@@ -557,7 +579,7 @@
   color: var(--text-3);
 }
 
-/* —— 空态 · 藏书票 —— */
+/* 空态 · 藏书票 */
 .msgs-inner.is-empty { justify-content: center; }
 .exlib { width: 82%; margin: 0 auto; }
 .exlib-frame {

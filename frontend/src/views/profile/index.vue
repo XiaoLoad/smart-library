@@ -124,6 +124,23 @@
 
           <ChangePasswordForm />
         </section>
+
+        <section class="card panel-card fade-in">
+          <div class="card-head">
+            <div class="card-head__icon"><AppIcon name="sparkles" :size="22" /></div>
+            <div>
+              <h2 class="card-title">AI 悬浮球</h2>
+              <p class="card-sub">在任意页面右下角显示 AI 助手悬浮球，点击即可展开对话。</p>
+            </div>
+          </div>
+          <div class="float-switch-row">
+            <div>
+              <div class="switch-label">启用 AI 悬浮球</div>
+              <div class="switch-desc">关闭后所有页面不再显示悬浮球入口</div>
+            </div>
+            <el-switch v-model="aiFloatOn" @change="onAiFloatChange" />
+          </div>
+        </section>
       </div>
     </div>
 
@@ -213,7 +230,7 @@ const quotaStateText = computed(() => {
   return quota.value.canBorrow ? '可正常借阅' : '已达借阅上限'
 })
 
-/* ===== 表单 ===== */
+/* 表单 */
 const formRef = ref(null)
 const saving = ref(false)
 const form = reactive({})
@@ -274,7 +291,7 @@ const save = () => {
   })
 }
 
-/* ===== 加载 ===== */
+/* 加载 */
 const load = async () => {
   showPageLoading()
   try {
@@ -298,6 +315,15 @@ const load = async () => {
 }
 
 onMounted(load)
+
+/* AI 悬浮球开关（与系统设置共用 localStorage 键与同步事件） */
+const FLOAT_KEY = 'ai_float_disabled'
+const aiFloatOn = ref(localStorage.getItem(FLOAT_KEY) !== '1')
+const onAiFloatChange = (val) => {
+  if (val) localStorage.removeItem(FLOAT_KEY)
+  else localStorage.setItem(FLOAT_KEY, '1')
+  window.dispatchEvent(new CustomEvent('ai-float-toggle', { detail: { enabled: !!val } }))
+}
 </script>
 
 <style scoped>
@@ -315,7 +341,7 @@ onMounted(load)
   gap: var(--space-5);
 }
 
-/* ===== 身份卡 ===== */
+/* 身份卡 */
 .identity-card {
   padding: var(--space-5);
 }
@@ -427,7 +453,7 @@ onMounted(load)
   color: var(--color-text-tertiary);
 }
 
-/* ===== 借阅概览 ===== */
+/* 借阅概览 */
 .quota-head {
   display: flex;
   align-items: center;
@@ -488,7 +514,7 @@ onMounted(load)
   color: var(--color-text-tertiary);
 }
 
-/* ===== 右侧卡片 ===== */
+/* 右侧卡片 */
 .panel-card {
   padding: var(--space-6);
 }
@@ -557,5 +583,24 @@ onMounted(load)
   .panel-card {
     padding: var(--space-5) var(--space-4);
   }
+}
+
+/* AI 悬浮球开关行 */
+.float-switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-2) 0;
+}
+.switch-label {
+  font-size: var(--fs-body);
+  font-weight: 500;
+  color: var(--color-text);
+}
+.switch-desc {
+  font-size: var(--fs-caption);
+  color: var(--color-text-tertiary);
+  margin-top: 2px;
 }
 </style>

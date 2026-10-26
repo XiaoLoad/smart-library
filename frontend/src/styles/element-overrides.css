@@ -1,7 +1,7 @@
-/* ===== Element Plus 主题定制 · 日式极简覆盖 ===== */
+/* Element Plus 主题定制 · 日式极简覆盖 */
 /* 消除 Element Plus 默认的"科技蓝"感，融入暖纸调主题 */
 
-/* —— 全局根变量映射：让 Element Plus 组件跟随设计 tokens —— */
+/* 全局根变量映射：让 Element Plus 组件跟随设计 tokens */
 /* 由于 CSS var() 动态解析，[data-theme="dark"] 切换 --color-* 后自动级联 */
 :root {
   /* 主色系 */
@@ -68,7 +68,7 @@
   --el-mask-color-extra-light: rgba(0, 0, 0, 0.5);
 }
 
-/* —— 通用 —— */
+/* 通用 */
 .el-button {
   font-family: var(--font-sans);
   font-weight: 500;
@@ -113,7 +113,7 @@
   cursor: not-allowed;
 }
 
-/* —— 输入框 —— */
+/* 输入框 */
 .el-input__wrapper {
   background-color: var(--color-bg-elevated);
   border-radius: var(--radius-md);
@@ -129,7 +129,7 @@
   color: var(--color-text);
 }
 
-/* —— 表格 —— */
+/* 表格 */
 .el-table {
   --el-table-bg-color: var(--color-bg-elevated);
   --el-table-tr-bg-color: var(--color-bg-elevated);
@@ -149,7 +149,7 @@
   color: var(--color-text-tertiary);
 }
 
-/* —— 卡片 —— */
+/* 卡片 */
 .el-card {
   --el-card-bg-color: var(--color-bg-elevated);
   --el-card-border-color: var(--color-border);
@@ -158,7 +158,7 @@
   border: 1px solid var(--color-border);
 }
 
-/* —— 分页 —— */
+/* 分页 */
 .el-pagination {
   --el-pagination-bg-color: transparent;
   --el-pagination-hover-color: var(--color-primary);
@@ -167,7 +167,7 @@
   --el-pagination-button-disabled-color: var(--color-text-tertiary);
 }
 
-/* —— 菜单 · 侧边栏 —— */
+/* 菜单 · 侧边栏 */
 .el-menu {
   --el-menu-bg-color: transparent;
   --el-menu-text-color: var(--color-text-secondary);
@@ -182,7 +182,7 @@
   font-weight: 500;
 }
 
-/* —— 标签 —— */
+/* 标签 */
 .el-tag {
   border-radius: var(--radius-sm);
   font-weight: 500;
@@ -191,19 +191,19 @@
   --el-tag-text-color: var(--color-text-secondary);
 }
 
-/* —— 对话框 —— */
+/* 对话框 */
 .el-dialog {
   --el-dialog-bg-color: var(--color-bg-elevated);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
 }
 
-/* —— 消息提示 —— */
+/* 消息提示 */
 .el-message-box {
   border-radius: var(--radius-lg);
 }
 
-/* —— 下拉 —— */
+/* 下拉 */
 .el-dropdown-menu {
   background: var(--color-bg-elevated);
   border: 1px solid var(--color-border);
@@ -211,14 +211,14 @@
   box-shadow: var(--shadow-md);
 }
 
-/* —— 树 —— */
+/* 树 */
 .el-tree {
   --el-tree-node-hover-bg-color: var(--color-bg-subtle);
   --el-tree-text-color: var(--color-text);
   background: transparent;
 }
 
-/* —— Tabs —— */
+/* Tabs */
 .el-tabs__item {
   font-family: var(--font-sans);
   font-weight: 500;
@@ -234,12 +234,12 @@
   background-color: var(--color-border);
 }
 
-/* —— Empty —— */
+/* Empty */
 .el-empty__description p {
   color: var(--color-text-tertiary);
 }
 
-/* —— Select 下拉 / Popper 浮层 —— */
+/* Select 下拉 / Popper 浮层 */
 .el-select-dropdown__item.hover,
 .el-select-dropdown__item:hover {
   background-color: var(--color-bg-subtle);
@@ -249,7 +249,7 @@
   border: 1px solid var(--color-border) !important;
 }
 
-/* —— Checkbox / Radio —— */
+/* Checkbox / Radio */
 .el-checkbox__label,
 .el-radio__label {
   color: var(--color-text-secondary);
@@ -259,10 +259,10 @@
   color: var(--color-primary);
 }
 
-/* —— Breadcrumb —— */
+/* Breadcrumb */
 /* 面包屑已抽为自定义组件（components/AppBreadcrumb.vue），样式随组件作用域管理 */
 
-/* —— Loading 遮罩 —— */
+/* Loading 遮罩 */
 .el-loading-mask {
   background-color: var(--el-mask-color);
 }
@@ -273,29 +273,29 @@
   stroke: var(--color-text-inverse);
 }
 
-/* —— Message 消息条 —— */
+/* Message 消息条 */
 .el-message {
   background: var(--color-bg-elevated) !important;
   border: 1px solid var(--color-border) !important;
   color: var(--color-text) !important;
 }
 
-/* —— Drawer 抽屉 —— */
+/* Drawer 抽屉 */
 .el-drawer {
   background: var(--color-bg-elevated);
 }
 
-/* —— Form —— */
+/* Form */
 .el-form-item__label {
   color: var(--color-text-secondary);
 }
 
-/* —— Avatar / Badge —— */
+/* Avatar / Badge */
 .el-badge__content {
   font-family: var(--font-sans);
 }
 
-/* —— Tooltip 文字提示 —— */
+/* Tooltip 文字提示 */
 .el-popper.is-dark {
   background: var(--color-text) !important;
   color: var(--color-bg) !important;

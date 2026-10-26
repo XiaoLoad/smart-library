@@ -1,8 +1,8 @@
-/* —— 页头 —— */
+/* 页头 */
 .page-header { margin-bottom: 32rpx; }
 .page-title { font-size: 56rpx; font-weight: 600; letter-spacing: 4rpx; margin-top: 8rpx; }
 
-/* —— 额度 · 纸面数字 —— */
+/* 额度 · 纸面数字 */
 .quota-line { display: flex; align-items: baseline; gap: 16rpx; margin-top: 6rpx; }
 .quota-num { font-size: 72rpx; font-weight: 600; line-height: 1.1; }
 .quota-unit { font-size: 26rpx; color: var(--text-3); }
@@ -22,7 +22,7 @@
 /* 吸附中只补一道极浅投影——发丝线由 .segments 自带的下划线充当 */
 .dock.stuck { box-shadow: 0 12rpx 18rpx -16rpx rgba(44, 40, 37, 0.3); }
 
-/* —— 分段 · 下划线 —— */
+/* 分段 · 下划线 */
 .segments {
   white-space: nowrap;
   border-bottom: 1rpx solid var(--border);
@@ -56,7 +56,7 @@
   transition: height 260ms ease-out;
 }
 
-/* —— 借阅记录 —— */
+/* 借阅记录 */
 .rec-title { font-size: 32rpx; font-weight: 600; }
 .no-line { letter-spacing: 1rpx; margin: 6rpx 0; }
 .record .tiny { margin-top: 4rpx; }

@@ -249,7 +249,7 @@ onBeforeUnmount(() => {
   border-radius: 2px;
 }
 
-/* —— 悬停卡片 —— */
+/* 悬停卡片 */
 .nav-card {
   position: absolute;
   right: calc(100% + 10px);
