@@ -54,6 +54,20 @@
                 </div>
               </div>
 
+              <!-- 生成式 UI 一级内联卡片：带可视化 type 的工具快照默认平铺展开（与 /ai/chat 页一致） -->
+              <div
+                v-for="(card, gi) in (m.toolEvents || []).filter((e) => e.phase === 'end' && e._inlineGen)"
+                :key="'gi-' + gi"
+                class="gen-ui-inline"
+                :data-gen-turn="card._turnMarker"
+              >
+                <div class="gen-ui-inline-label">
+                  <el-icon><DataBoard /></el-icon>
+                  <span>{{ genCardTitle(card) }}</span>
+                </div>
+                <AiGenUi :snapshot="parseSnapshot(card.data)" />
+              </div>
+
               <!-- 写操作授权卡（浮动面板为简化版：空间有限，只留标题与操作区） -->
               <div v-if="m.confirmCard" class="confirm-card" :class="m.confirmCard.state">
                 <div class="confirm-eyebrow">
@@ -122,7 +136,7 @@
  * 挂载后懒初始化（init），流式期间组件被 v-show 隐藏不销毁——后台继续输出。
  */
 import { ref, reactive, nextTick, onBeforeUnmount } from 'vue'
-import { Loading, Check, Close, Lock, Warning } from '@element-plus/icons-vue'
+import { Loading, Check, Close, Lock, Warning, DataBoard } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import MarkdownIt from 'markdown-it'
 import hljs from 'highlight.js'
@@ -130,6 +144,7 @@ import 'highlight.js/styles/github.css'
 import { aiApi } from '@/api'
 import { useAiSearchStore } from '@/stores/aiSearch'
 import AppIcon from '@/components/AppIcon.vue'
+import AiGenUi from '@/components/ai/AiGenUi.vue'
 
 const emit = defineEmits(['state-change'])
 
@@ -213,9 +228,60 @@ const renderMarkdown = (content) => {
   try { return md.render(content) } catch { return md.utils.escapeHtml(content) }
 }
 
+/** 工具快照 JSON → 对象（供 AiGenUi 渲染），解析失败返回 null */
+const parseSnapshot = (dataJson) => {
+  if (!dataJson || typeof dataJson !== 'string') return null
+  try {
+    return JSON.parse(dataJson.replace(/…$/, ''))
+  } catch {
+    return null
+  }
+}
+
 const scrollToBottom = async () => {
   await nextTick()
   if (msgListRef.value) msgListRef.value.scrollTop = msgListRef.value.scrollHeight
+}
+
+// ===== 生成式 UI 一级内联卡片（与 /ai/chat 页逻辑一致） =====
+const GEN_CARD_TITLES = {
+  book_grid: '图书卡片',
+  rank_list: '排行榜',
+  quota_bar: '借阅额度',
+  category_grid: '分类分布',
+  announce_list: '公告列表',
+  borrow_table: '借阅记录',
+  fine_table: '罚款记录',
+  user_table: '用户列表',
+  stats_dashboard: '统计看板',
+}
+const GEN_UI_TYPES = new Set(Object.keys(GEN_CARD_TITLES))
+const genCardTitle = (card) => GEN_CARD_TITLES[card._genType] || '数据卡片'
+
+/** 判定工具快照是否带可视化 type，是则打 _inlineGen 标志提升为一级内联卡片 */
+const markInlineGen = (card) => {
+  try {
+    const snap = JSON.parse((card.data || '').replace(/…$/, ''))
+    if (snap && GEN_UI_TYPES.has(snap.type)) {
+      card._inlineGen = true
+      card._genType = snap.type
+    }
+  } catch { /* 截断/异常快照回落原折叠行为 */ }
+}
+
+/** done 后滚动定位：本轮有内联卡片时滚到本轮第一张卡片。
+ *  通过 data-gen-turn 标记精确定位——面板消息列表同样可能含历史卡片，
+ *  全局 querySelector 会命中更早的卡片导致滚错位置 */
+const scrollToFirstGenCard = async (msg) => {
+  await nextTick()
+  if (!msg) return
+  const marker = `gen-turn-${msg.id}`
+  msg.toolEvents?.forEach((e) => { if (e._inlineGen) e._turnMarker = marker })
+  await nextTick()
+  const el = msgListRef.value
+  if (!el) return
+  const first = el.querySelector(`[data-gen-turn="${marker}"]`)
+  if (first) el.scrollTo({ top: first.offsetTop - el.offsetTop - 8, behavior: 'smooth' })
 }
 
 const onScroll = () => {
@@ -441,8 +507,20 @@ const send = async () => {
             for (let i = events.length - 1; i >= 0; i--) {
               if (events[i].name === (info.name || '') && events[i].phase === 'start') { target = events[i]; break }
             }
-            if (target) target.phase = info.phase
-            else events.push({ name: info.name || '', phase: info.phase })
+            if (target) {
+              target.phase = info.phase
+              if (info.phase === 'end' && info.data) {
+                target.data = info.data
+                markInlineGen(target)
+              }
+            } else {
+              const fbCard = { name: info.name || '', phase: info.phase }
+              if (info.phase === 'end' && info.data) {
+                fbCard.data = info.data
+                markInlineGen(fbCard)
+              }
+              events.push(fbCard)
+            }
           }
           // AI 检索联动：工具返回的图书快照先暂存候补，done 时统一判定。
           // 不限定工具名：只要快照含图书条目（items 数组且元素带 title）即成为候补；
@@ -515,6 +593,10 @@ const send = async () => {
         if (event === 'error') {
           msg.content = `⚠️ ${data || 'AI 请求出错'}`
           msg.html = renderMarkdown(msg.content)
+        }
+        // 流结束滚动定位：本轮有内联生成式卡片时滚到本轮第一张卡片，否则维持滚底
+        if (event === 'done' && (msg.toolEvents || []).some((e) => e._inlineGen)) {
+          scrollToFirstGenCard(msg)
         }
       }
     }
@@ -743,6 +825,24 @@ defineExpose({ init, destroy, send, prefill })
 .tool-card.error .tool-icon { color: var(--color-danger, #c0564a); }
 .tool-card.start .tool-icon { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* ===== 生成式 UI 一级内联卡片（与 /ai/chat 页一致） ===== */
+.gen-ui-inline {
+  margin: 8px 0;
+  padding: 10px 12px 12px;
+  border-radius: 6px;
+  background: var(--color-bg-subtle, #f5f2ec);
+  border: 1px solid var(--color-border, #e8e3dc);
+}
+.gen-ui-inline-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--color-text-secondary, #6b6560);
+}
+.gen-ui-inline-label .el-icon { color: var(--color-primary, #3a5a6b); }
 
 /* 写操作授权卡（浮动面板简化版：卡片 + 靛蓝竖条，与工具 pill 形态区分） */
 .confirm-card {

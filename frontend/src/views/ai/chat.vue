@@ -153,6 +153,24 @@
                   </div>
                 </div>
 
+                <!-- M5 升级：生成式 UI 一级内联卡片。
+                     带可视化 type 的工具快照不再折叠在工具 pill 里，直接平铺渲染在时间线之后，
+                     默认展开——用户无需上滑点击工具条展开；工具 pill 仍可查看原始 JSON（调试用）。
+                     纯 JSON 回落快照（无 type 映射）不在此渲染，保持原折叠行为 -->
+                <div
+                  v-for="(card, gi) in inlineGenCards(m)"
+                  :key="'gi-' + gi"
+                  class="gen-ui-inline"
+                  :data-gen-card="genCardAnchorId(m, gi)"
+                  :data-gen-turn="card._turnMarker"
+                >
+                  <div class="gen-ui-inline-label">
+                    <el-icon><DataBoard /></el-icon>
+                    <span>{{ genCardTitle(card) }}</span>
+                  </div>
+                  <AiGenUi :snapshot="parseSnapshot(card.data)" />
+                </div>
+
                 <!-- 写操作授权卡：AI 发起的写操作被代码级门禁拦截，等待用户授权。
                      形态刻意区别于工具卡片（卡片 vs pill），避免被当成一次普通查询结果 -->
                 <div v-if="m.confirmCard" class="confirm-card" :class="m.confirmCard.state">
@@ -316,7 +334,7 @@ import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount } from 'v
 import {
   Plus, ChatDotRound, MagicStick, Promotion, Delete,
   VideoPause, Loading, Check, Close, ArrowDownBold, ArrowUpBold, Connection,
-  Lock, Warning,
+  Lock, Warning, DataBoard,
 } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import MarkdownIt from 'markdown-it'
@@ -414,6 +432,68 @@ const parseSnapshot = (dataJson) => {
   } catch {
     return null
   }
+}
+
+// ===== 生成式 UI 一级内联卡片 =====
+// 可视化 type → 卡片标题（与 AiGenUi 内各视图对应）
+const GEN_CARD_TITLES = {
+  book_grid: '图书卡片',
+  rank_list: '排行榜',
+  quota_bar: '借阅额度',
+  category_grid: '分类分布',
+  announce_list: '公告列表',
+  borrow_table: '借阅记录',
+  fine_table: '罚款记录',
+  user_table: '用户列表',
+  stats_dashboard: '统计看板',
+}
+
+/**
+ * 取本轮工具事件中带可视化 type 的快照（内联渲染用）。
+ * 每个事件对象记有 _inlineGen 标志（tool end 时算好），避免模板里反复 JSON.parse。
+ */
+const inlineGenCards = (m) =>
+  (m.toolEvents || []).filter((e) => e.phase === 'end' && e._inlineGen)
+
+const genCardTitle = (card) =>
+  GEN_CARD_TITLES[card._genType] || '数据卡片'
+
+// DOM 锚点 id：done 后滚动定位第一张内联卡片用（历史消息无流式 id，用消息序号）
+const genCardAnchorId = (m, gi) => `gen-card-${m._seq ?? m.id ?? 'x'}-${gi}`
+
+/**
+ * 判定工具快照是否带可视化 type（与 AiGenUi 支持的映射一致），
+ * 是则打 _inlineGen 标志提升为一级内联卡片；纯 JSON 回落快照保持折叠。
+ */
+const GEN_UI_TYPES = new Set(Object.keys(GEN_CARD_TITLES))
+const markInlineGen = (card) => {
+  try {
+    const snap = JSON.parse((card.data || '').replace(/…$/, ''))
+    if (snap && GEN_UI_TYPES.has(snap.type)) {
+      card._inlineGen = true
+      card._genType = snap.type
+    }
+  } catch { /* 截断/异常快照回落原折叠行为 */ }
+}
+
+/**
+ * done 后滚动定位：本轮有内联生成式卡片时滚到第一张卡片（而非正文底部），
+ * 保证卡片直接进入视野；无卡片维持原有滚底行为。
+ * 通过 data-gen-turn 标记精确定位本轮消息的卡片——不能全局查 .gen-ui-inline，
+ * 会话历史里可能有更早的卡片，querySelector 会命中它们导致滚错位置。
+ */
+const scrollToFirstGenCard = async (msg) => {
+  await nextTick()
+  if (!msg) return false
+  const marker = `gen-turn-${msg.id}`
+  msg.toolEvents?.forEach((e) => { if (e._inlineGen) e._turnMarker = marker })
+  await nextTick()
+  const first = document.querySelector(`[data-gen-turn="${marker}"]`)
+  if (first) {
+    first.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    return true
+  }
+  return false
 }
 
 const renderMarkdown = (content) => {
@@ -991,15 +1071,19 @@ const send = async () => {
               // 结构化输出：end 阶段携带数据快照，可展开查看
               if (info.phase === 'end' && info.data) {
                 target.data = info.data
+                // 生成式 UI 内联判定：快照带可视化 type 时提升为一级卡片默认展开
+                markInlineGen(target)
               }
             } else {
-              events.push({
+              const fbCard = {
                 name: info.name || '',
                 phase: info.phase,
                 detail: endDetail,
                 data: info.phase === 'end' ? (info.data || null) : null,
                 expanded: false,
-              })
+              }
+              if (fbCard.data) markInlineGen(fbCard)
+              events.push(fbCard)
             }
             // AI 检索联动：工具返回的图书快照先暂存候补，done 时统一判定（本条注释与悬浮球面板一致）。
             // 不限定工具名：只要快照含图书条目（items 数组且元素带 title）即成为候补；
@@ -1036,6 +1120,10 @@ const send = async () => {
           assistantMsg.reasoningStreaming = false
           assistantMsg.reasoningOpen = false
         }
+        // 流结束滚动定位：本轮有内联生成式卡片时滚到本轮第一张卡片，否则维持滚底
+        scrollToFirstGenCard(assistantMsg).then((hit) => {
+          if (!hit) scrollToBottom()
+        })
         if (isFirstMsg && conv) {
           conv.title = content.length > 20 ? content.substring(0, 20) + '…' : content
         }
@@ -1961,6 +2049,26 @@ onMounted(loadConversations)
 }
 /* M5：生成式 UI 容器 —— 内容自带卡片，容器只做留白与背景承载 */
 .gen-ui-wrap { padding: 10px 12px 12px; }
+
+/* ===== 生成式 UI 一级内联卡片 =====
+   带可视化 type 的工具快照平铺渲染在时间线之后，默认展开，无需点击工具 pill */
+.gen-ui-inline {
+  align-self: stretch;
+  margin: 10px 0 6px;
+  padding: 12px 14px 14px;
+  border-radius: var(--radius-md);
+  background: var(--color-bg-subtle);
+  border: 1px solid var(--color-border);
+}
+.gen-ui-inline-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+.gen-ui-inline-label .el-icon { color: var(--color-primary); }
 /* 抽屉左上角与 pill 的视觉连接线 */
 .tool-data::before {
   content: '';

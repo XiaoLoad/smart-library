@@ -62,6 +62,16 @@ public abstract class BaseLibraryTools {
      * 前端解析失败只能回落到 JSON 兜底视图——「生成式 UI」最该发挥的看板场景反而失效。
      */
     private static final int DASHBOARD_SNAPSHOT_MAX_LEN = 12000;
+    /**
+     * 表格/卡片类工具快照字符上限。
+     * <p>
+     * 生成式 UI 升级后，所有映射到可视化 type 的快照都会被前端提升为一级内联卡片默认展开；
+     * 借阅记录等表格 16 条会被 600 上限截成非法 JSON（前端解析失败、卡片不渲染），
+     * 与看板同类问题——凡 SNAPSHOT_TYPES 命中的工具统一豁免全局截断。
+     */
+    private static final int GEN_UI_SNAPSHOT_MAX_LEN = 12000;
+    /** 表格类快照条数上限（内联卡片一屏可见的合理行数） */
+    private static final int TABLE_SNAPSHOT_LIMIT = 20;
 
     protected final Long userId;
     protected final Integer userType;
@@ -210,18 +220,22 @@ public abstract class BaseLibraryTools {
     private String snapshotData(Object r, String toolName) {
         if (r == null) return null;
         try {
+            String genType = SNAPSHOT_TYPES.get(toolName);
             int maxLen = DATA_SNAPSHOT_MAX_LEN;
             Object toSerialize = r;
-            // 看板类结果体量大，给独立上限，避免被 600 截成非法 JSON
-            if ("stats_dashboard".equals(SNAPSHOT_TYPES.get(toolName))) {
-                maxLen = DASHBOARD_SNAPSHOT_MAX_LEN;
+            // 生成式 UI 工具（带可视化 type）一律豁免全局 600 截断——
+            // 截断会破坏 JSON，前端解析失败后卡片降级为折叠 JSON 视图，一级内联失效
+            if (genType != null) {
+                maxLen = "stats_dashboard".equals(genType) ? DASHBOARD_SNAPSHOT_MAX_LEN : GEN_UI_SNAPSHOT_MAX_LEN;
             }
             if (r instanceof Map<?, ?> m && m.get("items") instanceof List<?> list) {
                 boolean fullList = "queryBooks".equals(toolName) || "queryHotBooks".equals(toolName);
                 if (fullList) {
                     maxLen = BOOK_SEARCH_SNAPSHOT_MAX_LEN;
                 }
-                int limit = Math.min(list.size(), fullList ? BOOK_SEARCH_SNAPSHOT_LIMIT : LIST_SNAPSHOT_LIMIT);
+                int cap = fullList ? BOOK_SEARCH_SNAPSHOT_LIMIT
+                        : (genType != null ? TABLE_SNAPSHOT_LIMIT : LIST_SNAPSHOT_LIMIT);
+                int limit = Math.min(list.size(), cap);
                 List<Object> head = new ArrayList<>();
                 for (int i = 0; i < limit; i++) {
                     if (fullList && list.get(i) instanceof Map<?, ?> item) {

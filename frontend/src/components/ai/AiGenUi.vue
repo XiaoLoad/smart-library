@@ -170,6 +170,9 @@ const TABLE_HEADERS = {
 }
 const headers = computed(() => TABLE_HEADERS[type.value] || [])
 
+/** 表格行数据（borrow_table / fine_table / user_table 共用 items 数组） */
+const rows = computed(() => (Array.isArray(props.snapshot?.items) ? props.snapshot.items : []))
+
 /** 统计看板的 KPI 列表 */
 const kpis = computed(() => {
   const s = props.snapshot || {}
