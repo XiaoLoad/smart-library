@@ -6,7 +6,7 @@
       <p class="desc">追踪每一本流转中的图书。</p>
     </header>
 
-    <div class="data-table fade-in" v-if="list.length || total">
+    <div class="data-table fade-in">
       <div class="table-toolbar">
         <div class="left">
           <el-select v-model="statusFilter" placeholder="全部状态" clearable @change="load" style="width: 140px">
@@ -101,6 +101,25 @@
             >{{ userStore.isAdmin ? '归还' : '申请归还' }}</el-button>
           </template>
         </el-table-column>
+        <template #empty>
+          <div class="borrow-empty">
+            <span class="empty-mark">∅</span>
+            <p class="empty-title">
+              {{ statusFilter !== '' ? '该状态下暂无借阅记录' : search ? '未找到匹配的借阅记录' : '暂无借阅记录' }}
+            </p>
+            <span class="empty-tip">
+              {{ statusFilter !== '' ? '换个状态看看，或清除筛选查看全部记录' : search ? '试试更换关键词，或清除搜索条件' : '' }}
+            </span>
+            <el-button
+              v-if="statusFilter !== '' || search"
+              type="primary"
+              plain
+              size="small"
+              class="empty-clear"
+              @click="clearAllFilter"
+            >清除筛选条件</el-button>
+          </div>
+        </template>
       </el-table>
 
       <div class="table-pagination">
@@ -189,6 +208,14 @@ const { reload: load } = useSnapshotRefresh({
 })
 
 const onSizeChange = () => {
+  page.value = 1
+  load()
+}
+
+// 空态：一键清除状态 + 关键词筛选
+const clearAllFilter = () => {
+  statusFilter.value = ''
+  search.value = ''
   page.value = 1
   load()
 }
@@ -415,4 +442,31 @@ onMounted(load)
   color: var(--color-text-secondary);
 }
 .time-text.danger { color: var(--color-danger); }
+
+/* 借阅空态 */
+.borrow-empty {
+  padding: 56px 0 60px;
+  text-align: center;
+}
+.borrow-empty .empty-mark {
+  display: block;
+  font-size: 38px;
+  color: var(--color-text-tertiary);
+  margin-bottom: 10px;
+}
+.borrow-empty .empty-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text);
+  margin: 0 0 6px;
+}
+.borrow-empty .empty-tip {
+  display: block;
+  font-size: var(--fs-small);
+  color: var(--color-text-tertiary);
+  margin-bottom: 14px;
+}
+.borrow-empty .empty-clear {
+  margin: 0 auto;
+}
 </style>
