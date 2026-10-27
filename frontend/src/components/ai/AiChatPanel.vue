@@ -269,6 +269,15 @@ const emitState = (gen, justFinished) => {
 
 /** 最近一次发送的用户原话（queryBooks 结果联动图书页时展示用） */
 const lastUserText = ref('')
+// 检索联动候补：本轮工具返回的图书快照先暂存，流结束（done）且本轮无写操作时才广播——
+// 借书等写流程中模型也会先调 queryBooks 拿书名，那是流程中间步骤，不应联动图书页筛选
+let pendingAiSearch = null
+// 本轮是否出现写操作授权（confirm 事件，仅写操作会触发门禁）——出现则本轮不广播检索联动
+let turnHasWrite = false
+// 写意图关键词：用户原话带借/还/续借等写意图时同样不广播——模型在借书前常先查库存、
+// 确认版本（不调写工具、无 confirm 事件），如「请先选定一版，我再提交借阅申请」
+const WRITE_INTENT_RE = /(借阅|帮我借|想借|要借|借下|借一下|借一本|借这本|借了|续借|归还|还书|罚款)/
+let turnWriteIntent = false
 
 const send = async () => {
   if (generating.value) return
@@ -276,6 +285,10 @@ const send = async () => {
   const content = input.value.trim()
   input.value = ''
   lastUserText.value = content
+  // 新一轮：重置检索联动候补与写操作标记
+  pendingAiSearch = null
+  turnHasWrite = false
+  turnWriteIntent = WRITE_INTENT_RE.test(content)
 
   if (!currentConvId) {
     try {
@@ -431,24 +444,24 @@ const send = async () => {
             if (target) target.phase = info.phase
             else events.push({ name: info.name || '', phase: info.phase })
           }
-          // AI 检索联动：工具返回的图书列表广播到 aiSearchStore，
-          // 图书检索页 watch 到后切换为「AI 检索结果」视图。
-          // 不限定工具名：只要快照含图书条目（items 数组且元素带 title）即广播，
-          // 避免「推荐书籍」类请求被模型路由到 adminQueryStats 等工具时漏掉
+          // AI 检索联动：工具返回的图书快照先暂存候补，done 时统一判定。
+          // 不限定工具名：只要快照含图书条目（items 数组且元素带 title）即成为候补；
+          // 本轮若带写操作（如借书前的 queryBooks），候补不广播
           if (info.phase === 'end' && info.data) {
             try {
               const snap = JSON.parse(info.data)
               const items = snap.items
               if (Array.isArray(items) && items.length && items[0]?.title) {
-                console.log('[AI联动] 广播检索结果', info.name, items.length, '条')
-                aiSearchStore.setResult(lastUserText.value || '', items, snap.total)
+                pendingAiSearch = { query: lastUserText.value || '', items, total: snap.total }
               }
             } catch (e) { console.warn('[AI联动] 快照解析失败', info.name, e) }
           }
         } catch { /* 忽略 */ }
         scrollToBottom()
       } else if (event === 'confirm') {
-        // 写操作授权请求：模型发起写操作被门禁拦截，改为向用户请求授权
+        // 写操作授权请求：模型发起写操作被门禁拦截，改为向用户请求授权。
+        // 本轮出现写操作：检索候补不再广播（借书前的 queryBooks 只是流程中间步骤）
+        turnHasWrite = true
         msg.pending = false
         try {
           const info = JSON.parse(data)
@@ -490,6 +503,15 @@ const send = async () => {
         stopReasonTimer(msg)
         msg._reasonSegOpen = false
         msg.reasoningStreaming = false
+        // 流结束：本轮既无写操作（confirm 事件）也无写意图（用户原话）才广播检索候补到馆藏图书页
+        if (pendingAiSearch) {
+          if (!turnHasWrite && !turnWriteIntent) {
+            aiSearchStore.setResult(pendingAiSearch.query, pendingAiSearch.items, pendingAiSearch.total)
+          }
+          pendingAiSearch = null
+        }
+        turnHasWrite = false
+        turnWriteIntent = false
         if (event === 'error') {
           msg.content = `⚠️ ${data || 'AI 请求出错'}`
           msg.html = renderMarkdown(msg.content)
