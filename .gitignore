@@ -60,6 +60,9 @@ application-local.properties
 .trae/
 fix_system_path.ps1
 
+# 本地测试/截图/提交拆分临时工作区（Playwright 脚本、回归套件、提交信息草稿等）
+.tmp-visual/
+
 # Python
 __pycache__/
 *.pyc
