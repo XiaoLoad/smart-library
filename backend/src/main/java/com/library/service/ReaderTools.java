@@ -89,7 +89,9 @@ public class ReaderTools extends BaseLibraryTools {
     /**
      * 查询当前用户本人的借阅额度。
      */
-    @Tool("查询当前用户本人的借阅额度（最大可借、已用、剩余、逾期数、当前是否可借）")
+    @Tool("查询当前用户本人的借阅额度（最大可借、已用、剩余、逾期数、当前是否可借）。"
+            + "overdueHolding 为在手逾期本数，pendingReturnOverdue 为逾期归还待管理员确认的本数（罚款未结算），"
+            + "overdueCount 为两者之和；canBorrow=false 时依据细分字段向用户解释具体原因")
     public Map<String, Object> queryBorrowQuota() {
         return withEvent("queryBorrowQuota", null, v -> {
             User user = ctx.userMapper.selectById(userId);
@@ -100,15 +102,20 @@ public class ReaderTools extends BaseLibraryTools {
                 m.put("used", 0);
                 m.put("remaining", 0);
                 m.put("overdueCount", 0);
+                m.put("overdueHolding", 0);
+                m.put("pendingReturnOverdue", 0);
                 m.put("canBorrow", false);
             } else {
                 int used = ctx.borrowMapper.countByUserAndStatuses(userId, List.of(0, 1, 5));
-                int overdue = ctx.borrowMapper.countOverduePending(userId);
+                List<Borrow> overdue = ctx.borrowMapper.selectOverduePending(userId);
+                int holding = (int) overdue.stream().filter(b -> b.getStatus() == 3).count();
                 m.put("maxBooks", limit.getMaxBooks());
                 m.put("used", used);
                 m.put("remaining", Math.max(0, limit.getMaxBooks() - used));
-                m.put("overdueCount", overdue);
-                m.put("canBorrow", used < limit.getMaxBooks() && overdue == 0);
+                m.put("overdueCount", overdue.size());
+                m.put("overdueHolding", holding);
+                m.put("pendingReturnOverdue", overdue.size() - holding);
+                m.put("canBorrow", used < limit.getMaxBooks() && overdue.isEmpty());
             }
             return m;
         });

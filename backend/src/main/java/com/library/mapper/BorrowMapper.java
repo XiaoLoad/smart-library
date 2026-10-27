@@ -38,7 +38,7 @@ public interface BorrowMapper {
 
     void updateReturnReject(@Param("id") Long id, @Param("status") Integer status, @Param("remark") String remark);
 
-    int countOverduePending(@Param("userId") Long userId);
+    List<Borrow> selectOverduePending(@Param("userId") Long userId);
 
     void updateRenew(@Param("id") Long id, @Param("dueTime") LocalDateTime dueTime,
                      @Param("renewCount") Integer renewCount);

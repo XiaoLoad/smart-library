@@ -62,11 +62,18 @@
         <foreach collection="statuses" item="s" open="(" separator="," close=")">#{s}</foreach>
     </select>
 
-    <!-- 有效的逾期未还：已逾期 或 申请归还但实际已超期（罚款尚未结算） -->
-    <select id="countOverduePending" resultType="int">
-        SELECT COUNT(*) FROM borrows
+    <!-- 有效的逾期未还（拦截借阅/续借的口径）：
+         · status=3 已逾期，书仍在借阅人手上；
+         · status=5 仅当逾期之后才申请归还（return_request_time > due_time，罚款已注定且未结算）。
+           按时提交归还申请但管理员未确认的（return_request_time <= due_time）不算——
+           归还确认按申请时间结算，本就不会产生罚款，不应把管理员流程拖延算到读者头上。 -->
+    <select id="selectOverduePending" resultMap="borrowMap">
+        SELECT * FROM borrows
         WHERE user_id = #{userId}
-        AND (status = 3 OR (status = 5 AND due_time IS NOT NULL AND due_time &lt; NOW()))
+        AND (status = 3
+             OR (status = 5 AND due_time IS NOT NULL AND return_request_time IS NOT NULL
+                 AND return_request_time &gt; due_time))
+        ORDER BY due_time
     </select>
 
     <select id="selectMaxSeqOfDay" resultType="java.lang.Integer">

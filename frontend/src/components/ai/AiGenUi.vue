@@ -61,7 +61,9 @@
       </div>
       <div class="gi-quota-foot">
         <span>剩余 <b>{{ remaining }}</b> 本</span>
-        <span v-if="overdueCount > 0" class="gi-quota-overdue">逾期 {{ overdueCount }} 本</span>
+        <span v-if="overdueCount > 0" class="gi-quota-overdue">
+          逾期 {{ overdueCount }} 本<template v-if="pendingReturnOverdue > 0">（含归还待确认 {{ pendingReturnOverdue }} 本）</template>
+        </span>
         <span v-else class="gi-quota-ok">状态正常</span>
       </div>
     </div>
@@ -139,6 +141,7 @@ const max = computed(() => props.snapshot?.maxBooks ?? 0)
 const used = computed(() => props.snapshot?.used ?? 0)
 const remaining = computed(() => props.snapshot?.remaining ?? 0)
 const overdueCount = computed(() => props.snapshot?.overdueCount ?? 0)
+const pendingReturnOverdue = computed(() => props.snapshot?.pendingReturnOverdue ?? 0)
 const percent = computed(() => {
   const m = Number(max.value) || 0
   if (m <= 0) return 0

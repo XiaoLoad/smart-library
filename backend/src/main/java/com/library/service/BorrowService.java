@@ -104,10 +104,10 @@ public class BorrowService {
         if (used >= limit.getMaxBooks()) {
             throw new BusinessException(400, "借阅额度已满（" + limit.getMaxBooks() + "本），请先归还");
         }
-        // 逾期校验（含申请归还但已超期的记录）
-        int overdueCount = borrowMapper.countOverduePending(user.getId());
-        if (overdueCount > 0) {
-            throw new BusinessException(400, "您有逾期未还图书，请先归还");
+        // 逾期校验（书在手逾期；「逾期之后才申请归还、罚款未结算」的同样拦截）
+        List<Borrow> overdue = borrowMapper.selectOverduePending(user.getId());
+        if (!overdue.isEmpty()) {
+            throw new BusinessException(400, overdueBlockMessage(overdue));
         }
         // 图书校验
         Book book = bookMapper.selectById(bookId);
@@ -447,10 +447,10 @@ public class BorrowService {
         if (record.getRenewCount() >= record.getRenewMaxCount()) {
             throw new BusinessException("续借次数已用完");
         }
-        // 有其他逾期不可续借（含申请归还但已超期的记录）
-        int overdueCount = borrowMapper.countOverduePending(record.getUserId());
-        if (overdueCount > 0) {
-            throw new BusinessException("您有逾期未还图书，请先归还");
+        // 有其他逾期不可续借（书在手逾期 / 逾期归还罚款未结算）
+        List<Borrow> overdueForRenew = borrowMapper.selectOverduePending(record.getUserId());
+        if (!overdueForRenew.isEmpty()) {
+            throw new BusinessException(overdueBlockMessage(overdueForRenew) + "，暂不可续借");
         }
         // 获取额度规则
         User user = userMapper.selectById(record.getUserId());
@@ -479,13 +479,43 @@ public class BorrowService {
             return vo;
         }
         int used = borrowMapper.countByUserAndStatuses(user.getId(), List.of(0, 1, 5));
-        int overdueCount = borrowMapper.countOverduePending(user.getId());
+        List<Borrow> overdue = borrowMapper.selectOverduePending(user.getId());
+        int holding = (int) overdue.stream().filter(b -> b.getStatus() == 3).count();
         vo.setMaxBooks(limit.getMaxBooks());
         vo.setUsed(used);
         vo.setRemaining(Math.max(0, limit.getMaxBooks() - used));
-        vo.setOverdueCount(overdueCount);
-        vo.setCanBorrow(used < limit.getMaxBooks() && overdueCount == 0);
+        vo.setOverdueCount(overdue.size());
+        vo.setOverdueHolding(holding);
+        vo.setPendingReturnOverdue(overdue.size() - holding);
+        vo.setCanBorrow(used < limit.getMaxBooks() && overdue.isEmpty());
         return vo;
+    }
+
+    /**
+     * 逾期未还拦截文案：区分「书在手逾期」与「逾期归还待确认（罚款未结算）」，带具体书名，
+     * 避免笼统的「有逾期未还」让读者误以为是历史罚款未缴清。
+     */
+    private String overdueBlockMessage(List<Borrow> overdue) {
+        String holding = titles(overdue.stream().filter(b -> b.getStatus() == 3).toList());
+        String pending = titles(overdue.stream().filter(b -> b.getStatus() != 3).toList());
+        StringBuilder msg = new StringBuilder();
+        if (!holding.isEmpty()) {
+            msg.append("您有逾期未还图书 ").append(holding).append("，请先归还后再借阅");
+        }
+        if (!pending.isEmpty()) {
+            if (msg.length() > 0) {
+                msg.append("；");
+            }
+            msg.append(pending).append("为逾期归还，待管理员确认结算罚款前暂不可借阅");
+        }
+        return msg.toString();
+    }
+
+    private String titles(List<Borrow> list) {
+        return list.stream()
+                .map(b -> "《" + b.getBookTitle() + "》")
+                .reduce((a, b) -> a + "、" + b)
+                .orElse("");
     }
 
     /**
