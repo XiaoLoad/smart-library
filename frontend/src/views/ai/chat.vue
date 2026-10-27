@@ -1294,6 +1294,8 @@ onMounted(loadConversations)
   grid-template-rows: 1fr;          /* 显式 1fr 行，约束子项不随内容增高 */
   height: calc(100vh - var(--header-height));
   overflow: hidden;
+  /* 顶栏对齐：侧栏会话头与聊天头共用同一高度 */
+  --ai-head-h: 64px;
 }
 
 /* 会话侧栏 */
@@ -1306,9 +1308,12 @@ onMounted(loadConversations)
 }
 
 .conv-head {
-  padding: var(--space-4);
+  height: var(--ai-head-h);
+  padding: 0 var(--space-4);
   border-bottom: 1px solid var(--color-divider);
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
 }
 
 .new-btn { width: 100%; }
@@ -1384,11 +1389,12 @@ onMounted(loadConversations)
 }
 
 .chat-head {
+  height: var(--ai-head-h);
   flex-shrink: 0;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: var(--space-4) var(--space-6);
+  padding: 0 var(--space-6);
   border-bottom: 1px solid var(--color-border);
   background: var(--color-bg-elevated);
   z-index: 2;
@@ -1399,6 +1405,7 @@ onMounted(loadConversations)
   font-size: var(--fs-h3);
   font-weight: 600;
   margin-top: 2px;
+  line-height: 1.2;
 }
 
 .head-tip {
