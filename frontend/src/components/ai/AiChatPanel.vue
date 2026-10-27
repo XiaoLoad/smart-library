@@ -64,6 +64,9 @@
                 <div class="gen-ui-inline-label">
                   <el-icon><DataBoard /></el-icon>
                   <span>{{ genCardTitle(card) }}</span>
+                  <span v-if="card._fromHistory" class="gen-ui-time">
+                    {{ formatSnapTime(card._snapshotTime) }} 查询
+                  </span>
                 </div>
                 <AiGenUi :snapshot="parseSnapshot(card.data)" />
               </div>
@@ -258,6 +261,42 @@ const GEN_CARD_TITLES = {
 const GEN_UI_TYPES = new Set(Object.keys(GEN_CARD_TITLES))
 const genCardTitle = (card) => GEN_CARD_TITLES[card._genType] || '数据卡片'
 
+/** 快照时点展示（历史卡片角标）：今天显示时分，更早显示 月-日 时:分 */
+const formatSnapTime = (t) => {
+  if (!t) return '历史'
+  const d = new Date(t)
+  if (isNaN(d.getTime())) return '历史'
+  const pad = (n) => String(n).padStart(2, '0')
+  const now = new Date()
+  const sameDay = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate()
+  return sameDay
+    ? `${pad(d.getHours())}:${pad(d.getMinutes())}`
+    : `${d.getMonth() + 1}-${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+/**
+ * 解析落库的工具快照数组为 toolEvents 形态（历史消息重建内联卡片）。
+ * 历史卡片标记 _fromHistory（时点角标判定）。
+ */
+const parseStoredSnapshots = (snapshotsJson) => {
+  if (!snapshotsJson || typeof snapshotsJson !== 'string') return []
+  try {
+    const arr = JSON.parse(snapshotsJson)
+    if (!Array.isArray(arr)) return []
+    return arr.map((rec) => ({
+      name: rec.tool || '',
+      phase: 'end',
+      data: rec.data ? JSON.stringify(rec.data) : null,
+      _inlineGen: true,
+      _genType: rec.type || '',
+      _fromHistory: true,
+      _snapshotTime: rec.createTime || '',
+    }))
+  } catch {
+    return []
+  }
+}
+
 /** 判定工具快照是否带可视化 type，是则打 _inlineGen 标志提升为一级内联卡片 */
 const markInlineGen = (card) => {
   try {
@@ -306,7 +345,8 @@ const init = async () => {
       messages.value = (md2.list || []).map((m) => ({
         ...m,
         html: renderMarkdown(m.content),
-        toolEvents: [],
+        // 工具快照落库后历史消息可重建内联生成式卡片（时点数据，卡片带时间角标）
+        toolEvents: parseStoredSnapshots(m.toolSnapshots),
         reasoningSegments: [],
         reasoningOpen: false,
         reasoningStreaming: false,
@@ -843,6 +883,15 @@ defineExpose({ init, destroy, send, prefill })
   color: var(--color-text-secondary, #6b6560);
 }
 .gen-ui-inline-label .el-icon { color: var(--color-primary, #3a5a6b); }
+.gen-ui-time {
+  margin-left: 4px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--color-text-tertiary, #9c958d);
+  background: var(--color-bg-elevated, #fff);
+  border: 1px solid var(--color-border, #e8e3dc);
+}
 
 /* 写操作授权卡（浮动面板简化版：卡片 + 靛蓝竖条，与工具 pill 形态区分） */
 .confirm-card {

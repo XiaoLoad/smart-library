@@ -354,6 +354,10 @@ public class AiService {
         // 本次回复实际执行完成的工具调用（按顺序记录工具名），随助手消息落库为摘要
         java.util.List<String> toolCalls = new java.util.concurrent.CopyOnWriteArrayList<>();
 
+        // 本轮产生可视化卡片的工具快照（[{tool,type,data,createTime}]），随助手消息落库，
+        // 前端加载历史消息时据此重建内联生成式卡片。快照是查询时点数据，历史卡片由前端标注生成时间。
+        java.util.List<Map<String, Object>> toolSnapshots = new java.util.concurrent.CopyOnWriteArrayList<>();
+
         // 本轮工具循环轮次：与框架的计数口径严格一致。
         // <p>
         // 框架（LangChain4j 1.22）在每次「模型返回含工具调用的响应」时递减计数，
@@ -391,6 +395,22 @@ public class AiService {
                     toolCalls.add(toolName);
                     // M6a：工具序列记入轨迹
                     trace.recordTool(toolName);
+                    // 快照带可视化 type 时收集落库（历史消息重建内联卡片用）
+                    if (data != null && data.contains("\"type\"")) {
+                        try {
+                            Map<?, ?> snap = objectMapper.readValue(data, Map.class);
+                            if (snap.get("type") instanceof String genType && !genType.isBlank()) {
+                                Map<String, Object> rec = new java.util.LinkedHashMap<>();
+                                rec.put("tool", toolName);
+                                rec.put("type", genType);
+                                rec.put("data", snap);
+                                rec.put("createTime", LocalDateTime.now().toString());
+                                toolSnapshots.add(rec);
+                            }
+                        } catch (Exception e) {
+                            log.warn("[AI] 快照解析失败 tool={}: {}", toolName, e.getMessage());
+                        }
+                    }
                 }
                 Map<String, Object> payload = new java.util.LinkedHashMap<>();
                 payload.put("name", toolName);
@@ -532,6 +552,14 @@ public class AiService {
                                 }
                                 ts.append(']');
                                 aiMsg.setToolSummary(ts.toString());
+                            }
+                            // 工具快照数组落库：前端加载历史消息时重建内联生成式卡片
+                            if (!toolSnapshots.isEmpty()) {
+                                try {
+                                    aiMsg.setToolSnapshots(objectMapper.writeValueAsString(toolSnapshots));
+                                } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+                                    log.warn("[AI] 工具快照序列化失败: {}", e.getMessage());
+                                }
                             }
                             messageMapper.insert(aiMsg);
                             evictMemory(conversationId);

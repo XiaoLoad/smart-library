@@ -167,6 +167,9 @@
                   <div class="gen-ui-inline-label">
                     <el-icon><DataBoard /></el-icon>
                     <span>{{ genCardTitle(card) }}</span>
+                    <span v-if="card._fromHistory" class="gen-ui-time" :title="'查询时点：' + formatSnapTime(card._snapshotTime)">
+                      {{ formatSnapTime(card._snapshotTime) }} 查询
+                    </span>
                   </div>
                   <AiGenUi :snapshot="parseSnapshot(card.data)" />
                 </div>
@@ -458,6 +461,19 @@ const inlineGenCards = (m) =>
 const genCardTitle = (card) =>
   GEN_CARD_TITLES[card._genType] || '数据卡片'
 
+/** 快照时点展示（历史卡片角标）：今天显示时分，更早显示 月-日 时:分 */
+const formatSnapTime = (t) => {
+  if (!t) return '历史'
+  const d = new Date(t)
+  if (isNaN(d.getTime())) return '历史'
+  const pad = (n) => String(n).padStart(2, '0')
+  const now = new Date()
+  const sameDay = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate()
+  return sameDay
+    ? `${pad(d.getHours())}:${pad(d.getMinutes())}`
+    : `${d.getMonth() + 1}-${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
 // DOM 锚点 id：done 后滚动定位第一张内联卡片用（历史消息无流式 id，用消息序号）
 const genCardAnchorId = (m, gi) => `gen-card-${m._seq ?? m.id ?? 'x'}-${gi}`
 
@@ -509,7 +525,8 @@ const renderMarkdown = (content) => {
 const enrichMsg = (m) => ({
   ...m,
   html: renderMarkdown(m.content),
-  toolEvents: [], // 历史消息无工具调用记录
+  // 工具快照落库后历史消息可重建内联生成式卡片；快照是查询时点数据，历史卡片带时点角标
+  toolEvents: parseStoredSnapshots(m.toolSnapshots),
   // 历史消息不持久化思维链（与工具中间态一致），仅本轮流式生成时展示
   reasoningSegments: [],
   reasoningOpen: false,
@@ -520,6 +537,31 @@ const enrichMsg = (m) => ({
   // M4：thought 旁白不落库（与思维链一致），历史消息无时间线
   timeline: [],
 })
+
+/**
+ * 解析落库的工具快照数组为 toolEvents 形态（供内联卡片渲染）。
+ * 历史卡片标记 _fromHistory（时点角标判定）；快照为落库时点数据，不参与检索联动。
+ */
+const parseStoredSnapshots = (snapshotsJson) => {
+  if (!snapshotsJson || typeof snapshotsJson !== 'string') return []
+  try {
+    const arr = JSON.parse(snapshotsJson)
+    if (!Array.isArray(arr)) return []
+    return arr.map((rec) => ({
+      name: rec.tool || '',
+      phase: 'end',
+      detail: '',
+      data: rec.data ? JSON.stringify(rec.data) : null,
+      _inlineGen: true,
+      _genType: rec.type || '',
+      _fromHistory: true,
+      _snapshotTime: rec.createTime || '',
+      expanded: false,
+    }))
+  } catch {
+    return []
+  }
+}
 
 // 日期分隔（历史导航锚点）
 const dayKey = (t) => (t ? String(t).slice(0, 10) : '')
@@ -2069,6 +2111,15 @@ onMounted(loadConversations)
   color: var(--color-text-secondary);
 }
 .gen-ui-inline-label .el-icon { color: var(--color-primary); }
+.gen-ui-time {
+  margin-left: 4px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--color-text-tertiary, #9c958d);
+  background: var(--color-bg-elevated, #fff);
+  border: 1px solid var(--color-border, #e8e3dc);
+}
 /* 抽屉左上角与 pill 的视觉连接线 */
 .tool-data::before {
   content: '';
