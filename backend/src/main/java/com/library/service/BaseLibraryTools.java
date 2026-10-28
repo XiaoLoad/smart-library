@@ -88,6 +88,24 @@ public abstract class BaseLibraryTools {
     /** 当前请求的写操作授权回调，由 AiService 注入；为 null 时写操作不拦截（退化行为） */
     private ConfirmRequestHandler confirmHandler;
 
+    /** 当前请求的权限档位，由 AiService 按会话配置注入；默认逐笔确认 */
+    private PermissionMode permissionMode = PermissionMode.CONFIRM;
+
+    /** 批量授权收集器（batch 档位用）：本轮被拦截的写操作在此累积，由 AiService 在流结束前统一弹卡 */
+    public interface BatchCollector {
+        /**
+         * 收集一条待授权的写操作。
+         *
+         * @param toolName 写工具名
+         * @param title    授权卡内该项标题（如「取书 BR202610280001」）
+         * @param rows     该项参数明细
+         * @param args     工具参数（服务端保存）
+         */
+        void collect(String toolName, String title, List<Map<String, String>> rows, Map<String, Object> args);
+    }
+
+    private BatchCollector batchCollector;
+
     protected BaseLibraryTools(Long userId, Integer userType, AiToolContext ctx) {
         this.userId = userId;
         this.userType = userType;
@@ -102,6 +120,16 @@ public abstract class BaseLibraryTools {
     /** 注入本次请求的写操作授权回调 */
     public void setConfirmHandler(ConfirmRequestHandler handler) {
         this.confirmHandler = handler;
+    }
+
+    /** 注入本次请求的权限档位 */
+    public void setPermissionMode(PermissionMode mode) {
+        this.permissionMode = mode == null ? PermissionMode.CONFIRM : mode;
+    }
+
+    /** 注入批量授权收集器（batch 档位） */
+    public void setBatchCollector(BatchCollector collector) {
+        this.batchCollector = collector;
     }
 
     protected boolean isAdmin() {
@@ -133,12 +161,8 @@ public abstract class BaseLibraryTools {
                                                  List<Map<String, String>> rows,
                                                  Map<String, Object> args,
                                                  Function<Void, Map<String, Object>> action) {
-        // 门禁未初始化（装配异常）时保留放行，但必须留下高可见日志便于排查
-        if (confirmHandler == null) {
-            log.error("[AI] 写门禁未初始化，写操作[{}]直接执行(fail-open)", name);
-            return withEvent(name, title, action);
-        }
-        // 白名单登记制：未登记的写操作一律拒绝执行（fail-closed），防止漏登记工具绕过授权
+        // 白名单登记制：未登记的写操作一律拒绝执行（fail-closed），防止漏登记工具绕过授权。
+        // 三档位共享此底线：登记表是「哪些操作算写操作」的定义，档位只决定「怎么确认」
         if (!AiToolRegistry.requiresConfirm(name)) {
             Map<String, Object> rejected = new LinkedHashMap<>();
             rejected.put("success", false);
@@ -147,7 +171,40 @@ public abstract class BaseLibraryTools {
             rejected.put("message", "工具[" + name + "]未登记为写操作，已拒绝执行");
             return rejected;
         }
-        // 门禁拦截：不执行，改为发起授权请求
+        // 自动执行档：跳过拦截，走普通执行路径（回执卡片/轨迹照常记录）
+        if (permissionMode == PermissionMode.AUTO) {
+            return withEvent(name, title, action);
+        }
+        // 批量授权档：不立即弹卡，累积到本轮批次，由 AiService 在流结束前合并成一张批量卡
+        if (permissionMode == PermissionMode.BATCH) {
+            if (batchCollector != null) {
+                batchCollector.collect(name, title, rows, args);
+            } else {
+                // 收集器缺失（装配异常）退回逐笔确认，保持 fail-safe
+                log.warn("[AI] 批量收集器未注入，写操作[{}]退回逐笔确认", name);
+                return interceptForConfirm(name, title, rows, args);
+            }
+            Map<String, Object> pending = new LinkedHashMap<>();
+            pending.put("success", false);
+            pending.put("awaitingConfirm", true);
+            pending.put("batched", true);
+            pending.put("message", "本操作已加入本轮批量授权清单，将在本轮结束前统一请求确认");
+            return pending;
+        }
+        // 逐笔确认档（默认）：门禁未初始化视为装配异常，放行但留高可见日志
+        if (confirmHandler == null) {
+            log.error("[AI] 写门禁未初始化，写操作[{}]直接执行(fail-open)", name);
+            return withEvent(name, title, action);
+        }
+        return interceptForConfirm(name, title, rows, args);
+    }
+
+    /**
+     * 逐笔确认：立即弹授权卡，返回「等待用户确认」结构。
+     */
+    private Map<String, Object> interceptForConfirm(String name, String title,
+                                                    List<Map<String, String>> rows,
+                                                    Map<String, Object> args) {
         confirmHandler.request(name, title, rows, args);
         Map<String, Object> pending = new LinkedHashMap<>();
         pending.put("success", false);

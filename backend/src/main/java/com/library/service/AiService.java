@@ -103,6 +103,7 @@ public class AiService {
     @Autowired private LibraryConfigService libraryConfigService;
     @Autowired private RagIndexService ragIndexService;
     @Autowired private AiConfirmService aiConfirmService;
+    @Autowired private AiBatchConfirmService aiBatchConfirmService;
     @Autowired private AiAgentTraceService traceService;
 
     /** 缓存最近构建的流式模型，配置未变时复用，避免重复创建 OkHttpClient */
@@ -237,6 +238,30 @@ public class AiService {
     // 会话管理
 
     /**
+     * 设置会话写操作权限档位（M7）。
+     * <p>
+     * 规则：仅会话本人可改；auto 档仅管理员可设置（读者端强制逐笔确认）；
+     * 非法档位名直接拒绝而非静默回退，避免用户以为切成功实际没切。
+     */
+    public void setPermissionMode(Long conversationId, Long userId, Integer userType, String mode) {
+        AiConversation conv = conversationMapper.selectById(conversationId);
+        if (conv == null) {
+            throw new BusinessException(404, "会话不存在");
+        }
+        if (!conv.getUserId().equals(userId)) {
+            throw new BusinessException(403, "无权操作该会话");
+        }
+        PermissionMode target = PermissionMode.of(mode);
+        if (!target.code().equalsIgnoreCase(mode == null ? "" : mode.trim())) {
+            throw new BusinessException(400, "未知权限档位：" + mode + "（可选 confirm/batch/auto）");
+        }
+        if (target == PermissionMode.AUTO && (userType == null || userType != 3)) {
+            throw new BusinessException(403, "自动执行档仅管理员可用");
+        }
+        conversationMapper.updatePermissionMode(conversationId, target.code());
+    }
+
+    /**
      * 创建新会话。标题暂为「新对话」，首条消息后自动更新。
      */
     public AiConversation createConversation() {
@@ -339,6 +364,11 @@ public class AiService {
         // 3. 构建每请求独立的工具实例（烘焙 userId/userType，规避异步线程丢失 CurrentUser）
         AiToolContext toolCtx = buildToolContext();
         boolean admin = cu.getUserType() != null && cu.getUserType() == 3;
+        // M7：会话权限档位。读者端强制逐笔确认（动的是用户本人资产，不做自动执行）；
+        // 管理员可按会话切 batch/auto，未配置时回退 confirm
+        PermissionMode mode = admin
+                ? PermissionMode.of(conv.getPermissionMode())
+                : PermissionMode.CONFIRM;
         CommonTools commonTools = new CommonTools(cu.getUserId(), cu.getUserType(), toolCtx);
         BaseLibraryTools roleTools = admin
                 ? new AdminTools(cu.getUserId(), cu.getUserType(), toolCtx)
@@ -475,6 +505,20 @@ public class AiService {
         commonTools.setConfirmHandler(confirmCb);
         roleTools.setConfirmHandler(confirmCb);
 
+        // M7：批量授权收集器（batch 档位）。本轮被拦截的写操作在此累积，
+        // onCompleteResponse 时合并为一张批量卡（batch_confirm 事件）统一请求确认
+        java.util.List<AiBatchConfirmService.BatchItem> batchItems =
+                new java.util.concurrent.CopyOnWriteArrayList<>();
+        BaseLibraryTools.BatchCollector batchCb = (toolName, title, rows, args) -> {
+            trace.markGate(toolName);
+            batchItems.add(new AiBatchConfirmService.BatchItem(toolName, title,
+                    rows == null ? List.of() : rows, args));
+        };
+        commonTools.setBatchCollector(batchCb);
+        roleTools.setBatchCollector(batchCb);
+        commonTools.setPermissionMode(mode);
+        roleTools.setPermissionMode(mode);
+
         try {
             // RAG：知识库启用且索引就绪时挂载检索增强；retriever 每请求构造以携带当前用户的可见范围
             RetrievalAugmentor augmentor = buildAugmentor(admin);
@@ -594,6 +638,11 @@ public class AiService {
                         // M6a：记录 token 用量并落库轨迹
                         recordTokenUsage(trace, response);
                         traceService.save(trace);
+                        // M7：批量授权档——本轮收集到的写操作在 done 前合并成一张批量卡统一请求确认。
+                        // 放在 done 之前保证前端先收到卡再结束流；批次令牌同样由服务端持有参数
+                        if (!batchItems.isEmpty()) {
+                            emitBatchConfirm(emitter, conversationId, cu.getUserId(), batchItems);
+                        }
                         try {
                             emitter.send(SseEmitter.event().name("done").data("[DONE]"));
                         } catch (IOException e) {
@@ -807,13 +856,7 @@ public class AiService {
         }
         // 按令牌中保存的原始参数执行，忽略任何外部传入的参数
         Map<String, Object> args = pc.args();
-        Object result = switch (pc.toolName()) {
-            case "applyBorrow" -> applyBorrowConfirmed(userId, args);
-            case "renewMyBorrow" -> renewConfirmed(userId, args);
-            case "requestReturn" -> returnConfirmed(userId, args);
-            case "adminCounterProcess" -> counterConfirmed(userId, args);
-            default -> throw new BusinessException(400, "不支持的授权操作：" + pc.toolName());
-        };
+        Object result = executeConfirmed(userId, pc.toolName(), args);
         @SuppressWarnings("unchecked")
         Map<String, Object> map = (Map<String, Object>) result;
         return map;
@@ -853,6 +896,104 @@ public class AiService {
         AiToolContext toolCtx = buildToolContext();
         AdminTools tools = new AdminTools(userId, currentUserType(), toolCtx);
         return tools.adminCounterProcessConfirmed(str(args.get("borrowNo"), ""));
+    }
+
+    /**
+     * M7：批量授权卡 SSE 推送（batch 档位）。
+     * <p>
+     * 把本轮收集到的全部写操作合并为一张批量卡：rows 汇总各项明细，客户端只拿
+     * 一个批次令牌；确认时服务端按顺序执行全部操作并逐项回报结果。
+     * 推送失败时作废批次，避免「前端没收到卡、批次却在服务端存活」的悬挂状态。
+     */
+    private void emitBatchConfirm(SseEmitter emitter, Long conversationId, Long userId,
+                                  List<AiBatchConfirmService.BatchItem> items) {
+        String token = null;
+        try {
+            token = aiBatchConfirmService.issue(userId, conversationId, items);
+            Map<String, Object> payload = new java.util.LinkedHashMap<>();
+            payload.put("token", token);
+            payload.put("batch", true);
+            payload.put("count", items.size());
+            payload.put("title", "批量授权（" + items.size() + " 项操作）");
+            payload.put("rows", AiBatchConfirmService.mergeRows(items));
+            payload.put("ttlSeconds", 120);
+            emitter.send(SseEmitter.event().name("batch_confirm")
+                    .data(objectMapper.writeValueAsString(payload)));
+        } catch (IOException e) {
+            if (token != null) {
+                aiBatchConfirmService.revoke(token);
+                log.warn("[AI] 批量授权卡推送失败，批次已作废");
+            }
+        } catch (Exception e) {
+            if (token != null) {
+                aiBatchConfirmService.revoke(token);
+            }
+            log.warn("[AI] 批量授权卡序列化失败: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * 执行已确认的批量授权：按批次内顺序逐项执行，逐项回报结果。
+     * <p>
+     * 各项独立 try-catch：某项业务失败（如该书已借出）不影响其余项，
+     * 汇总结构对齐 BorrowService.batchProcess 的 PickResultVo 风格，前端可统一渲染。
+     */
+    public Map<String, Object> confirmBatchWrite(String token, Long userId, Long conversationId) {
+        AiBatchConfirmService.PendingBatch pb = aiBatchConfirmService.consume(token, userId, conversationId);
+        if (pb == null) {
+            throw new BusinessException(400, "批量授权已失效或已被处理，请重新发起该操作");
+        }
+        List<Map<String, Object>> results = new ArrayList<>();
+        int success = 0;
+        for (AiBatchConfirmService.BatchItem item : pb.items()) {
+            Map<String, Object> r = new java.util.LinkedHashMap<>();
+            r.put("tool", item.toolName());
+            r.put("title", item.title());
+            try {
+                Object result = executeConfirmed(userId, item.toolName(), item.args());
+                @SuppressWarnings("unchecked")
+                Map<String, Object> map = (Map<String, Object>) result;
+                r.putAll(map);
+                if (Boolean.TRUE.equals(map.get("success"))) {
+                    success++;
+                }
+            } catch (Exception e) {
+                r.put("success", false);
+                r.put("message", e.getMessage() == null ? "执行失败" : e.getMessage());
+            }
+            results.add(r);
+        }
+        Map<String, Object> summary = new java.util.LinkedHashMap<>();
+        summary.put("success", success == results.size());
+        summary.put("total", results.size());
+        summary.put("successCount", success);
+        summary.put("failCount", results.size() - success);
+        summary.put("results", results);
+        summary.put("message", "批量办理完成：成功 " + success + " 项，失败 " + (results.size() - success) + " 项");
+        return summary;
+    }
+
+    /** 按工具名分发已确认的写操作执行（批量确认与单笔确认共用） */
+    private Object executeConfirmed(Long userId, String toolName, Map<String, Object> args) {
+        return switch (toolName) {
+            case "applyBorrow" -> applyBorrowConfirmed(userId, args);
+            case "renewMyBorrow" -> renewConfirmed(userId, args);
+            case "requestReturn" -> returnConfirmed(userId, args);
+            case "adminCounterProcess" -> counterConfirmed(userId, args);
+            case "adminCounterProcessBatch" -> counterBatchConfirmed(userId, args);
+            default -> throw new BusinessException(400, "不支持的授权操作：" + toolName);
+        };
+    }
+
+    /** 执行已确认的批量柜台办理（批量授权卡单项或单笔工具卡确认后的入口） */
+    private Object counterBatchConfirmed(Long userId, Map<String, Object> args) {
+        Integer userType = currentUserType();
+        if (userType == null || userType != 3) {
+            throw new BusinessException(403, "仅管理员可执行批量柜台办理");
+        }
+        AiToolContext toolCtx = buildToolContext();
+        AdminTools tools = new AdminTools(userId, currentUserType(), toolCtx);
+        return tools.adminCounterProcessBatchConfirmed(str(args.get("borrowNos"), ""));
     }
 
     /** 构造工具依赖上下文 */

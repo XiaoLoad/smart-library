@@ -8,6 +8,7 @@
         <result property="title" column="title"/>
         <result property="model" column="model"/>
         <result property="status" column="status"/>
+        <result property="permissionMode" column="permission_mode"/>
         <result property="createTime" column="create_time"/>
     </resultMap>
 
@@ -28,6 +29,10 @@
 
     <update id="updateTitle">
         UPDATE ai_conversations SET title = #{title} WHERE id = #{id}
+    </update>
+
+    <update id="updatePermissionMode">
+        UPDATE ai_conversations SET permission_mode = #{permissionMode} WHERE id = #{id}
     </update>
 
     <delete id="deleteById">

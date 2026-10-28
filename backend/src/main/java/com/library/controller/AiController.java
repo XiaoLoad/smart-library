@@ -2,6 +2,7 @@ package com.library.controller;
 
 import com.library.common.Result;
 import com.library.common.exception.BusinessException;
+import com.library.dto.AiBatchConfirmRequest;
 import com.library.dto.AiChatRequest;
 import com.library.dto.AiConfirmRequest;
 import com.library.entity.AiConversation;
@@ -95,11 +96,12 @@ public class AiController {
      * 流式对话（SSE）
      * <p>
      * 事件流（完整列表）：reset（工具开始前清空正文）/ tool（工具调用状态）/
-     * confirm（写操作授权卡）/ rag（知识库参考资料）/ thinking（深度思考思维链增量）/
+     * confirm（写操作授权卡）/ batch_confirm（批量授权卡，batch 档位）/
+     * rag（知识库参考资料）/ thinking（深度思考思维链增量）/
      * delta（增量正文）/ final（消毒后最终正文替换）/ thought（工具轮决策旁白）/
      * degrade（工具循环超限降级提示）/ done（"[DONE]"，本轮结束）/ error（错误消息）
      * <p>
-     * 以上 11 种事件与前端 SSE 解析逻辑一一对应，新增事件类型需同步前端处理。
+     * 以上事件与前端 SSE 解析逻辑一一对应，新增事件类型需同步前端处理。
      */
     @PostMapping(value = "/chat", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter chat(@Valid @RequestBody AiChatRequest req) {
@@ -120,5 +122,30 @@ public class AiController {
         CurrentUser cu = CurrentUser.get();
         Map<String, Object> result = aiService.confirmWrite(req.getToken(), cu.getUserId(), req.getTool(), req.getConversationId());
         return Result.success(result);
+    }
+
+    /**
+     * 批量授权确认（batch 档位授权卡的回调）。
+     * <p>
+     * 与单笔 confirm 同一安全模型：只回传批次令牌，服务端按保存的批次顺序逐项执行，
+     * 逐项回报结果（部分失败不影响已成功项）。
+     */
+    @PostMapping("/confirm/batch")
+    public Result<Map<String, Object>> confirmBatch(@Valid @RequestBody AiBatchConfirmRequest req) {
+        CurrentUser cu = CurrentUser.get();
+        return Result.success(aiService.confirmBatchWrite(req.getToken(), cu.getUserId(), req.getConversationId()));
+    }
+
+    /**
+     * 设置会话的写操作权限档位。
+     * <p>
+     * 仅会话本人可设置；auto（自动执行）档仅管理员可切换到——读者端动的是
+     * 用户本人资产，保持逐笔确认不做放开。降档（任何档位切回 confirm）不受限。
+     */
+    @PostMapping("/conversation/{id}/permission-mode")
+    public Result<Void> setPermissionMode(@PathVariable Long id, @RequestParam String mode) {
+        CurrentUser cu = CurrentUser.get();
+        aiService.setPermissionMode(id, cu.getUserId(), cu.getUserType(), mode);
+        return Result.success("权限档位已更新", null);
     }
 }

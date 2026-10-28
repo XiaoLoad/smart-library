@@ -191,6 +191,73 @@ public class AdminTools extends BaseLibraryTools {
         return doCounterProcess(blankToNull(borrowNo));
     }
 
+    /**
+     * 批量柜台办理（管理员，写操作）：一次授权处理多条借阅记录。
+     * <p>
+     * 底层直接复用 {@code BorrowService.batchProcess}（已支持批量、事务内逐项分流）。
+     * 适用场景：管理员说「把待取书的都确认取书」「这些单子一起归还确认」——
+     * 相比逐条调用 adminCounterProcess，本工具一次授权完成整批，避免多张授权卡逐个点头。
+     * 借阅码必须来自 adminQueryBorrows 查询结果，禁止猜测。
+     */
+    @Tool("【管理员】批量柜台办理多条借阅记录（写操作）：一次授权处理一批，按每条记录当前状态自动分流"
+            + "——待取书(0)→取书确认，借阅中(1)/已逾期(3)→直接归还并自动结算逾期罚款，待确认归还(5)→归还确认。"
+            + "当管理员要批量办理（如「把待取书的都确认」「待确认归还的全归」）时优先调用本工具而不是逐条办理；"
+            + "系统会弹出一张批量授权卡列出全部明细，管理员确认后整批生效。"
+            + "借阅码列表必须来自 adminQueryBorrows 查询结果，禁止猜测；返回逐项办理结果与成功/失败计数")
+    public Map<String, Object> adminCounterProcessBatch(
+            @P("借阅码列表（来自 adminQueryBorrows 查询结果，逗号分隔，如 BR202609090001,BR202609090002）")
+            String borrowNos) {
+        List<String> nos = new ArrayList<>();
+        if (borrowNos != null && !borrowNos.isBlank()) {
+            for (String s : borrowNos.split("[,，;；\\s]+")) {
+                if (!s.isBlank()) {
+                    nos.add(s.trim());
+                }
+            }
+        }
+        if (nos.isEmpty()) {
+            throw new BusinessException("请提供至少一个借阅码");
+        }
+        // 授权卡明细：每条一行「借阅码 → 书名」需要先查库，但门禁拦截阶段不应产生查询副作用之外的动作；
+        // 直接以借阅码列表作为明细（确认后执行时返回逐项含书名的结果）
+        List<Map<String, String>> rows = new ArrayList<>();
+        rows.add(row("记录数", String.valueOf(nos.size())));
+        rows.add(row("借阅码", String.join("、", nos)));
+        return withWriteEvent("adminCounterProcessBatch", "批量柜台办理（" + nos.size() + " 条）",
+                rows,
+                Map.of("borrowNos", String.join(",", nos)),
+                v -> doCounterBatch(nos));
+    }
+
+    /** 执行已确认的批量柜台办理（批量授权卡确认后由 {@link AiService} 调用，绕过门禁） */
+    public Map<String, Object> adminCounterProcessBatchConfirmed(String borrowNos) {
+        List<String> nos = new ArrayList<>();
+        if (borrowNos != null && !borrowNos.isBlank()) {
+            for (String s : borrowNos.split("[,，;；\\s]+")) {
+                if (!s.isBlank()) {
+                    nos.add(s.trim());
+                }
+            }
+        }
+        return doCounterBatch(nos);
+    }
+
+    /** 批量柜台办理的实际业务逻辑（门禁与确认后执行共用） */
+    private Map<String, Object> doCounterBatch(List<String> nos) {
+        if (nos.isEmpty()) {
+            throw new BusinessException("请提供至少一个借阅码");
+        }
+        PickupResultVo r = ctx.borrowService.batchProcess(null, nos, userId);
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("success", r.getFailCount() == 0);
+        m.put("total", r.getSuccessCount() + r.getFailCount());
+        m.put("successCount", r.getSuccessCount());
+        m.put("failCount", r.getFailCount());
+        m.put("results", r.getResults());
+        m.put("message", "批量办理完成：成功 " + r.getSuccessCount() + " 条，失败 " + r.getFailCount() + " 条");
+        return m;
+    }
+
     /** 柜台办理的实际业务逻辑（门禁与确认后执行共用） */
     private Map<String, Object> doCounterProcess(String no) {
         if (no == null) {

@@ -223,6 +223,66 @@
                   </div>
                 </div>
 
+                <!-- M7 批量授权卡（batch 档位）：本轮多个写操作合并一张卡，一次确认整批执行。
+                     形态与单笔授权卡一致，eyebrow 标注批量属性与操作数 -->
+                <div v-if="m.batchConfirmCard" class="confirm-card batch" :class="m.batchConfirmCard.state">
+                  <div class="confirm-head">
+                    <span class="confirm-eyebrow">
+                      <el-icon><Lock /></el-icon>
+                      <span>{{ batchEyebrow(m.batchConfirmCard) }}</span>
+                    </span>
+                  </div>
+                  <div class="confirm-title">{{ m.batchConfirmCard.title }}</div>
+                  <div v-if="m.batchConfirmCard.rows && m.batchConfirmCard.rows.length" class="confirm-rows">
+                    <div v-for="(r, ri) in m.batchConfirmCard.rows" :key="ri" class="confirm-row">
+                      <span class="confirm-k">{{ r.key }}</span>
+                      <span class="confirm-v mono">{{ r.value }}</span>
+                    </div>
+                  </div>
+                  <div v-if="m.batchConfirmCard.state === 'pending'" class="confirm-actions">
+                    <button class="confirm-btn primary" @click="onConfirmBatch(m.batchConfirmCard)">
+                      全部确认（{{ m.batchConfirmCard.count }} 项）
+                    </button>
+                    <button class="confirm-btn" @click="onCancelBatch(m.batchConfirmCard)">取消</button>
+                    <span class="confirm-ttl">{{ m.batchConfirmCard.remain ?? m.batchConfirmCard.ttlSeconds }} 秒内有效</span>
+                  </div>
+                  <div v-else-if="m.batchConfirmCard.state === 'submitting'" class="confirm-actions">
+                    <span class="confirm-state">
+                      <el-icon class="is-loading"><Loading /></el-icon>
+                      <span>正在批量办理…</span>
+                    </span>
+                  </div>
+                  <div v-else-if="m.batchConfirmCard.state === 'confirmed'" class="confirm-actions confirm-batch-result">
+                    <span class="confirm-state ok">
+                      <el-icon><Check /></el-icon>
+                      <span>{{ m.batchConfirmCard.result?.message || '批量办理完成' }}</span>
+                    </span>
+                    <div v-if="m.batchConfirmCard.result?.results?.length" class="batch-result-list">
+                      <div
+                        v-for="(r, ri) in m.batchConfirmCard.result.results"
+                        :key="ri"
+                        class="batch-result-item"
+                        :class="{ fail: r.success === false }"
+                      >
+                        <span class="batch-result-title">{{ r.title || r.tool }}</span>
+                        <span class="batch-result-msg">{{ r.message || (r.success ? '成功' : '失败') }}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div v-else-if="m.batchConfirmCard.state === 'cancelled'" class="confirm-actions">
+                    <span class="confirm-state muted">
+                      <el-icon><Close /></el-icon>
+                      <span>已取消本批操作</span>
+                    </span>
+                  </div>
+                  <div v-else-if="m.batchConfirmCard.state === 'expired' || m.batchConfirmCard.state === 'failed'" class="confirm-actions">
+                    <span class="confirm-state err">
+                      <el-icon><Warning /></el-icon>
+                      <span>{{ m.batchConfirmCard.error || '授权已失效，请重新发起' }}</span>
+                    </span>
+                  </div>
+                </div>
+
                 <!-- 参考资料：本轮注入的知识库来源。
                      后端 rag 事件在调用 LLM 之前推送（早于 delta），故参考资料条先出、正文随后流式出现；
                      点击药丸展开片段摘要（后端只回传截断摘要，不落库，历史消息无此块） -->
@@ -307,6 +367,22 @@
 
       <!-- 输入区：固定在视口底部 -->
       <div class="composer">
+        <!-- M7 写操作权限档位：confirm=逐笔确认 / batch=批量授权 / auto=自动执行（仅管理员可切）。
+             切换即时生效并持久到会话，读者端不显示 auto 选项 -->
+        <div v-if="currentConvId" class="perm-mode-bar">
+          <span class="perm-label">写操作权限</span>
+          <div class="perm-seg">
+            <button
+              v-for="opt in permOptions"
+              :key="opt.value"
+              class="perm-opt"
+              :class="{ active: permMode === opt.value }"
+              :title="opt.title"
+              :disabled="opt.adminOnly && !isAdminUser"
+              @click="switchPermMode(opt.value)"
+            >{{ opt.label }}</button>
+          </div>
+        </div>
         <div class="composer-box" :class="{ active: input }">
           <el-input
             v-model="input"
@@ -345,6 +421,7 @@ import hljs from 'highlight.js'
 import 'highlight.js/styles/github.css'
 import { aiApi } from '@/api'
 import { useAiSearchStore } from '@/stores/aiSearch'
+import { useUserStore } from '@/stores/user'
 import ConversationNav from '@/components/ConversationNav.vue'
 import AppIcon from '@/components/AppIcon.vue'
 import AiGenUi from '@/components/ai/AiGenUi.vue'
@@ -590,6 +667,27 @@ const input = ref('')
 const thinking = ref(false)
 const msgListRef = ref(null)
 
+// M7 写操作权限档位：随会话切换加载，切换时即时调 API 持久到会话
+const permMode = ref('confirm')
+// 管理员身份：user store 里的 userType（3=管理员）
+const userStore = useUserStore()
+const isAdminUser = userStore.isAdmin
+const permOptions = [
+  { value: 'confirm', label: '逐笔确认', title: '每个写操作执行前都弹授权卡（默认）', adminOnly: false },
+  { value: 'batch', label: '批量授权', title: '本轮写操作合并一张卡，一次确认整批', adminOnly: false },
+  { value: 'auto', label: '自动执行', title: '写操作直接执行，仅展示回执（仅管理员）', adminOnly: true },
+]
+const switchPermMode = async (mode) => {
+  if (mode === permMode.value || !currentConvId.value) return
+  try {
+    await aiApi.setPermissionMode(currentConvId.value, mode)
+    permMode.value = mode
+    ElMessage.success(mode === 'confirm' ? '已切换为逐笔确认' : mode === 'batch' ? '已切换为批量授权' : '已切换为自动执行')
+  } catch (e) {
+    ElMessage.error(e?.message || '权限档位切换失败')
+  }
+}
+
 // AI 检索联动：与悬浮球面板一致，queryBooks/queryHotBooks 结果广播到 aiSearchStore，
 // 图书检索页 watch 到后切换为「AI 检索结果」视图
 const aiSearchStore = useAiSearchStore()
@@ -712,6 +810,9 @@ const switchConv = async (id) => {
   if (thinking.value) return // 流式输出中不切换
   currentConvId.value = id
   isAutoFollow.value = true
+  // M7：加载该会话的权限档位（切会话即切档位视图；接口失败按默认逐笔确认显示）
+  const convMeta = conversations.value.find((c) => c.id === id)
+  permMode.value = convMeta?.permissionMode || 'confirm'
   try {
     const data = await aiApi.messageList(id)
     // 后端返回最新一页（id DESC），倒转为正序后再渲染
@@ -845,6 +946,42 @@ const onConfirmWrite = async (card) => {
 
 // 用户取消：卡片原地转为静默状态，不跳变
 const onCancelWrite = (card) => {
+  if (!card || card.state !== 'pending') return
+  stopConfirmCountdown(card)
+  card.state = 'cancelled'
+}
+
+/* —— M7 批量授权卡 —— */
+
+const batchEyebrow = (card) => {
+  const state = card.state
+  if (state === 'pending') return `批量授权 · ${card.count} 项操作待确认`
+  if (state === 'submitting') return '正在批量办理'
+  if (state === 'confirmed') return '批量办理完成'
+  if (state === 'cancelled') return '已取消'
+  return '批量授权失效'
+}
+
+// 全部确认：只回传批次令牌，服务端按保存的批次顺序逐项执行
+const onConfirmBatch = async (card) => {
+  if (!card || card.state !== 'pending') return
+  stopConfirmCountdown(card)
+  card.state = 'submitting'
+  try {
+    const res = await aiApi.confirmBatchWrite(card.token, card.conversationId)
+    card.state = 'confirmed'
+    card.result = res
+    appendAssistantText(res?.message || '批量办理完成')
+  } catch (e) {
+    const message = e?.message || '批量授权已失效，请重新发起该操作'
+    const tokenInvalid = /失效|过期|已被处理|重新发起/.test(message)
+    card.state = tokenInvalid ? 'expired' : 'failed'
+    card.error = message
+  }
+}
+
+// 取消本批：后端批次到期自动失效，本地置灰即可
+const onCancelBatch = (card) => {
   if (!card || card.state !== 'pending') return
   stopConfirmCountdown(card)
   card.state = 'cancelled'
@@ -1246,6 +1383,34 @@ const send = async () => {
         } catch {
           // 解析失败时不影响对话
         }
+      } else if (event === 'batch_confirm') {
+        // M7 批量授权卡（batch 档位）：本轮多个写操作合并一张卡，一次确认整批。
+        // 后端在 done 前推送；此时助手消息已基本成形，卡片追加在其后
+        turnHasWrite = true
+        const msg = ensureAssistantMsg()
+        msg.pending = false
+        try {
+          const info = JSON.parse(data)
+          msg.batchConfirmCard = {
+            token: info.token,
+            title: info.title || '批量授权',
+            count: info.count || 0,
+            rows: Array.isArray(info.rows) ? info.rows : [],
+            ttlSeconds: info.ttlSeconds || 120,
+            conversationId: convId,
+            // pending: 等待确认 / submitting / confirmed / cancelled / expired / failed
+            state: 'pending',
+            result: null,
+            error: '',
+          }
+          msg.timeline.push({ kind: 'confirm', tool: 'batch:' + (info.count || 0) })
+          msg.content = msg.content || `本轮共 ${info.count || 0} 项写操作待授权，请在下方批量卡上一并确认。`
+          msg.html = renderMarkdown(msg.content)
+          startConfirmCountdown(msg.batchConfirmCard)
+          scrollToBottom()
+        } catch {
+          // 解析失败时不影响对话
+        }
       } else if (event === 'degrade') {
         // 工具循环超限降级：非报错样式，提示已完成部分 + 建议继续追问
         const msg = ensureAssistantMsg()
@@ -1338,7 +1503,10 @@ const formatTime = (t) => {
 
 onBeforeUnmount(() => {
   if (abortController) abortController.abort()
-  messages.value.forEach((m) => stopConfirmCountdown(m.confirmCard))
+  messages.value.forEach((m) => {
+    stopConfirmCountdown(m.confirmCard)
+    stopConfirmCountdown(m.batchConfirmCard)
+  })
 })
 
 onMounted(loadConversations)
@@ -2329,6 +2497,73 @@ onMounted(loadConversations)
   background: linear-gradient(to top, var(--color-bg) 70%, transparent);
   z-index: 2;
 }
+
+/* M7 权限档位选择条 */
+.perm-mode-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 860px;
+  margin: 0 auto 8px;
+  padding: 0 4px;
+}
+.perm-label {
+  font-size: var(--fs-caption, 12px);
+  color: var(--color-text-tertiary, #9c958d);
+  flex-shrink: 0;
+}
+.perm-seg {
+  display: inline-flex;
+  border: 1px solid var(--color-border, #d4cdc2);
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--color-bg-elevated, #fff);
+}
+.perm-opt {
+  padding: 3px 14px;
+  font-size: var(--fs-caption, 12px);
+  color: var(--color-text-secondary, #5c564f);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.perm-opt + .perm-opt {
+  border-left: 1px solid var(--color-border, #d4cdc2);
+}
+.perm-opt:hover:not(:disabled):not(.active) {
+  color: var(--color-primary, #2f6f4f);
+}
+.perm-opt.active {
+  background: var(--color-primary, #2f6f4f);
+  color: #fff;
+}
+.perm-opt:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* M7 批量授权卡逐项结果 */
+.confirm-batch-result { flex-direction: column; align-items: stretch; gap: 8px; }
+.batch-result-list {
+  border-top: 1px dashed var(--color-divider, #eae6df);
+  padding-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.batch-result-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: var(--fs-caption, 12px);
+}
+.batch-result-item .batch-result-title { color: var(--color-text-secondary, #5c564f); flex-shrink: 0; }
+.batch-result-item .batch-result-msg { color: var(--color-success, #5d8a6b); text-align: right; word-break: break-all; }
+.batch-result-item.fail .batch-result-msg { color: var(--color-danger, #a85a4a); }
+
 .composer-box {
   position: relative;
   max-width: 860px;
