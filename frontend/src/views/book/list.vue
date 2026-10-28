@@ -155,8 +155,8 @@
         </div>
 
         <div v-if="books.length" ref="gridRef" class="wall">
-          <article v-for="(row, i) in books" :key="row.id" class="volume">
-            <div class="volume-cover" @click="openDetail(row)">
+          <article v-for="(row, i) in books" :key="row.id" class="volume" :data-book-id="row.id">
+            <div class="volume-cover" @click="openDetail(row, $event)">
               <span class="volume-no">{{ volumeNo(i) }}</span>
               <img
                 v-if="row.coverUrl && !brokenCovers.has(row.id)"
@@ -174,7 +174,7 @@
                 {{ row.availableCount === 0 ? '已借完' : `可借 ${row.availableCount}` }}
               </span>
               <div class="cover-actions">
-                <button type="button" class="cover-btn" @click.stop="openDetail(row)">详情</button>
+                <button type="button" class="cover-btn" @click.stop="openDetail(row, $event)">详情</button>
                 <button
                   v-if="userStore.isAdmin"
                   type="button"
@@ -192,7 +192,7 @@
             </div>
 
             <div class="volume-meta">
-              <h3 class="volume-title" :title="row.title" @click="openDetail(row)">{{ row.title }}</h3>
+              <h3 class="volume-title" :title="row.title" @click="openDetail(row, $event)">{{ row.title }}</h3>
               <p class="volume-sub" :title="`${row.author}${row.publisher ? ' · ' + row.publisher : ''}`">
                 <span>{{ row.author }}</span>
                 <span v-if="row.publisher" class="sub-dot">·</span>
@@ -262,7 +262,7 @@
 </template>
 
 <script setup>
-import { ref, computed, reactive, onMounted, onBeforeUnmount, watch, nextTick } from "vue";
+import { ref, computed, reactive, onMounted, onActivated, onBeforeUnmount, watch, nextTick } from "vue";
 import { useRouter } from "vue-router";
 import {
   Search, Plus, Notebook, Expand, Fold, ArrowDown, Top, MagicStick,
@@ -272,6 +272,7 @@ import { gsap } from "gsap";
 import { bookApi, borrowApi } from "@/api";
 import { useUserStore } from "@/stores/user";
 import { useAiSearchStore } from "@/stores/aiSearch";
+import { useBookTransitionStore } from "@/stores/bookTransition";
 import BorrowCodeDialog from "@/components/BorrowCodeDialog.vue";
 import BookFormDialog from "@/components/BookFormDialog.vue";
 import { useScrollRestore } from "@/composables/useScrollRestore";
@@ -321,8 +322,28 @@ const openBookDialog = (mode, row = null) => {
   bookDialogVisible.value = true;
 };
 
-// 路由跳转（详情页）
+// 路由跳转（详情页）：先登记源封面位置，由全局覆盖层做抽书翻页转场
 const router = useRouter();
+const bookTransition = useBookTransitionStore();
+
+const prefersReducedMotion = () =>
+  window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+const openDetail = (row, evt) => {
+  const coverEl = evt?.currentTarget?.closest?.(".volume")?.querySelector(".volume-cover");
+  if (coverEl && window.innerWidth >= 768 && !prefersReducedMotion()) {
+    const r = coverEl.getBoundingClientRect();
+    bookTransition.begin({
+      id: row.id,
+      rect: { left: r.left, top: r.top, width: r.width, height: r.height },
+      coverUrl: row.coverUrl && !brokenCovers.has(row.id) ? row.coverUrl : "",
+      title: row.title,
+      author: row.author || "",
+      char: row.title?.charAt(0) || "书",
+    });
+  }
+  router.push(`/book/detail/${row.id}`);
+};
 
 // 分类树滚动状态：超出可视高度时显示底部渐隐提示
 const treeScrollRef = ref(null);
@@ -543,11 +564,6 @@ const onBorrow = async (row) => {
   }
 };
 
-// 图书详情：跳转独立详情页
-const openDetail = (row) => {
-  router.push(`/book/detail/${row.id}`);
-};
-
 const onCategoryClick = async (node) => {
   selectedCategory.value = node.id;
   await runSearch();
@@ -733,6 +749,19 @@ const onStageLeave = () => {
 const onWindowScroll = () => {
   showTopBtn.value = (window.scrollY || 0) > 360;
 };
+
+// 详情 → 列表：等滚动位置恢复后再量原卡片，交给转场层做「合书放回」
+onActivated(async () => {
+  if (!bookTransition.active || bookTransition.mode !== "return") return
+  await nextTick();
+  await new Promise((resolve) =>
+    requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+  );
+  const id = bookTransition.payload?.id;
+  if (id == null) return;
+  const el = stageRef.value?.querySelector(`.volume[data-book-id="${id}"] .volume-cover`);
+  if (el) bookTransition.registerTarget(el);
+});
 
 onMounted(async () => {
   playIntro();

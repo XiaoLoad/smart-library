@@ -20,7 +20,7 @@
       <!-- 左：藏书票卡 -->
       <aside class="plate fade-in">
         <div class="plate-card">
-          <div class="plate-cover" :class="{ 'no-img': !book.coverUrl }">
+          <div class="plate-cover" ref="plateCoverRef" :class="{ 'no-img': !book.coverUrl }">
             <img v-if="book.coverUrl" :src="book.coverUrl" :alt="book.title" />
             <span v-else class="plate-char">{{ book.title?.charAt(0) }}</span>
           </div>
@@ -141,17 +141,20 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { ref, computed, onMounted, watch, nextTick } from 'vue'
+import { useRoute, onBeforeRouteLeave } from 'vue-router'
 import { Loading } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { bookApi, borrowApi } from '@/api'
 import { useUserStore } from '@/stores/user'
+import { useBookTransitionStore } from '@/stores/bookTransition'
 import BorrowCodeDialog from '@/components/BorrowCodeDialog.vue'
 import BookFormDialog from '@/components/BookFormDialog.vue'
 
 const route = useRoute()
 const userStore = useUserStore()
+const bookTransition = useBookTransitionStore()
+const plateCoverRef = ref(null)
 
 const book = ref(null)
 const categories = ref([])
@@ -238,6 +241,43 @@ const onBorrow = async () => {
 const openEdit = () => {
   editVisible.value = true
 }
+
+/* 返回馆藏列表：登记反向转场，覆盖层负责「合书 + 放回原卡片」 */
+onBeforeRouteLeave((to) => {
+  if (to.name !== 'BookList') return
+  const b = book.value
+  const el = plateCoverRef.value
+  if (!b || !el) return
+  const r = el.getBoundingClientRect()
+  bookTransition.beginReturn({
+    id: b.id,
+    rect: { left: r.left, top: r.top, width: r.width, height: r.height },
+    coverUrl: b.coverUrl || '',
+    title: b.title,
+    author: b.author || '',
+    char: b.title?.charAt(0) || '书',
+  })
+})
+
+/* 卡片→详情的共享元素转场：等页面滚到顶部、封面渲染完（图片解码或 400ms 兜底）后回传目标位置 */
+watch(book, async (v) => {
+  if (!v || !bookTransition.active) return
+  await nextTick()
+  // 路由会在导航后把页面滚回顶部，先让两帧，避免量到旧的滚动偏移
+  await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+  const el = plateCoverRef.value
+  if (!el) return
+  const img = el.querySelector('img')
+  if (img && !img.complete) {
+    await new Promise((resolve) => {
+      const done = () => resolve()
+      img.addEventListener('load', done, { once: true })
+      img.addEventListener('error', done, { once: true })
+      setTimeout(done, 400)
+    })
+  }
+  bookTransition.registerTarget(el)
+})
 
 const formatTime = (t) => {
   if (!t) return '—'
