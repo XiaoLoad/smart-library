@@ -1,7 +1,7 @@
 <template>
   <el-dialog
     v-model="visible"
-    width="780px"
+    width="648px"
     align-center
     class="book-form-dialog"
     :close-on-click-modal="false"
@@ -9,15 +9,17 @@
   >
     <template #header>
       <div class="bf-head">
-        <span class="eyebrow">{{ isEdit ? '馆藏 · REVISE ENTRY' : '馆藏 · NEW ACQUISITION' }}</span>
-        <h2 class="bf-title">{{ isEdit ? '编辑图书' : '新增图书' }}</h2>
-        <p class="bf-sub">{{ isEdit ? '修改保存后即时生效，ISBN 全馆唯一。' : '录入后将同步生成可借馆藏，ISBN 全馆唯一。' }}</p>
+        <div class="bf-head-main">
+          <span class="eyebrow">{{ isEdit ? '馆藏 · REVISE ENTRY' : '馆藏 · NEW ACQUISITION' }}</span>
+          <h2 class="bf-title">{{ isEdit ? '编辑图书' : '新增图书' }}</h2>
+        </div>
+        <p class="bf-sub">{{ isEdit ? '保存后即时生效' : '入库即全部可借' }} · ISBN 全馆唯一</p>
       </div>
     </template>
 
     <div class="bf-body" :key="dialogKey">
-      <!-- 封面区 -->
-      <div class="bf-cover">
+      <!-- 封面：缩略图 + 紧凑操作 -->
+      <aside class="bf-cover">
         <div class="cover-frame" :class="{ 'has-img': form.coverUrl && !coverImgError }">
           <img
             v-if="form.coverUrl"
@@ -28,54 +30,63 @@
           />
           <div v-if="!form.coverUrl || coverImgError" class="cover-empty">
             <span class="cover-char">{{ form.title ? form.title.charAt(0) : '书' }}</span>
-            <span class="cover-hint">{{ coverImgError ? '封面地址无法加载' : '封面预览' }}</span>
+            <span class="cover-hint">{{ coverImgError ? '地址无效' : '封面' }}</span>
           </div>
-          <div v-else class="cover-mask">
-            <el-button size="small" plain type="danger" @click="removeCover">移除封面</el-button>
-          </div>
+          <button
+            v-if="form.coverUrl && !coverImgError"
+            type="button"
+            class="cover-remove"
+            aria-label="移除封面"
+            @click="removeCover"
+          >×</button>
           <div v-if="coverUploading" class="cover-loading">
             <el-icon class="is-loading"><Loading /></el-icon>
-            <span>上传中…</span>
           </div>
         </div>
 
-        <div class="cover-tabs">
+        <div class="cover-switch" role="tablist">
           <button
             type="button"
-            class="cover-tab"
+            role="tab"
+            :aria-selected="coverMode === 'local'"
             :class="{ active: coverMode === 'local' }"
             @click="setCoverMode('local')"
-          >本地上传</button>
+          >上传</button>
           <button
             type="button"
-            class="cover-tab"
+            role="tab"
+            :aria-selected="coverMode === 'link'"
             :class="{ active: coverMode === 'link' }"
             @click="setCoverMode('link')"
-          >图片链接</button>
+          >链接</button>
         </div>
 
         <el-upload
           v-if="coverMode === 'local'"
-          class="cover-upload"
-          drag
+          class="cover-upload-inline"
           accept="image/jpeg,image/png,image/webp,image/gif"
           :show-file-list="false"
           :before-upload="beforeCoverUpload"
           :http-request="uploadCover"
         >
-          <el-icon class="cover-upload-icon"><UploadFilled /></el-icon>
-          <div class="cover-upload-text">拖拽图片至此，或<em>点击上传</em></div>
+          <button type="button" class="cover-action">
+            <el-icon><UploadFilled /></el-icon>{{ form.coverUrl ? '更换封面' : '选择图片' }}
+          </button>
         </el-upload>
 
-        <template v-else>
-          <el-input v-model="coverLink" placeholder="https://…" clearable class="cover-link" />
-        </template>
-        <p class="cover-tip">
-          {{ coverMode === 'local' ? '支持 JPG / PNG / WebP / GIF，≤ 5MB' : '粘贴图片直链，左侧实时预览' }}
-        </p>
-      </div>
+        <el-input
+          v-else
+          v-model="coverLink"
+          size="small"
+          placeholder="图片直链 https://…"
+          clearable
+          class="cover-link"
+        />
 
-      <!-- 表单区 -->
+        <p class="cover-tip">{{ coverMode === 'local' ? 'JPG / PNG / WebP / GIF，≤ 5MB' : '粘贴直链，左侧实时预览' }}</p>
+      </aside>
+
+      <!-- 表单：紧凑三组 -->
       <el-form
         :model="form"
         label-position="top"
@@ -83,7 +94,11 @@
         :rules="rules"
         class="bf-form"
       >
-        <div class="bf-section">基础信息</div>
+        <div class="bf-group">
+          <span class="bf-group-no">01</span>
+          <span class="bf-group-name">书目</span>
+          <span class="bf-group-rule"></span>
+        </div>
         <div class="bf-fields">
           <el-form-item label="书名" prop="title" class="span-2">
             <el-input v-model="form.title" placeholder="请输入书名" />
@@ -94,22 +109,36 @@
           <el-form-item label="ISBN" prop="isbn">
             <el-input v-model="form.isbn" placeholder="请输入 ISBN" />
           </el-form-item>
-          <el-form-item label="分类" prop="categoryId" class="span-2">
+          <el-form-item label="分类" prop="categoryId">
             <CategoryTreeSelect
               v-model="form.categoryId"
               :data="categories"
-              placeholder="输入分类名称可模糊搜索"
+              placeholder="可模糊搜索"
             />
           </el-form-item>
-        </div>
-
-        <div class="bf-section">馆藏信息</div>
-        <div class="bf-fields">
           <el-form-item label="出版社">
             <el-input v-model="form.publisher" placeholder="选填" />
           </el-form-item>
+        </div>
+
+        <div class="bf-group">
+          <span class="bf-group-no">02</span>
+          <span class="bf-group-name">馆藏</span>
+          <span class="bf-group-rule"></span>
+        </div>
+        <div class="bf-fields cols-3">
           <el-form-item label="馆藏位置">
             <el-input v-model="form.location" placeholder="如 A区1排3架" />
+          </el-form-item>
+          <el-form-item label="馆藏数量" prop="totalCount">
+            <el-input-number
+              v-model="form.totalCount"
+              :min="1"
+              :max="9999"
+              :step="1"
+              controls-position="right"
+              style="width: 100%"
+            />
           </el-form-item>
           <el-form-item label="定价（元）" prop="price">
             <el-input-number
@@ -122,48 +151,40 @@
               controls-position="right"
               style="width: 100%"
             />
-            <span class="field-tip">最低定价 ¥10.00</span>
-          </el-form-item>
-          <el-form-item label="馆藏数量" prop="totalCount">
-            <el-input-number
-              v-model="form.totalCount"
-              :min="1"
-              :max="9999"
-              :step="1"
-              controls-position="right"
-              style="width: 100%"
-            />
-            <span class="field-tip">入库即全部可借</span>
           </el-form-item>
         </div>
 
-        <div class="bf-section">内容简介</div>
-        <div class="bf-fields">
-          <el-form-item label="简介" class="span-2">
-            <el-input
-              v-model="form.description"
-              type="textarea"
-              :rows="4"
-              maxlength="500"
-              show-word-limit
-              resize="none"
-              placeholder="简要介绍书籍的内容主旨、作者背景与阅读价值，选填，将展示在图书详情页"
-            />
-            <span class="field-tip">最多 500 字，留空则详情页显示「暂无简介」</span>
-          </el-form-item>
+        <div class="bf-group">
+          <span class="bf-group-no">03</span>
+          <span class="bf-group-name">简介</span>
+          <span class="bf-group-rule"></span>
         </div>
+        <el-form-item label="内容简介" class="bf-desc">
+          <el-input
+            v-model="form.description"
+            type="textarea"
+            :rows="3"
+            maxlength="500"
+            show-word-limit
+            resize="none"
+            placeholder="内容主旨、作者背景与阅读价值，选填；将展示在图书详情页"
+          />
+        </el-form-item>
       </el-form>
     </div>
 
     <template #footer>
       <div class="bf-footer">
-        <el-button @click="visible = false">取消</el-button>
-        <el-button
-          type="primary"
-          :icon="isEdit ? Check : Plus"
-          :loading="submitting"
-          @click="submit"
-        >{{ isEdit ? '保存修改' : '确认新增' }}</el-button>
+        <span class="bf-foot-note">{{ isEdit ? '修改保存后即时生效' : '录入后生成可借馆藏' }}</span>
+        <div class="bf-foot-actions">
+          <el-button @click="visible = false">取消</el-button>
+          <el-button
+            type="primary"
+            :icon="isEdit ? Check : Plus"
+            :loading="submitting"
+            @click="submit"
+          >{{ isEdit ? '保存修改' : '确认新增' }}</el-button>
+        </div>
       </div>
     </template>
   </el-dialog>
@@ -329,85 +350,122 @@ const submit = async () => {
 </script>
 
 <style>
-/* 图书新增/编辑弹窗（Editorial · 日式极简） */
+/* 图书新增/编辑弹窗 · 紧凑版（书目登记卡） */
 .book-form-dialog {
   border-radius: var(--radius-lg);
   border: 1px solid var(--color-border);
   box-shadow: var(--shadow-lg);
   overflow: hidden;
+  max-width: calc(100vw - 32px);
 }
+
 .book-form-dialog .el-dialog__header {
-  padding: 26px 32px 0;
+  padding: 20px 24px 0;
   margin-right: 0;
 }
+
 .book-form-dialog .el-dialog__headerbtn {
-  top: 22px;
-  right: 22px;
+  top: 16px;
+  right: 16px;
 }
+
 .book-form-dialog .el-dialog__body {
-  padding: 18px 32px 6px;
-  max-height: 72vh;
+  padding: 14px 24px 2px;
+  max-height: 66vh;
   overflow-y: auto;
 }
+
 .book-form-dialog .el-dialog__footer {
-  padding: 14px 32px 22px;
+  padding: 10px 24px 16px;
   border-top: 1px solid var(--color-divider);
 }
 
-/* 头部 */
-.book-form-dialog .bf-head .eyebrow {
-  display: block;
-  margin-bottom: 6px;
-}
-.book-form-dialog .bf-head .bf-title {
-  font-family: var(--font-serif);
-  font-size: var(--fs-h2);
-  font-weight: 600;
-  letter-spacing: var(--ls-tight);
-  color: var(--color-text);
-  margin: 0 0 6px;
-}
-.book-form-dialog .bf-head .bf-sub {
-  margin: 0;
-  font-size: var(--fs-small);
-  color: var(--color-text-tertiary);
+/* —— 头部 —— */
+.book-form-dialog .bf-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
 }
 
-/* 主体两栏 */
+.book-form-dialog .bf-head .eyebrow {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.book-form-dialog .bf-head .bf-title {
+  font-family: var(--font-serif);
+  font-size: 1.5rem;
+  font-weight: 600;
+  letter-spacing: var(--ls-tight);
+  line-height: 1.15;
+  color: var(--color-text);
+  margin: 0;
+}
+
+.book-form-dialog .bf-head .bf-sub {
+  margin: 0 0 3px;
+  font-size: var(--fs-caption);
+  color: var(--color-text-tertiary);
+  text-align: right;
+  flex-shrink: 0;
+}
+
+/* —— 主体：封面窄栏 + 表单 —— */
 .book-form-dialog .bf-body {
   display: grid;
-  grid-template-columns: 172px minmax(0, 1fr);
-  gap: 28px;
+  grid-template-columns: 118px minmax(0, 1fr);
+  gap: 20px;
   align-items: start;
 }
+
 .book-form-dialog .bf-cover,
 .book-form-dialog .bf-form {
   animation: bf-rise var(--duration-slow) var(--ease-out) both;
 }
-.book-form-dialog .bf-form { animation-delay: 60ms; }
+
+.book-form-dialog .bf-form {
+  animation-delay: 50ms;
+}
+
 @keyframes bf-rise {
-  from { opacity: 0; transform: translateY(10px); }
+  from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
 }
 
-/* 封面区 */
+.book-form-dialog .bf-cover {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-right: 18px;
+  border-right: 1px solid var(--color-divider);
+}
+
+/* 封面缩略图 */
 .book-form-dialog .cover-frame {
   position: relative;
   width: 100%;
+  max-width: 118px;
   aspect-ratio: 3 / 4;
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
+  border-radius: 3px;
   background: linear-gradient(160deg, var(--color-bg-subtle), var(--color-bg-muted));
   overflow: hidden;
+  box-shadow: 0 10px 20px -16px rgba(31, 27, 22, 0.5);
   transition: border-color var(--duration-fast) var(--ease-soft);
 }
-.book-form-dialog .cover-frame:hover { border-color: var(--color-border-strong); }
+
+.book-form-dialog .cover-frame:hover {
+  border-color: var(--color-border-strong);
+}
+
 .book-form-dialog .cover-frame img {
   width: 100%;
   height: 100%;
   object-fit: cover;
   display: block;
 }
+
 .book-form-dialog .cover-empty {
   position: absolute;
   inset: 0;
@@ -415,156 +473,281 @@ const submit = async () => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 6px;
 }
+
 .book-form-dialog .cover-empty .cover-char {
   font-family: var(--font-serif);
-  font-size: 44px;
+  font-size: 2rem;
   font-weight: 600;
   line-height: 1;
   color: var(--color-primary);
   opacity: 0.55;
 }
+
 .book-form-dialog .cover-empty .cover-hint {
-  font-size: var(--fs-caption);
-  letter-spacing: var(--ls-wide);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.18em;
   color: var(--color-text-tertiary);
 }
-.book-form-dialog .cover-mask {
+
+.book-form-dialog .cover-remove {
   position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(26, 24, 21, 0.45);
+  top: 4px;
+  right: 4px;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(26, 24, 21, 0.62);
+  color: #faf8f5;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
   opacity: 0;
   transition: opacity var(--duration-fast) var(--ease-soft);
 }
-.book-form-dialog .cover-frame:hover .cover-mask { opacity: 1; }
+
+.book-form-dialog .cover-frame:hover .cover-remove {
+  opacity: 1;
+}
+
 .book-form-dialog .cover-loading {
   position: absolute;
   inset: 0;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  background: rgba(250, 248, 245, 0.72);
+  background: rgba(250, 248, 245, 0.74);
   backdrop-filter: blur(2px);
-  font-size: var(--fs-caption);
-  color: var(--color-text-secondary);
 }
+
 .book-form-dialog .cover-loading .el-icon {
-  font-size: 20px;
+  font-size: 18px;
   color: var(--color-primary);
 }
 
-/* 模式切换 */
-.book-form-dialog .cover-tabs {
+/* 上传 / 链接 切换 */
+.book-form-dialog .cover-switch {
   display: flex;
-  gap: 16px;
-  margin: 12px 0 10px;
-}
-.book-form-dialog .cover-tab {
-  appearance: none;
-  background: none;
-  border: none;
-  padding: 0 0 6px;
-  font-family: var(--font-sans);
-  font-size: var(--fs-small);
-  color: var(--color-text-tertiary);
-  cursor: pointer;
-  border-bottom: 1px solid transparent;
-  transition: color var(--duration-fast) var(--ease-soft),
-    border-color var(--duration-fast) var(--ease-soft);
-}
-.book-form-dialog .cover-tab:hover { color: var(--color-text-secondary); }
-.book-form-dialog .cover-tab.active {
-  color: var(--color-primary);
-  font-weight: 500;
-  border-bottom-color: var(--color-primary);
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
 }
 
-/* 上传拖拽区 / 链接输入 */
-.book-form-dialog .cover-upload .el-upload { width: 100%; }
-.book-form-dialog .cover-upload .el-upload-dragger {
-  width: 100%;
-  padding: 16px 12px;
-  border: 1px dashed var(--color-border-strong);
-  border-radius: var(--radius-md);
+.book-form-dialog .cover-switch button {
+  flex: 1;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 2px;
   background: transparent;
-  transition: border-color var(--duration-fast) var(--ease-soft),
-    background var(--duration-fast) var(--ease-soft);
-}
-.book-form-dialog .cover-upload .el-upload-dragger:hover {
-  border-color: var(--color-primary);
-  background: var(--color-primary-light);
-}
-.book-form-dialog .cover-upload-icon {
-  font-size: 24px;
   color: var(--color-text-tertiary);
-  margin-bottom: 6px;
+  font-size: 10px;
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-soft);
 }
-.book-form-dialog .cover-upload-text {
-  font-size: var(--fs-caption);
+
+.book-form-dialog .cover-switch button:hover {
   color: var(--color-text-secondary);
 }
-.book-form-dialog .cover-upload-text em {
+
+.book-form-dialog .cover-switch button.active {
+  background: var(--color-primary-light);
   color: var(--color-primary);
-  font-style: normal;
-}
-.book-form-dialog .cover-tip {
-  margin: 8px 0 0;
-  font-size: var(--fs-caption);
-  color: var(--color-text-tertiary);
+  font-weight: 600;
 }
 
-/* 表单 */
-.book-form-dialog .bf-form .bf-section {
+/* 上传按钮 / 链接输入 */
+.book-form-dialog .cover-upload-inline,
+.book-form-dialog .cover-upload-inline .el-upload {
+  width: 100%;
+}
+
+.book-form-dialog .cover-action {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin: 4px 0 12px;
-  font-size: var(--fs-caption);
-  font-weight: 500;
-  letter-spacing: var(--ls-wide);
-  text-transform: uppercase;
+  justify-content: center;
+  gap: 4px;
+  width: 100%;
+  height: 26px;
+  padding: 0;
+  border: 1px dashed var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 10px;
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-soft);
+}
+
+.book-form-dialog .cover-action:hover {
+  border-color: var(--color-primary);
+  border-style: solid;
+  color: var(--color-primary);
+  background: var(--color-primary-light);
+}
+
+.book-form-dialog .cover-link {
+  width: 100%;
+}
+
+.book-form-dialog .cover-tip {
+  margin: 0;
+  font-size: 9px;
+  line-height: 1.45;
   color: var(--color-text-tertiary);
 }
-.book-form-dialog .bf-form .bf-section:not(:first-child) { margin-top: 18px; }
-.book-form-dialog .bf-form .bf-section::after {
-  content: '';
+
+/* —— 表单：紧凑分组 —— */
+.book-form-dialog .bf-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+}
+
+.book-form-dialog .bf-group:not(:first-child) {
+  margin-top: 12px;
+}
+
+.book-form-dialog .bf-group-no {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  color: var(--color-text-tertiary);
+}
+
+.book-form-dialog .bf-group-name {
+  font-family: var(--font-serif);
+  font-size: var(--fs-caption);
+  letter-spacing: 0.08em;
+  color: var(--color-text-secondary);
+}
+
+.book-form-dialog .bf-group-rule {
   flex: 1;
   height: 1px;
   background: var(--color-divider);
 }
+
 .book-form-dialog .bf-fields {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  column-gap: 16px;
+  column-gap: 14px;
 }
-.book-form-dialog .bf-fields .span-2 { grid-column: span 2; }
-.book-form-dialog .bf-form .el-form-item { margin-bottom: 14px; }
+
+.book-form-dialog .bf-fields.cols-3 {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.book-form-dialog .bf-fields .span-2 {
+  grid-column: span 2;
+}
+
+.book-form-dialog .bf-form .el-form-item {
+  margin-bottom: 10px;
+}
+
 .book-form-dialog .bf-form .el-form-item__label {
   font-size: var(--fs-caption);
   color: var(--color-text-secondary);
-  line-height: 1.4;
-  margin-bottom: 4px;
+  line-height: 1.3;
+  margin-bottom: 3px;
+  padding: 0;
 }
-.book-form-dialog .bf-form .el-form-item__content { flex-wrap: wrap; }
-.book-form-dialog .field-tip {
-  display: block;
-  width: 100%;
+
+.book-form-dialog .bf-form .bf-desc {
+  margin-bottom: 2px;
+}
+
+.book-form-dialog .bf-form .bf-desc .el-textarea__inner {
+  font-size: var(--fs-small);
+}
+
+/* —— 底部 —— */
+.book-form-dialog .bf-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.book-form-dialog .bf-foot-note {
   font-size: var(--fs-caption);
-  line-height: 1.4;
-  margin-top: 2px;
   color: var(--color-text-tertiary);
 }
 
-/* 底部 */
-.book-form-dialog .bf-footer {
+.book-form-dialog .bf-foot-actions {
   display: flex;
-  justify-content: flex-end;
   gap: 10px;
+}
+
+/* —— 窄屏 —— */
+@media (max-width: 640px) {
+  .book-form-dialog .el-dialog__body {
+    max-height: 70vh;
+    padding: 12px 16px 2px;
+  }
+
+  .book-form-dialog .el-dialog__header {
+    padding: 16px 16px 0;
+  }
+
+  .book-form-dialog .el-dialog__footer {
+    padding: 10px 16px 14px;
+  }
+
+  .book-form-dialog .bf-head .bf-sub {
+    display: none;
+  }
+
+  .book-form-dialog .bf-body {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+
+  .book-form-dialog .bf-cover {
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 10px;
+    padding-right: 0;
+    padding-bottom: 12px;
+    border-right: none;
+    border-bottom: 1px solid var(--color-divider);
+    flex-wrap: wrap;
+  }
+
+  .book-form-dialog .cover-frame {
+    width: 84px;
+    flex-shrink: 0;
+  }
+
+  .book-form-dialog .cover-switch {
+    width: 84px;
+    flex-shrink: 0;
+  }
+
+  .book-form-dialog .cover-upload-inline,
+  .book-form-dialog .cover-link {
+    flex: 1;
+    min-width: 120px;
+  }
+
+  .book-form-dialog .cover-tip {
+    flex-basis: 100%;
+  }
+
+  .book-form-dialog .bf-fields,
+  .book-form-dialog .bf-fields.cols-3 {
+    grid-template-columns: 1fr;
+  }
+
+  .book-form-dialog .bf-fields .span-2 {
+    grid-column: auto;
+  }
 }
 </style>
