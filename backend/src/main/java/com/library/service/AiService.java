@@ -570,14 +570,19 @@ public class AiService {
         commonTools.setConfirmHandler(confirmCb);
         roleTools.setConfirmHandler(confirmCb);
 
-        // M7：批量授权收集器（batch 档位）。本轮被拦截的写操作在此累积，
-        // onCompleteResponse 时合并为一张批量卡（batch_confirm 事件）统一请求确认
+        // M12：写操作收集回调（confirm 档与 batch 档共用收集器）。
+        // confirm 档：逐项立即签发独立令牌并推送独立授权卡（一轮弹齐、逐张确认）；
+        // batch 档：仅累积，onCompleteResponse 时合并为一张批量卡统一确认
         java.util.List<AiBatchConfirmService.BatchItem> batchItems =
                 new java.util.concurrent.CopyOnWriteArrayList<>();
         BaseLibraryTools.BatchCollector batchCb = (toolName, title, rows, args) -> {
             trace.markGate(toolName);
-            batchItems.add(new AiBatchConfirmService.BatchItem(toolName, title,
-                    rows == null ? List.of() : rows, args));
+            AiBatchConfirmService.BatchItem item = new AiBatchConfirmService.BatchItem(toolName, title,
+                    rows == null ? List.of() : rows, args);
+            batchItems.add(item);
+            if (mode == PermissionMode.CONFIRM) {
+                emitSingleConfirm(emitter, conversationId, cu.getUserId(), toolName, title, rows, args);
+            }
         };
         commonTools.setBatchCollector(batchCb);
         roleTools.setBatchCollector(batchCb);
@@ -710,9 +715,9 @@ public class AiService {
                         // M6a：记录 token 用量并落库轨迹
                         recordTokenUsage(trace, response);
                         traceService.save(trace);
-                        // M7：批量授权档——本轮收集到的写操作在 done 前合并成一张批量卡统一请求确认。
-                        // 放在 done 之前保证前端先收到卡再结束流；批次令牌同样由服务端持有参数
-                        if (!batchItems.isEmpty()) {
+                        // M7：batch 档——本轮收集到的写操作在 done 前合并成一张批量卡统一请求确认。
+                        // confirm 档已在收集时逐项推卡（emitSingleConfirm），此处跳过
+                        if (!batchItems.isEmpty() && mode == PermissionMode.BATCH) {
                             emitBatchConfirm(emitter, conversationId, cu.getUserId(), batchItems);
                         }
                         try {
@@ -1081,6 +1086,41 @@ public class AiService {
         AiToolContext toolCtx = buildToolContext();
         AdminTools tools = new AdminTools(userId, currentUserType(), toolCtx);
         return tools.adminCounterProcessConfirmed(str(args.get("borrowNo"), ""));
+    }
+
+    /**
+     * M12：confirm 档单项授权卡立即推送。
+     * <p>
+     * 收集器回调时逐项调用：每项写操作签发独立令牌并推一张独立授权卡
+     * （confirm 事件），一轮内多本借阅等场景全部卡同时出现，用户逐张确认。
+     * 推送失败时作废令牌，避免「前端没收到卡、令牌却在服务端存活」的悬挂状态。
+     */
+    private void emitSingleConfirm(SseEmitter emitter, Long conversationId, Long userId,
+                                   String toolName, String title,
+                                   List<Map<String, String>> rows, Map<String, Object> args) {
+        String token = null;
+        try {
+            token = aiConfirmService.issue(userId, conversationId, toolName, args, title, rows);
+            Map<String, Object> payload = new java.util.LinkedHashMap<>();
+            payload.put("token", token);
+            payload.put("tool", toolName);
+            payload.put("title", title);
+            payload.put("rows", rows == null ? List.of() : rows);
+            payload.put("ttlSeconds", 60);
+            payload.put("sessionAllow", true);
+            emitter.send(SseEmitter.event().name("confirm")
+                    .data(objectMapper.writeValueAsString(payload)));
+        } catch (IOException e) {
+            if (token != null) {
+                aiConfirmService.revoke(token);
+                log.warn("[AI] 授权卡推送失败，令牌已作废 tool={}", toolName);
+            }
+        } catch (Exception e) {
+            if (token != null) {
+                aiConfirmService.revoke(token);
+            }
+            log.warn("[AI] 授权卡序列化失败 tool={}: {}", toolName, e.getMessage());
+        }
     }
 
     /**

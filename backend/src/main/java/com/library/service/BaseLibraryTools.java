@@ -218,7 +218,22 @@ public abstract class BaseLibraryTools {
             pending.put("message", "本操作已加入本轮批量授权清单，将在本轮结束前统一请求确认");
             return pending;
         }
-        // 逐笔确认档（默认）：门禁未初始化视为装配异常，放行但留高可见日志
+        // M12：逐笔确认档也走收集模式——本轮被拦截的写操作逐个通过收集器上报，
+        // 由 AiService 立即签发令牌并推送独立授权卡（每项一个令牌、一张卡、独立确认）。
+        // 模型收到统一的「已收集」提示后停轮，用户把全部卡处理完后前端聚合发起一次续跑。
+        // 相比旧「一次拦截弹一张卡」，多本借阅等场景一轮弹齐，不再确认一次续跑一次。
+        if (batchCollector != null) {
+            batchCollector.collect(name, title, rows, args);
+            Map<String, Object> pending = new LinkedHashMap<>();
+            pending.put("success", false);
+            pending.put("awaitingConfirm", true);
+            pending.put("queued", true);
+            pending.put("message", "本操作已进入本轮待授权清单（用户界面已出现对应授权卡）。"
+                    + "若任务链还有其他待授权写操作，请在本轮继续逐个调用工具发起；全部发起完后停止回复等待用户确认。"
+                    + "操作尚未执行：只有用户逐张确认后才会执行，绝不可宣称任何一项已完成");
+            return pending;
+        }
+        // 收集器缺失（装配异常）退回同步弹卡，保持 fail-safe
         if (confirmHandler == null) {
             log.error("[AI] 写门禁未初始化，写操作[{}]直接执行(fail-open)", name);
             return withEvent(name, title, action);
@@ -236,10 +251,9 @@ public abstract class BaseLibraryTools {
         Map<String, Object> pending = new LinkedHashMap<>();
         pending.put("success", false);
         pending.put("awaitingConfirm", true);
-        // M11 措辞强化：明确告知模型立即停轮 + 未确认≠完成，防两类翻车——
-        // ① 模型误以为要等确认而拒绝为本轮其他项继续弹卡；② 模型把「已弹卡」当成「已办完」
+        // M12 措辞：明确告知模型未确认≠完成，防把「已弹卡」当成「已办完」
         pending.put("message", "已向用户发起授权请求（用户界面上已出现授权卡）。本操作尚未执行、尚未完成："
-                + "请立即结束本轮回复等待用户确认，不要在本轮继续调用其他写工具，也绝不可宣称本操作或任务链已完成。"
+                + "请等待用户确认，绝不可宣称本操作或任务链已完成。"
                 + "用户确认后系统会以回执告知真实执行结果，届时再继续剩余步骤");
         return pending;
     }
