@@ -108,7 +108,7 @@
       </div>
 
       <div class="chart-grid">
-        <div class="card panel">
+        <div class="card panel chart-panel">
           <div class="panel-head">
             <div>
               <span class="panel-eyebrow">TREND</span>
@@ -119,10 +119,10 @@
               <span class="figure"><i class="dot secondary"></i>归还 <b>{{ trendTotals.return }}</b></span>
             </div>
           </div>
-          <v-chart :option="borrowTrendOption" class="chart-canvas" autoresize />
+          <v-chart ref="trendChartRef" :option="borrowTrendOption" class="chart-canvas" autoresize />
         </div>
 
-        <div class="card panel">
+        <div class="card panel chart-panel">
           <div class="panel-head">
             <div>
               <span class="panel-eyebrow">{{ userStore.isAdmin ? 'ACTIVE' : 'CATEGORY' }}</span>
@@ -131,7 +131,7 @@
           </div>
           <div class="donut-wrap">
             <div class="donut-chart">
-              <v-chart :option="sidePieOption" class="donut-canvas" autoresize />
+              <v-chart ref="donutChartRef" :option="sidePieOption" class="donut-canvas" autoresize />
               <div class="donut-center">
                 <span class="donut-total">{{ formatNumber(donutTotal) }}</span>
                 <span class="donut-caption">{{ donutCaption }}</span>
@@ -158,7 +158,7 @@
         <span class="section-note">按一级分类</span>
       </div>
 
-      <div class="card panel">
+      <div class="card panel chart-panel">
         <div class="panel-head">
           <div>
             <span class="panel-eyebrow">COLLECTION</span>
@@ -186,7 +186,7 @@
           <span class="legend-item hint">横条总长 = 该分类总册数</span>
         </div>
 
-        <v-chart :option="collectionBarOption" class="chart-canvas collection-canvas" autoresize />
+        <v-chart ref="collectionChartRef" :option="collectionBarOption" class="chart-canvas collection-canvas" autoresize />
       </div>
     </section>
 
@@ -268,7 +268,7 @@
 </template>
 
 <script setup>
-import { ref, computed, reactive, onMounted } from 'vue'
+import { ref, computed, reactive, watch, onMounted, onBeforeUnmount } from 'vue'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
 import { LineChart, PieChart, BarChart } from 'echarts/charts'
@@ -287,6 +287,23 @@ const appStore = useAppStore()
 const data = ref({ stats: [], borrowTrend: {}, hotBooks: [], categoryDist: [], categoryBookDist: [], collection: {}, operations: {} })
 const notices = ref([])
 const brokenCovers = reactive(new Set())
+
+const trendChartRef = ref(null)
+const donutChartRef = ref(null)
+const collectionChartRef = ref(null)
+
+/* 侧边栏折叠/展开会改变内容区宽度：等宽度过渡结束后按最终尺寸重排图表，
+   避免画布停在过渡中的中间尺寸、在卡片里溢出或空白 */
+let resizeTimer = null
+watch(() => appStore.sidebarCollapsed, () => {
+  clearTimeout(resizeTimer)
+  resizeTimer = setTimeout(() => {
+    for (const chartRef of [trendChartRef, donutChartRef, collectionChartRef]) {
+      chartRef.value?.chart?.resize()
+    }
+  }, 320)
+})
+onBeforeUnmount(() => clearTimeout(resizeTimer))
 
 const ops = computed(() => data.value.operations || {})
 const hero = computed(() => data.value.stats[0] || {})
@@ -643,7 +660,9 @@ onMounted(loadData)
 }
 
 .reveal {
-  animation: fade-in-up 0.5s var(--ease-out) both;
+  /* backwards：延迟期间沿用首帧，动画结束后不再保留 transform/opacity，
+     避免每个分节变成长期合成层（侧边栏宽度变化时容易出现卡片重绘失败、背景透明） */
+  animation: fade-in-up 0.5s var(--ease-out) backwards;
 }
 
 .section:nth-of-type(2) { animation-delay: 0.05s; }
@@ -1003,6 +1022,12 @@ onMounted(loadData)
   display: flex;
   flex-direction: column;
   padding: var(--space-5);
+  min-width: 0;
+}
+
+/* 图表卡裁切内部画布：宽度变化时画布即使短暂停留在旧尺寸，也不会溢出卡片影响版式 */
+.chart-panel {
+  overflow: hidden;
 }
 
 .panel-head {
