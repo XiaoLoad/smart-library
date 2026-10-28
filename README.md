@@ -198,7 +198,7 @@ pnpm dev
 | 端 | 依赖清单文件 | 关键依赖 |
 |---|---|---|
 | 后端 | [backend/pom.xml](./backend/pom.xml) | Spring Boot 3.3.5、mybatis-spring-boot-starter 3.0.4、pagehelper 2.1.0、flyway-core/mysql、mysql-connector-j、jjwt 0.12.6、langchain4j 1.22.0、langchain4j-embeddings-bge-small-zh-v15-q、spring-boot-starter-mail |
-| Web 前端 | [frontend/package.json](./frontend/package.json) + `pnpm-lock.yaml` | vue 3.5、vite 8、element-plus 2.14、pinia 4、echarts 6、axios、markdown-it、highlight.js、qrcode |
+| Web 前端 | [frontend/package.json](./frontend/package.json) + `pnpm-lock.yaml` | vue 3.5、vite 8、element-plus 2.14、pinia 4、echarts 6、gsap 3、axios、markdown-it、highlight.js、qrcode |
 | 小程序 | [miniprogram-reader/package.json](./miniprogram-reader/package.json) | 微信原生运行时，无第三方运行时依赖（`miniprogram_npm` 由开发者工具构建生成，不入库） |
 
 ### 端口与网络

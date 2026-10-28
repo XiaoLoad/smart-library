@@ -644,7 +644,9 @@ onMounted(() => {
 
 .app-content {
   flex: 1;
+  /* clip 不会把容器变成滚动容器，页面内的 position: sticky 才能相对视口生效 */
   overflow-x: hidden;
+  overflow-x: clip;
 }
 
 /* 通知抽屉 */
