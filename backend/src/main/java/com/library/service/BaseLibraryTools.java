@@ -342,6 +342,13 @@ public abstract class BaseLibraryTools {
             String genType = SNAPSHOT_TYPES.get(toolName);
             int maxLen = DATA_SNAPSHOT_MAX_LEN;
             Object toSerialize = r;
+            // M13：写操作结果专项投影——快照只服务前端渲染，不进模型上下文，
+            // 因此这里可以带全逐项明细（单号/标题/结果），不影响对话 token
+            if (r instanceof Map<?, ?> m && m.get("results") instanceof List<?> results
+                    && (m.containsKey("successCount") || m.containsKey("success"))) {
+                toSerialize = operationSnapshot(m, results);
+                return writeJson(toSerialize, GEN_UI_SNAPSHOT_MAX_LEN);
+            }
             // 生成式 UI 工具（带可视化 type）一律豁免全局 600 截断——
             // 截断会破坏 JSON，前端解析失败后卡片降级为折叠 JSON 视图，一级内联失效
             if (genType != null) {
@@ -400,6 +407,42 @@ public abstract class BaseLibraryTools {
             // 序列化失败不影响主流程
             return null;
         }
+    }
+
+    /** 序列化并在超限时截断（截断可能破坏 JSON，前端有解析失败兜底） */
+    private String writeJson(Object o, int maxLen) throws com.fasterxml.jackson.core.JsonProcessingException {
+        String json = ctx.objectMapper.writeValueAsString(o);
+        return json.length() > maxLen ? json.substring(0, maxLen) + "…" : json;
+    }
+
+    /**
+     * M13：写操作结果的渲染投影（type=operation_result）。
+     * <p>
+     * 逐项提取单号/标题/成功标记/消息，前端渲染为绿点/红点逐项列表；
+     * 顶层保留 success/total/successCount/failCount/message 汇总字段。
+     */
+    private Map<String, Object> operationSnapshot(Map<?, ?> m, List<?> results) {
+        List<Map<String, Object>> items = new ArrayList<>();
+        for (Object o : results) {
+            if (o instanceof Map<?, ?> item) {
+                Map<String, Object> it = new LinkedHashMap<>();
+                it.put("tool", item.get("tool"));
+                it.put("title", item.get("title"));
+                it.put("borrowNo", item.get("borrowNo"));
+                it.put("success", item.get("success"));
+                it.put("message", item.get("message"));
+                items.add(it);
+            }
+        }
+        Map<String, Object> snap = new LinkedHashMap<>();
+        snap.put("type", "operation_result");
+        snap.put("total", m.get("total"));
+        snap.put("successCount", m.get("successCount"));
+        snap.put("failCount", m.get("failCount"));
+        snap.put("success", m.get("success"));
+        snap.put("message", m.get("message"));
+        snap.put("items", items);
+        return snap;
     }
 
     /** 构造授权卡的一行键值对（key/value） */

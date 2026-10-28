@@ -12,7 +12,7 @@
   <div class="gen-ui">
     <!-- 图书卡片网格 -->
     <div v-if="type === 'book_grid'" class="gi-book-grid">
-      <div v-for="(b, i) in items" :key="i" class="gi-book">
+      <div v-for="(b, i) in items" :key="i" class="gi-book" :title="b.publisher ? `出版社：${b.publisher}` : ''">
         <div class="gi-book-cover">
           <img v-if="b.coverUrl" :src="b.coverUrl" :alt="b.title" loading="lazy" />
           <div v-else class="gi-book-cover-fallback">
@@ -25,9 +25,15 @@
           <div class="gi-book-meta">
             <span v-if="b.availableCount !== undefined && b.availableCount !== null"
                   class="gi-stock" :class="{ empty: b.availableCount <= 0 }">
-              {{ b.availableCount > 0 ? `可借 ${b.availableCount}` : '暂无可借' }}
+              {{ b.availableCount > 0 ? `可借 ${b.availableCount}/${b.totalCount ?? '?'}` : '暂无可借' }}
             </span>
             <span v-if="b.category" class="gi-cat">{{ b.category }}</span>
+          </div>
+          <div v-if="b.location || b.publisher" class="gi-book-extra">
+            <span v-if="b.location" class="gi-book-loc" :title="'馆藏位置：' + b.location">
+              <el-icon><Location /></el-icon>{{ b.location }}
+            </span>
+            <span v-if="b.publisher" class="gi-book-pub">{{ b.publisher }}</span>
           </div>
         </div>
       </div>
@@ -86,8 +92,43 @@
       <div v-if="!items.length" class="gi-empty">暂无公告</div>
     </div>
 
-    <!-- 通用表格（借阅记录 / 罚款 / 读者） -->
-    <div v-else-if="type === 'borrow_table' || type === 'fine_table' || type === 'user_table'" class="gi-table-wrap">
+    <!-- 借阅记录表：专属渲染（状态徽章 / 读者列 / 逾期与待取书时间分色） -->
+    <div v-else-if="type === 'borrow_table'" class="gi-table-wrap">
+      <table class="gi-table">
+        <thead>
+          <tr>
+            <th>借阅码</th>
+            <th v-if="hasUserName">读者</th>
+            <th>书名</th>
+            <th>状态</th>
+            <th>{{ hasPickupDeadline ? '取书截止' : '应还时间' }}</th>
+            <th v-if="hasRenewInfo">续借</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="(row, ri) in rows" :key="ri">
+            <td class="mono">{{ row.borrowNo ?? '—' }}</td>
+            <td v-if="hasUserName">{{ row.userName ?? '—' }}</td>
+            <td class="gi-bt-title" :title="row.bookTitle">{{ row.bookTitle ?? '—' }}</td>
+            <td>
+              <span class="gi-status" :class="statusClass(row.status, row.dueTime)">
+                {{ row.status ?? '—' }}
+              </span>
+            </td>
+            <td :class="dueCellClass(row)">
+              {{ (hasPickupDeadline ? row.pickupDeadline : row.dueTime) ? fmtDate(hasPickupDeadline ? row.pickupDeadline : row.dueTime) : '—' }}
+            </td>
+            <td v-if="hasRenewInfo" class="mono">
+              {{ row.renewCount != null ? `${row.renewCount}/${row.renewMaxCount ?? 2}` : '—' }}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <div v-if="!rows.length" class="gi-empty">暂无借阅记录</div>
+    </div>
+
+    <!-- 通用表格（罚款 / 读者） -->
+    <div v-else-if="type === 'fine_table' || type === 'user_table'" class="gi-table-wrap">
       <table class="gi-table">
         <thead>
           <tr>
@@ -101,6 +142,16 @@
         </tbody>
       </table>
       <div v-if="!rows.length" class="gi-empty">暂无记录</div>
+    </div>
+
+    <!-- 写操作结果：柜台办理 / 催还等逐项执行结果 -->
+    <div v-else-if="type === 'operation_result'" class="gi-op-result">
+      <div v-for="(r, ri) in items" :key="ri" class="gi-op-item" :class="{ fail: r.success === false }">
+        <span class="gi-op-dot" :class="{ fail: r.success === false }"></span>
+        <span class="gi-op-title">{{ r.borrowNo || r.title || r.tool }}</span>
+        <span class="gi-op-msg">{{ r.message || (r.success === false ? '失败' : '成功') }}</span>
+      </div>
+      <div v-if="!items.length" class="gi-empty">暂无操作结果</div>
     </div>
 
     <!-- 统计看板（ECharts 图表） -->
@@ -124,7 +175,7 @@
 
 <script setup>
 import { computed, ref, watch, onBeforeUnmount, nextTick } from 'vue'
-import { Collection } from '@element-plus/icons-vue'
+import { Collection, Location } from '@element-plus/icons-vue'
 
 const props = defineProps({
   // 快照对象（后端 tool 事件 data 解析后的结果）
@@ -172,6 +223,45 @@ const headers = computed(() => TABLE_HEADERS[type.value] || [])
 
 /** 表格行数据（borrow_table / fine_table / user_table 共用 items 数组） */
 const rows = computed(() => (Array.isArray(props.snapshot?.items) ? props.snapshot.items : []))
+
+/* —— 借阅表专属逻辑 —— */
+// 快照条目是否含读者列（adminQueryBorrows 有 userName，queryMyBorrows 没有）
+const hasUserName = computed(() => rows.value.some((r) => r.userName))
+// 待取书记录带 pickupDeadline（取书截止）；已有应还时间的按应还时间列展示
+const hasPickupDeadline = computed(() =>
+  rows.value.some((r) => r.pickupDeadline) && !rows.value.some((r) => r.dueTime && r.status === '借阅中'))
+const hasRenewInfo = computed(() => rows.value.some((r) => r.renewCount != null))
+
+/** 状态 → 徽章样式类（逾期红 / 待取书蓝 / 借阅中绿 / 已归还灰 / 取消浅灰） */
+const statusClass = (status, dueTime) => {
+  const s = String(status || '')
+  if (s.includes('逾期')) return 'st-overdue'
+  if (s.includes('待取书')) return 'st-pickup'
+  if (s.includes('借阅中')) {
+    // 借阅中但应还时间已过：按逾期提示
+    if (dueTime && new Date(dueTime) < new Date()) return 'st-overdue'
+    return 'st-active'
+  }
+  if (s.includes('待确认')) return 'st-pending'
+  if (s.includes('已归还')) return 'st-done'
+  return 'st-default'
+}
+
+/** 时间单元格分色：逾期红 / 临期（3 天内）琥珀 */
+const dueCellClass = (row) => {
+  const t = hasPickupDeadline.value ? row.pickupDeadline : row.dueTime
+  if (!t) return ''
+  const diff = new Date(t) - new Date()
+  if (diff < 0 && String(row.status || '').includes('借阅中')) return 'due-overdue'
+  if (diff > 0 && diff < 3 * 86400_000 && String(row.status || '').includes('借阅中')) return 'due-soon'
+  return ''
+}
+
+const fmtDate = (t) => {
+  const d = new Date(t)
+  if (isNaN(d)) return t
+  return `${d.getMonth() + 1}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
 
 /** 统计看板的 KPI 列表 */
 const kpis = computed(() => {
@@ -522,6 +612,90 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 .gi-table tr:last-child td { border-bottom: none; }
+.gi-table td.mono { font-family: var(--font-mono, monospace); font-size: 10.5px; }
+.gi-bt-title {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--color-text, #2c2825);
+}
+
+/* 借阅表：状态徽章 */
+.gi-status {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  line-height: 1.6;
+}
+.gi-status.st-overdue { color: #a85a4a; background: rgba(168, 90, 74, 0.13); font-weight: 600; }
+.gi-status.st-pickup { color: #3a5a6b; background: rgba(58, 90, 107, 0.12); }
+.gi-status.st-active { color: #5d8a6b; background: rgba(93, 138, 107, 0.13); }
+.gi-status.st-pending { color: #a8843c; background: rgba(196, 144, 74, 0.14); }
+.gi-status.st-done { color: var(--color-text-tertiary, #9c958d); background: var(--color-bg-muted, #ece6dd); }
+.gi-status.st-default { color: var(--color-text-secondary, #6b6560); background: var(--color-bg-subtle, #f3efe9); }
+/* 借阅表：时间分色 */
+.gi-table td.due-overdue { color: #a85a4a; font-weight: 600; }
+.gi-table td.due-soon { color: #a8843c; }
+
+/* 图书卡扩展行：馆藏位置 / 出版社 */
+.gi-book-extra {
+  margin-top: 3px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10.5px;
+  color: var(--color-text-tertiary, #9c958d);
+  min-width: 0;
+}
+.gi-book-loc {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.gi-book-pub {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 1;
+}
+
+/* 写操作结果：逐项列表 */
+.gi-op-result { display: flex; flex-direction: column; gap: 3px; }
+.gi-op-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: var(--radius, 4px);
+  background: var(--color-bg-subtle, #f3efe9);
+  font-size: 11.5px;
+}
+.gi-op-dot {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-success, #5d8a6b);
+  align-self: center;
+}
+.gi-op-dot.fail { background: var(--color-danger, #a85a4a); }
+.gi-op-title {
+  font-family: var(--font-mono, monospace);
+  color: var(--color-text, #2c2825);
+  flex-shrink: 0;
+}
+.gi-op-item.fail .gi-op-title { color: var(--color-danger, #a85a4a); }
+.gi-op-msg {
+  color: var(--color-text-secondary, #6b6560);
+  text-align: right;
+  flex: 1;
+  word-break: break-all;
+}
+.gi-op-item.fail .gi-op-msg { color: var(--color-danger, #a85a4a); }
 
 /* —— 统计看板 —— */
 .gi-stats { display: flex; flex-direction: column; gap: 10px; }
