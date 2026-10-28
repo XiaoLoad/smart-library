@@ -25,6 +25,7 @@ import dev.langchain4j.service.TokenStream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
 import org.springframework.stereotype.Service;
@@ -107,6 +108,13 @@ public class AiService {
     /** 缓存最近构建的流式模型，配置未变时复用，避免重复创建 OkHttpClient */
     private volatile OpenAiStreamingChatModel cachedModel;
     private volatile String cachedConfigHash;
+
+    // 模型请求/响应日志开关（application.yml app.ai.log-requests/log-responses）
+    // 完整 prompt 含用户借阅记录等个人信息，日志打开等于把 PII 写进日志文件——生产必须关闭
+    @Value("${app.ai.log-requests:true}")
+    private boolean logRequestsEnabled;
+    @Value("${app.ai.log-responses:true}")
+    private boolean logResponsesEnabled;
 
     /**
      * 核心行为规则（硬编码，不可被外部文件覆盖）。
@@ -433,13 +441,16 @@ public class AiService {
         // 写操作授权回调：写工具被门禁拦截时（不执行），改为向用户发起授权请求。
         // 令牌在服务端登记，客户端只拿到不透明 token，确认时回传 token 而非参数——参数无法被篡改。
         BaseLibraryTools.ConfirmRequestHandler confirmCb = (toolName, title, rows, args) -> {
+            // 令牌先在 try 外登记占位：推送失败时 catch 中可拿到它并作废，
+            // 避免「前端没收到授权卡、令牌却在服务端存活 60 秒」的悬挂状态
+            String token = null;
             try {
                 // M4：授权请求也是工具轮的一部分，先把过渡语发出，再推授权卡，
                 // 保证时间线顺序为「思考 → 授权请求」
                 emitPendingThought(emitter, thoughtBuffer, trace);
                 // M6a：门禁触发记入轨迹（安全事件的量化依据）
                 trace.markGate(toolName);
-                String token = aiConfirmService.issue(cu.getUserId(), conversationId, toolName, args, title, rows);
+                token = aiConfirmService.issue(cu.getUserId(), conversationId, toolName, args, title, rows);
                 Map<String, Object> payload = new java.util.LinkedHashMap<>();
                 payload.put("token", token);
                 payload.put("tool", toolName);
@@ -449,9 +460,16 @@ public class AiService {
                 emitter.send(SseEmitter.event().name("confirm")
                         .data(objectMapper.writeValueAsString(payload)));
             } catch (IOException e) {
-                // 客户端已断开，忽略
+                // 客户端已断开：作废令牌，用户重发消息后需重新发起授权
+                if (token != null) {
+                    aiConfirmService.revoke(token);
+                    log.warn("[AI] 授权卡推送失败，令牌已作废 tool={}", toolName);
+                }
             } catch (Exception e) {
-                log.warn("[AI] 授权请求推送失败 tool={}: {}", toolName, e.getMessage());
+                if (token != null) {
+                    aiConfirmService.revoke(token);
+                    log.warn("[AI] 授权卡推送失败，令牌已作废 tool={}: {}", toolName, e.getMessage());
+                }
             }
         };
         commonTools.setConfirmHandler(confirmCb);
@@ -483,6 +501,8 @@ public class AiService {
                         // 工具循环轮次自增：与框架的计数递减点严格对应
                         // （框架在同一次「模型返回含工具调用的响应」时递减 maxToolCallingRoundTrips）
                         toolRounds.incrementAndGet();
+                        // M6a：轮次同步写回轨迹收集器，落库取真实轮次而非按工具数估算
+                        trace.setToolRounds(toolRounds.get());
                     })
                     .onPartialThinking(partial -> {
                         // 深度思考思维链增量（reasoning_content）：独立 thinking 事件推给前端展示，
@@ -624,7 +644,16 @@ public class AiService {
             emitter.complete();
         }
 
-        emitter.onTimeout(emitter::complete);
+        // 超时收尾先补发 done 再 complete：前端 SSE 解析以事件驱动，只 complete 不发终止事件时，
+        // 部分场景（如容器异步超时但连接仍在）前端会一直停在生成态；done 与正常结束同形，UI 才能闭环。
+        emitter.onTimeout(() -> {
+            try {
+                emitter.send(SseEmitter.event().name("done").data("[DONE]"));
+            } catch (Exception ignored) {
+                // 连接已断，直接收尾
+            }
+            emitter.complete();
+        });
         emitter.onError(t -> emitter.complete());
 
         return emitter;
@@ -768,10 +797,11 @@ public class AiService {
      * @param token    授权令牌
      * @param userId   当前登录用户
      * @param toolName 待执行的工具名
+     * @param conversationId 当前会话 ID（令牌签发时绑定；null 跳过会话校验，兼容旧客户端）
      * @return 工具执行结果；令牌无效时抛出业务异常（前端提示原因）
      */
-    public Map<String, Object> confirmWrite(String token, Long userId, String toolName) {
-        AiConfirmService.PendingConfirm pc = aiConfirmService.consume(token, userId, toolName);
+    public Map<String, Object> confirmWrite(String token, Long userId, String toolName, Long conversationId) {
+        AiConfirmService.PendingConfirm pc = aiConfirmService.consume(token, userId, toolName, conversationId);
         if (pc == null) {
             throw new BusinessException(400, "授权已失效或已被处理，请重新发起该操作");
         }
@@ -814,6 +844,12 @@ public class AiService {
 
     /** 执行已确认的柜台办理 */
     private Object counterConfirmed(Long userId, Map<String, Object> args) {
+        // 柜台办理是管理员能力：即便令牌校验通过，也再次校验执行者角色，
+        // 防止管理员发起授权后令牌被同账户其他入口/降权场景复用
+        Integer userType = currentUserType();
+        if (userType == null || userType != 3) {
+            throw new BusinessException(403, "仅管理员可执行柜台办理");
+        }
         AiToolContext toolCtx = buildToolContext();
         AdminTools tools = new AdminTools(userId, currentUserType(), toolCtx);
         return tools.adminCounterProcessConfirmed(str(args.get("borrowNo"), ""));
@@ -876,8 +912,11 @@ public class AiService {
      * 文案原则：只陈述已完成的部分，绝不承诺未完成的结果（与 CORE_RULES 规则 2/7 一致）。
      */
     private void handleToolRoundDegrade(SseEmitter emitter, Long conversationId, int rounds) {
-        String text = "这个任务涉及的步骤较多，我已执行 " + rounds
-                + " 轮查询后停止。已完成的操作仍然有效，未完成的部分可以再说一次。";
+        // 不写「已完成的操作仍然有效」：超限时工具可能只执行了一半，断言"已完成"会误导用户；
+        // 改为中性陈述，请用户以查询结果为准核对
+        String text = "这个任务涉及的步骤较多，我执行 " + rounds
+                + " 轮查询后停了下来。已查到的结果仍然可用，办理类操作是否生效请以页面显示为准，"
+                + "未完成的部分可以再说一次。";
         try {
             Map<String, Object> payload = new java.util.LinkedHashMap<>();
             payload.put("rounds", rounds);
@@ -1154,7 +1193,8 @@ public class AiService {
 
     private OpenAiStreamingChatModel getOrBuildModel(AiConfig cfg) {
         String hash = cfg.provider() + "|" + cfg.apiKey() + "|" + cfg.model() + "|" + cfg.endpoint()
-                + "|thinking=" + cfg.thinkingEnabled();
+                + "|thinking=" + cfg.thinkingEnabled()
+                + "|log=" + logRequestsEnabled + "," + logResponsesEnabled;
         if (cachedModel != null && hash.equals(cachedConfigHash)) {
             return cachedModel;
         }
@@ -1193,9 +1233,9 @@ public class AiService {
         OpenAiStreamingChatModel model = builder
                 // 模型调用超时：避免长时间无响应卡死 SSE（参考 langchain4j-examples）
                 .timeout(Duration.ofSeconds(MODEL_TIMEOUT_SECONDS))
-                // 请求/响应日志：便于排查调用失败、token 用量等问题
-                .logRequests(true)
-                .logResponses(true)
+                // 请求/响应日志：便于排查调用失败、token 用量等问题（app.ai.log-* 配置，生产建议关闭）
+                .logRequests(logRequestsEnabled)
+                .logResponses(logResponsesEnabled)
                 .build();
         cachedModel = model;
         cachedConfigHash = hash;
@@ -1425,9 +1465,11 @@ public class AiService {
             return m.find() && m.start() == at ? m.group().length() : 0;
         }
 
-        /** 需要暂存等待下一分片的最大尾部长度（"<think".length() 与 "</think>".length() 取最大） */
+        /** 需要暂存等待下一分片的最大尾部长度（按开/闭标签族里最长的字面长度取，防止跨包截断泄漏） */
         private int holdbackLen(String s, int from, boolean closing) {
-            int maxTag = closing ? "</thinking>".length() : "<thinking>".length();
+            // 闭标签族最长是 </reasoning>（12），比 "</thinking>"（11）还长 1，固定取 11 会导致
+            // 分片恰好断在 "</reasoni" 时把半个闭合标签当正文发出，这里显式写最长的
+            int maxTag = closing ? "</reasoning>".length() : "<reasoning>".length();
             return Math.min(maxTag - 1, s.length() - from);
         }
 

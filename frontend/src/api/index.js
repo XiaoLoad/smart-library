@@ -87,8 +87,9 @@ export const aiApi = {
   messageList: (conversationId, params) => get('/ai/message/list', { conversationId, ...(params || {}) }),
   createConversation: () => post('/ai/conversation/create'),
   deleteConversation: (id) => service.delete(`/ai/conversation/${id}`),
-  // 确认执行写操作：只传令牌，参数由服务端保存，客户端无法篡改
-  confirmWrite: (token, tool) => post('/ai/confirm', { token, tool }),
+  // 确认执行写操作：回传令牌与工具名，参数由服务端保存，客户端无法篡改；
+  // conversationId 供服务端二次校验会话归属（不传时服务端跳过该校验）
+  confirmWrite: (token, tool, conversationId) => post('/ai/confirm', { token, tool, conversationId }),
 }
 
 // M6a：Agent 运行轨迹（管理员）

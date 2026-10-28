@@ -4,7 +4,10 @@
  */
 const IS_DEV = true
 
-const DEV_ORIGIN = 'http://192.168.1.200:8080'
+// 开发环境后端地址：主机 IP 需与本机局域网 IP 一致（改网络环境时同步修改），
+// 端口 8090 为后端实际端口（8080 常被其他反代工具占用、8081 是系统 IP Helper
+// 的动态占用端口，见 backend/application.yml）。
+const DEV_ORIGIN = 'http://192.168.1.200:8090'
 const PROD_ORIGIN = 'https://api.your-library.example.com'
 
 const ORIGIN = IS_DEV ? DEV_ORIGIN : PROD_ORIGIN

@@ -40,6 +40,8 @@ public class AiAgentTraceService {
         private volatile Integer promptTokens = null;
         private volatile Integer completionTokens = null;
         private volatile String errorMsg = null;
+        /** 实际工具循环轮次：由 AiService 在对话结束时回写（框架口径），未回写时为 0 */
+        private volatile int toolRounds = 0;
 
         public Collector(Long conversationId, Long userId, Integer userType, String userQuery) {
             this.conversationId = conversationId;
@@ -76,6 +78,15 @@ public class AiAgentTraceService {
         public void setTokenUsage(Integer prompt, Integer completion) {
             this.promptTokens = prompt;
             this.completionTokens = completion;
+        }
+
+        /** 回写实际工具循环轮次（框架口径的计数，见 AiService#chat 的 toolRounds） */
+        public void setToolRounds(int rounds) {
+            this.toolRounds = rounds;
+        }
+
+        public int getToolRounds() {
+            return toolRounds;
         }
 
         public List<String> getToolSequence() {
@@ -127,7 +138,8 @@ public class AiAgentTraceService {
             t.setUserQuery(c.userQuery);
             t.setToolSequence(toJsonArray(c.toolSequence));
             t.setThoughtSummary(toJsonArray(c.thoughtSummary));
-            t.setToolRounds(c.toolSequence.isEmpty() ? 0 : c.toolSequence.size());
+            // 轮次取实际框架计数（至少 1：用到工具即视为 1 轮），工具数仍按工具调用次数
+            t.setToolRounds(Math.max(1, c.getToolRounds()));
             t.setToolCount(c.toolSequence.size());
             t.setGateTriggered(c.isGateTriggered() ? 1 : 0);
             t.setGateTool(c.getGateTool());

@@ -208,11 +208,32 @@ public class RagController {
 
     /**
      * 更新 RAG 参数（保存后立即生效；改切分参数需手动全量重建索引）。
+     * <p>
+     * {@code getRagConfig()} 返回的是共享缓存对象，必须先按 req 值完成全部校验、
+     * 任何一项不合法直接抛出，才能把值 set 上去——先改后验会把非法值污染进缓存。
      */
     @PostMapping("/config")
     public Result<LibraryConfigService.RagConfig> saveConfig(@RequestBody RagConfigRequest req) {
         requireAdmin();
         LibraryConfigService.RagConfig cfg = configService.getRagConfig();
+        // 先验后改：overlap 与 chunkSize 需要合成后比较（req 传了用 req 值，没传用现值）
+        int maxResults = req.getMaxResults() != null ? req.getMaxResults() : cfg.getMaxResults();
+        if (req.getMaxResults() != null && (maxResults < 1 || maxResults > 20)) {
+            throw new BusinessException(400, "maxResults 须在 1~20 之间");
+        }
+        Double minScore = req.getMinScore() != null ? req.getMinScore() : cfg.getMinScore();
+        if (req.getMinScore() != null && (minScore < 0 || minScore > 1)) {
+            throw new BusinessException(400, "minScore 须在 0~1 之间");
+        }
+        int chunkSize = req.getChunkSize() != null ? req.getChunkSize() : cfg.getChunkSize();
+        if (req.getChunkSize() != null && (chunkSize < 100 || chunkSize > 2000)) {
+            throw new BusinessException(400, "chunkSize 须在 100~2000 之间");
+        }
+        int chunkOverlap = req.getChunkOverlap() != null ? req.getChunkOverlap() : cfg.getChunkOverlap();
+        if (req.getChunkOverlap() != null && (chunkOverlap < 0 || chunkOverlap >= chunkSize)) {
+            throw new BusinessException(400, "chunkOverlap 须在 0~(chunkSize-1) 之间（当前合成值 chunkSize=" + chunkSize + "）");
+        }
+        // 校验全部通过后才逐项写入缓存对象
         if (req.getEnabled() != null) {
             cfg.setEnabled(req.getEnabled());
         }

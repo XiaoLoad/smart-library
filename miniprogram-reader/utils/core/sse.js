@@ -1,8 +1,12 @@
 /* SSE 流式解析（配合 wx.request enableChunked）
  * 后端帧格式（SseEmitter）：`event: <type>\ndata: <payload>\n\n`
- * 事件类型（与 AiService 对齐）：
+ * 事件类型（事件全集与 AiController javadoc 对齐）：
  *   thinking 思维链增量 / delta 正文增量 / reset 清空已输出正文（工具开始执行）
  *   final 消毒后的完整正文（整体替换已拼接内容）/ tool 工具调用过程（JSON）
+ *   confirm 写操作授权卡（JSON，token+rows+ttl，等待用户确认）
+ *   degrade 工具循环超限降级（JSON：rounds/message，正文追加降级说明）
+ *   rag RAG 引用来源（JSON，检索命中的知识库片段）
+ *   thought 思考摘要（后端预留，前端暂未消费）
  *   done 本轮结束 / error 错误消息
  */
 

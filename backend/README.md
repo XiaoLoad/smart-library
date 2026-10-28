@@ -26,7 +26,7 @@ Spring Boot 3 单体后端，内置 Flyway 自动建库与 AI 能力（多渠道
 
 | 配置 | 默认值 | 说明 |
 |------|--------|------|
-| `server.port` / `context-path` | `8080` / `/api` | 所有接口以 `/api` 为前缀 |
+| `server.port` / `context-path` | `8090` / `/api` | 所有接口以 `/api` 为前缀；端口可用 `SERVER_PORT` 覆盖 |
 | `spring.datasource.*` | `localhost:3306/library_db` | `createDatabaseIfNotExist` 自动建库 |
 | `spring.flyway.*` | 启用 | 首次启动自动执行 V1~V8 建库表 + 幂等种子数据 |
 | `app.upload-dir` | `./uploads` | 封面/头像等静态资源目录 |

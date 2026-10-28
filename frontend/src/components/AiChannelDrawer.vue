@@ -177,6 +177,7 @@ const form = reactive({
   apiKeySet: false,
   model: '',
   enabled: true,
+  thinkingEnabled: false,
 })
 
 const rules = {
@@ -194,6 +195,7 @@ const resetForm = () => {
   form.apiKeySet = false
   form.model = ''
   form.enabled = true
+  form.thinkingEnabled = false
   fetchedModels.value = null
   testResult.value = null
   formRef.value?.clearValidate()
@@ -213,6 +215,7 @@ watch(
       form.apiKeySet = !!props.channel.apiKeySet
       form.model = props.channel.model || ''
       form.enabled = props.channel.enabled !== false
+      form.thinkingEnabled = props.channel.thinkingEnabled === true
     } else {
       resetForm()
     }

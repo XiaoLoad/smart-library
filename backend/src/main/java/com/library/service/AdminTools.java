@@ -34,8 +34,7 @@ public class AdminTools extends BaseLibraryTools {
                 "状态：" + (status == null || status.isBlank() ? "全部" : status)
                         + (search != null && !search.isBlank() ? "，关键词：" + search : ""),
                 v -> {
-                    // 先同步超期状态，保证统计口径与列表页一致
-                    ctx.borrowService.syncBorrowStatus();
+                    // 超期状态由 BorrowService 定时任务统一同步，读工具不触发写
                     List<Borrow> list = ctx.borrowMapper.selectList(null, true,
                             parseStatus(status), blankToNull(search));
                     int limit = Math.min(list.size(), 20);

@@ -18,6 +18,12 @@ public class AiConfirmRequest {
     @NotBlank(message = "缺少操作标识")
     private String tool;
 
+    /**
+     * 当前会话 ID（可选）：与令牌签发时的会话比对，防止令牌跨会话重放。
+     * 前端逐步接入；未传时跳过该校验（兼容旧客户端）。
+     */
+    private Long conversationId;
+
     public String getToken() {
         return token;
     }
@@ -32,5 +38,13 @@ public class AiConfirmRequest {
 
     public void setTool(String tool) {
         this.tool = tool;
+    }
+
+    public Long getConversationId() {
+        return conversationId;
+    }
+
+    public void setConversationId(Long conversationId) {
+        this.conversationId = conversationId;
     }
 }

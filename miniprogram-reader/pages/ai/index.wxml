@@ -257,6 +257,46 @@
           <text wx:else user-select>{{item.shown}}</text>
           <text wx:if="{{item.pending}}" class="typing">▍</text>
 
+          <!-- 写操作授权卡（SSE confirm 事件）：等待用户确认或取消；
+               状态流转 pending → submitting → confirmed/cancelled/expired。后端不落库 -->
+          <view wx:if="{{item.confirmCard}}" class="confirm-card {{item.confirmCard.state}}">
+            <view class="confirm-head">
+              <text class="eyebrow confirm-eyebrow">写操作授权 · {{item.confirmCard.state === 'pending' ? '需要你的授权' : (item.confirmCard.state === 'submitting' ? '正在办理' : (item.confirmCard.state === 'confirmed' ? '已确认' : (item.confirmCard.state === 'cancelled' ? '已取消' : '授权失效')))}}</text>
+            </view>
+            <text class="confirm-title">{{item.confirmCard.title}}</text>
+            <view wx:if="{{item.confirmCard.rows.length}}" class="confirm-rows">
+              <view
+                wx:for="{{item.confirmCard.rows}}"
+                wx:for-item="row"
+                wx:key="index"
+                class="confirm-row"
+              >
+                <text class="confirm-label">{{row.label || row.key}}</text>
+                <text user-select class="confirm-value">{{row.value}}</text>
+              </view>
+            </view>
+            <block wx:if="{{item.confirmCard.state === 'pending'}}">
+              <view class="confirm-ttl">
+                <view class="confirm-ttl-bar">
+                  <view class="confirm-ttl-fill" style="width: {{item.confirmCard.ttlLeft / item.confirmCard.ttlSeconds * 100}}%;"></view>
+                </view>
+                <text class="confirm-ttl-txt">{{item.confirmCard.ttlLeft}}s 后失效</text>
+              </view>
+              <view class="confirm-actions">
+                <view
+                  class="confirm-btn primary {{item.confirmCard.state === 'submitting' ? 'disabled' : ''}}"
+                  data-id="{{item.id}}"
+                  bindtap="onConfirmWrite"
+                >确认办理</view>
+                <view class="confirm-btn ghost" data-id="{{item.id}}" bindtap="onCancelWrite">取消</view>
+              </view>
+            </block>
+            <text wx:elif="{{item.confirmCard.state === 'submitting'}}" class="confirm-state">正在办理，请稍候…</text>
+            <text wx:elif="{{item.confirmCard.state === 'confirmed'}}" class="confirm-state ok">已确认，操作已完成</text>
+            <text wx:elif="{{item.confirmCard.state === 'cancelled'}}" class="confirm-state">已取消（令牌将自动过期）</text>
+            <text wx:else class="confirm-state err">{{item.confirmCard.error || '授权已失效，请重新发起该操作'}}</text>
+          </view>
+
           <!-- 工具徽章行：回复生成完毕后，工具卡片收拢为一排徽章（金色圆点 + 中文名 ×次数） -->
           <view wx:if="{{item.toolChips.length}}" class="chips">
             <view

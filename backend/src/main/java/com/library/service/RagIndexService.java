@@ -26,6 +26,7 @@ import org.springframework.stereotype.Service;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Executor;
@@ -119,7 +120,15 @@ public class RagIndexService {
         if (rawText == null || rawText.isBlank()) {
             throw new BusinessException(400, "文档内容不能为空");
         }
-        String normalizedScope = SCOPE_ADMIN.equals(scope) ? SCOPE_ADMIN : SCOPE_PUBLIC;
+        // 显式校验而非静默降级：拼写错误的 scope 会造成读者/管理员权限误解
+        String normalizedScope;
+        if (SCOPE_ADMIN.equals(scope)) {
+            normalizedScope = SCOPE_ADMIN;
+        } else if (SCOPE_PUBLIC.equals(scope)) {
+            normalizedScope = SCOPE_PUBLIC;
+        } else {
+            throw new BusinessException(400, "scope 仅支持 admin/public");
+        }
         LocalDateTime now = LocalDateTime.now();
         RagDocument doc = new RagDocument();
         doc.setTitle(title.trim());
@@ -138,16 +147,38 @@ public class RagIndexService {
     }
 
     /**
-     * 重建单篇文档索引：先清旧片段（DB + store），再按当前参数重新切分入库。
+     * 重建单篇文档索引：先在局部草稿中完成切分与嵌入（不落库、不动活跃索引），
+     * 成功后在紧凑序列里完成换装——DB 删旧写新，活跃索引该文档旧向量整体移除、新向量整体加入。
+     * 切分/嵌入中途失败时 DB 与活跃索引旧数据原封不动；换装阶段两次索引操作之间没有嵌入等慢步骤，
+     * 窗口内最多短暂查不到该篇，绝不出现新旧混杂的半篇中间态。
      */
     public synchronized int indexDocument(RagDocument doc) {
-        segmentMapper.deleteByDocumentId(doc.getId());
+        LibraryConfigService.RagConfig cfg = configService.getRagConfig();
         InMemoryEmbeddingStore<TextSegment> current = store;
+        List<SegmentDraft> drafts = splitAndEmbed(doc, cfg.getChunkSize(), cfg.getChunkOverlap());
+        // DB 侧先清后写，两步之间失败留下的只有「旧片段已删」状态，索引不受影响
+        segmentMapper.deleteByDocumentId(doc.getId());
+        List<String> ids = new ArrayList<>(drafts.size());
+        List<Embedding> embeddings = new ArrayList<>(drafts.size());
+        List<TextSegment> segments = new ArrayList<>(drafts.size());
+        int seq = 0;
+        for (SegmentDraft draft : drafts) {
+            RagSegment seg = persistSegment(doc, seq++, draft, null);
+            ids.add(String.valueOf(seg.getId()));
+            embeddings.add(draft.embedding());
+            segments.add(toSegment(doc.getId(), doc.getTitle(), doc.getScope(), draft.text()));
+        }
+        // 片段数回写 DB，并同步到返回实体（新建文档响应不再停留在占位的 0）
+        documentMapper.updateSegmentCount(doc.getId(), drafts.size());
+        doc.setSegmentCount(drafts.size());
+        // 新片段全部落库成功后才动活跃索引：先整体删旧再整体添新
         if (current != null) {
             current.removeAll(metadataKey("documentId").isEqualTo(String.valueOf(doc.getId())));
+            if (!ids.isEmpty()) {
+                current.addAll(ids, embeddings, segments);
+            }
         }
-        LibraryConfigService.RagConfig cfg = configService.getRagConfig();
-        return indexInto(current, doc, cfg.getChunkSize(), cfg.getChunkOverlap());
+        return drafts.size();
     }
 
     /**
@@ -205,17 +236,29 @@ public class RagIndexService {
     }
 
     /**
-     * 全量重建索引：清空片段表与内存索引，按当前 chunkSize/chunkOverlap 重新切分全部启用文档。
+     * 全量重建索引：先在内存中完成全部启用文档的切分与嵌入（构建阶段不碰片段表与活跃索引），
+     * 构建全部成功后才清空片段表、重写新片段并整体替换内存索引——构建中途失败时旧数据原封不动。
      * 供切换参数、切换 embedding 模型后手动触发。
      */
     public synchronized int rebuildAll() {
         LibraryConfigService.RagConfig cfg = configService.getRagConfig();
         List<RagDocument> docs = documentMapper.selectEnabled();
-        InMemoryEmbeddingStore<TextSegment> fresh = new InMemoryEmbeddingStore<>();
-        segmentMapper.deleteAll();
-        int total = 0;
+        // 构建阶段：只产出切片草稿，任何一篇切分/嵌入失败都直接抛出，旧片段表与活跃索引不受影响
+        List<RebuildItem> built = new ArrayList<>(docs.size());
         for (RagDocument doc : docs) {
-            total += indexInto(fresh, doc, cfg.getChunkSize(), cfg.getChunkOverlap());
+            built.add(new RebuildItem(doc, splitAndEmbed(doc, cfg.getChunkSize(), cfg.getChunkOverlap())));
+        }
+        // 提交阶段：构建已全部成功，才允许动旧数据
+        segmentMapper.deleteAll();
+        InMemoryEmbeddingStore<TextSegment> fresh = new InMemoryEmbeddingStore<>();
+        int total = 0;
+        for (RebuildItem item : built) {
+            int seq = 0;
+            for (SegmentDraft draft : item.drafts()) {
+                persistSegment(item.doc(), seq++, draft, fresh);
+            }
+            documentMapper.updateSegmentCount(item.doc().getId(), item.drafts().size());
+            total += item.drafts().size();
         }
         store = fresh;
         configService.updateRagEmbeddingInfo(LibraryConfigService.EMBEDDING_MODEL_NAME, model().dimension());
@@ -268,36 +311,45 @@ public class RagIndexService {
 
     // 内部实现
 
+    /** 切片草稿：文本 + 向量，索引构建的中间产物（构建阶段不落库不进索引） */
+    private record SegmentDraft(String text, Embedding embedding) {}
+
+    /** 全量重建提交项：文档 + 已构建完成的切片草稿 */
+    private record RebuildItem(RagDocument doc, List<SegmentDraft> drafts) {}
+
     /**
-     * 切分 → 逐片向量化 → 写 rag_segments → 入内存索引。调用方负责先清理旧片段。
+     * 切分 → 逐片向量化，产出切片草稿。不落库、不进索引，失败时对 DB 与索引无任何副作用。
      *
-     * @return 片段数
+     * @return 切片草稿列表（原文为空时为空列表）
      */
-    private int indexInto(InMemoryEmbeddingStore<TextSegment> target, RagDocument doc, int chunkSize, int chunkOverlap) {
+    private List<SegmentDraft> splitAndEmbed(RagDocument doc, int chunkSize, int chunkOverlap) {
         String text = doc.getRawText();
         if (text == null || text.isBlank()) {
-            documentMapper.updateSegmentCount(doc.getId(), 0);
-            return 0;
+            return List.of();
         }
         List<TextSegment> chunks = DocumentSplitters.recursive(chunkSize, chunkOverlap)
                 .split(Document.from(text));
-        int seq = 0;
+        List<SegmentDraft> drafts = new ArrayList<>(chunks.size());
         for (TextSegment chunk : chunks) {
-            Embedding embedding = model().embed(chunk.text()).content();
-            RagSegment seg = new RagSegment();
-            seg.setDocumentId(doc.getId());
-            seg.setSeq(seq++);
-            seg.setContent(chunk.text());
-            seg.setEmbedding(toBytes(embedding.vector()));
-            seg.setCreateTime(LocalDateTime.now());
-            segmentMapper.insert(seg);
-            if (target != null) {
-                target.add(String.valueOf(seg.getId()), embedding,
-                        toSegment(doc.getId(), doc.getTitle(), doc.getScope(), chunk.text()));
-            }
+            drafts.add(new SegmentDraft(chunk.text(), model().embed(chunk.text()).content()));
         }
-        documentMapper.updateSegmentCount(doc.getId(), chunks.size());
-        return chunks.size();
+        return drafts;
+    }
+
+    /** 切片草稿落库（回填生成主键）并加入内存索引；target 为 null 时只落库不进索引 */
+    private RagSegment persistSegment(RagDocument doc, int seq, SegmentDraft draft, InMemoryEmbeddingStore<TextSegment> target) {
+        RagSegment seg = new RagSegment();
+        seg.setDocumentId(doc.getId());
+        seg.setSeq(seq);
+        seg.setContent(draft.text());
+        seg.setEmbedding(toBytes(draft.embedding().vector()));
+        seg.setCreateTime(LocalDateTime.now());
+        segmentMapper.insert(seg);
+        if (target != null) {
+            target.add(String.valueOf(seg.getId()), draft.embedding(),
+                    toSegment(doc.getId(), doc.getTitle(), doc.getScope(), draft.text()));
+        }
+        return seg;
     }
 
     /**
@@ -359,7 +411,7 @@ public class RagIndexService {
                 && cfg.getEmbeddingDim() == model().dimension();
     }
 
-    /** float[] → float32 小端序字节（384 维 = 1536 字节） */
+    /** float[] → float32 小端序字节（字节数 = 维度 × 4，维度由 embedding 模型决定，当前 512） */
     private static byte[] toBytes(float[] vector) {
         ByteBuffer buffer = ByteBuffer.allocate(vector.length * Float.BYTES).order(ByteOrder.LITTLE_ENDIAN);
         for (float v : vector) {

@@ -1,5 +1,8 @@
 package com.library.service;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -19,6 +22,8 @@ import java.util.function.Function;
  * 用于在 UI 上展示「正在调用工具 / 工具返回」状态；end 阶段携带精简数据快照。
  */
 public abstract class BaseLibraryTools {
+
+    private static final Logger log = LoggerFactory.getLogger(BaseLibraryTools.class);
 
     /** 工具调用事件发射器（可选，未设置时不发送事件） */
     public interface ToolEventEmitter {
@@ -108,6 +113,8 @@ public abstract class BaseLibraryTools {
      * <p>
      * 与只读工具（{@link #withEvent}）的关键差异：
      * <ul>
+     *   <li>未登记在 {@link AiToolRegistry#WRITE_TOOLS} 的写操作会被直接拒绝
+     *       （fail-closed），不会退化为普通执行；</li>
      *   <li>写工具在执行前先查 {@link AiToolRegistry#WRITE_TOOLS}，命中则<b>不执行</b>，
      *       改为向 {@link ConfirmRequestHandler} 发起授权请求；</li>
      *   <li>被拦截时<b>不发 start 事件</b>——start 事件会触发前端 reset 清空正文，
@@ -126,9 +133,19 @@ public abstract class BaseLibraryTools {
                                                  List<Map<String, String>> rows,
                                                  Map<String, Object> args,
                                                  Function<Void, Map<String, Object>> action) {
-        // 未登记写工具时不做拦截，退化为普通执行（保持向后兼容）
-        if (confirmHandler == null || !AiToolRegistry.requiresConfirm(name)) {
+        // 门禁未初始化（装配异常）时保留放行，但必须留下高可见日志便于排查
+        if (confirmHandler == null) {
+            log.error("[AI] 写门禁未初始化，写操作[{}]直接执行(fail-open)", name);
             return withEvent(name, title, action);
+        }
+        // 白名单登记制：未登记的写操作一律拒绝执行（fail-closed），防止漏登记工具绕过授权
+        if (!AiToolRegistry.requiresConfirm(name)) {
+            Map<String, Object> rejected = new LinkedHashMap<>();
+            rejected.put("success", false);
+            rejected.put("rejected", true);
+            rejected.put("awaitingConfirm", false);
+            rejected.put("message", "工具[" + name + "]未登记为写操作，已拒绝执行");
+            return rejected;
         }
         // 门禁拦截：不执行，改为发起授权请求
         confirmHandler.request(name, title, rows, args);

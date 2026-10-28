@@ -1,6 +1,7 @@
 package com.library.controller;
 
 import com.library.common.Result;
+import com.library.common.exception.BusinessException;
 import com.library.dto.AiChatRequest;
 import com.library.dto.AiConfirmRequest;
 import com.library.entity.AiConversation;
@@ -56,6 +57,17 @@ public class AiController {
             @RequestParam Long conversationId,
             @RequestParam(required = false) Long beforeId,
             @RequestParam(defaultValue = "20") int pageSize) {
+        // 归属校验：会话不存在或非本人会话一律拒绝（管理员亦只读自己的会话，与全站无跨用户读入口保持一致）
+        AiConversation conv = conversationMapper.selectById(conversationId);
+        if (conv == null) {
+            throw new BusinessException(404, "会话不存在");
+        }
+        CurrentUser cu = CurrentUser.get();
+        if (conv.getUserId() == null || !conv.getUserId().equals(cu.getUserId())) {
+            throw new BusinessException(403, "无权查看该会话消息");
+        }
+        // 分页钳制：防止一次拉取过大分页拖垮查询
+        pageSize = Math.max(1, Math.min(pageSize, 100));
         List<AiMessage> list = messageMapper.selectHistoryPage(conversationId, beforeId, pageSize);
         int total = messageMapper.countByConversationId(conversationId);
         // hasMore：本页满页即可能还有更早消息；前端亦可用 loadedCount < total 判定
@@ -82,7 +94,12 @@ public class AiController {
     /**
      * 流式对话（SSE）
      * <p>
-     * 事件流：delta（增量文本）/ done（"[DONE]"）/ error（错误消息）
+     * 事件流（完整列表）：reset（工具开始前清空正文）/ tool（工具调用状态）/
+     * confirm（写操作授权卡）/ rag（知识库参考资料）/ thinking（深度思考思维链增量）/
+     * delta（增量正文）/ final（消毒后最终正文替换）/ thought（工具轮决策旁白）/
+     * degrade（工具循环超限降级提示）/ done（"[DONE]"，本轮结束）/ error（错误消息）
+     * <p>
+     * 以上 11 种事件与前端 SSE 解析逻辑一一对应，新增事件类型需同步前端处理。
      */
     @PostMapping(value = "/chat", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter chat(@Valid @RequestBody AiChatRequest req) {
@@ -101,7 +118,7 @@ public class AiController {
     @PostMapping("/confirm")
     public Result<Map<String, Object>> confirm(@Valid @RequestBody AiConfirmRequest req) {
         CurrentUser cu = CurrentUser.get();
-        Map<String, Object> result = aiService.confirmWrite(req.getToken(), cu.getUserId(), req.getTool());
+        Map<String, Object> result = aiService.confirmWrite(req.getToken(), cu.getUserId(), req.getTool(), req.getConversationId());
         return Result.success(result);
     }
 }

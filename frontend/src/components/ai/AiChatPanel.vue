@@ -71,16 +71,23 @@
                 <AiGenUi :snapshot="parseSnapshot(card.data)" />
               </div>
 
-              <!-- 写操作授权卡（浮动面板为简化版：空间有限，只留标题与操作区） -->
+              <!-- 写操作授权卡：含参数明细与有效期倒计时（与 /ai/chat 页一致，样式紧凑版） -->
               <div v-if="m.confirmCard" class="confirm-card" :class="m.confirmCard.state">
                 <div class="confirm-eyebrow">
                   <el-icon><Lock /></el-icon>
                   <span>{{ confirmEyebrow(m.confirmCard.state) }}</span>
                 </div>
                 <div class="confirm-title">{{ m.confirmCard.title }}</div>
+                <div v-if="m.confirmCard.rows && m.confirmCard.rows.length" class="confirm-rows">
+                  <div v-for="(r, ri) in m.confirmCard.rows" :key="ri" class="confirm-row">
+                    <span class="confirm-k">{{ r.key }}</span>
+                    <span class="confirm-v">{{ r.value }}</span>
+                  </div>
+                </div>
                 <div v-if="m.confirmCard.state === 'pending'" class="confirm-actions">
                   <button class="confirm-btn primary" @click="onConfirmWrite(m.confirmCard)">确认办理</button>
                   <button class="confirm-btn" @click="onCancelWrite(m.confirmCard)">取消</button>
+                  <span class="confirm-ttl">{{ m.confirmCard.remain ?? m.confirmCard.ttlSeconds }} 秒内有效</span>
                 </div>
                 <div v-else-if="m.confirmCard.state === 'submitting'" class="confirm-state">
                   <el-icon class="is-loading"><Loading /></el-icon>
@@ -97,6 +104,27 @@
                 <div v-else class="confirm-state err">
                   <el-icon><Warning /></el-icon>
                   <span>{{ m.confirmCard.error || '授权已失效，请重新发起' }}</span>
+                </div>
+              </div>
+
+              <!-- 参考资料：本轮注入的知识库来源（紧凑药丸条，点击展开片段摘要） -->
+              <div v-if="m.ragSources && m.ragSources.length" class="rag-block">
+                <div class="rag-row">
+                  <span class="rag-label">参考资料</span>
+                  <button
+                    v-for="(s, si) in m.ragSources"
+                    :key="si"
+                    class="rag-chip"
+                    :class="{ active: m.ragOpenIndex === si }"
+                    :title="m.ragOpenIndex === si ? '收起片段' : '查看片段摘要'"
+                    @click="m.ragOpenIndex = m.ragOpenIndex === si ? -1 : si"
+                  >
+                    <span class="rag-title">{{ s.docTitle }}</span>
+                  </button>
+                </div>
+                <div v-if="m.ragOpenIndex >= 0 && m.ragSources[m.ragOpenIndex]" class="rag-snippet">
+                  <span class="rag-snippet-title">{{ m.ragSources[m.ragOpenIndex].docTitle }} · 检索片段摘要</span>
+                  <p>{{ m.ragSources[m.ragOpenIndex].snippet }}</p>
                 </div>
               </div>
 
@@ -135,7 +163,8 @@
 <script setup>
 /**
  * 悬浮球内嵌 AI 会话面板：与 /ai/chat 页面共享同一套后端接口与会话列表，
- * 精简版 UI（无会话侧栏、无 RAG 药丸、无工具数据展开、无锚点导航）。
+ * 精简版 UI（无会话侧栏、无工具数据展开、无锚点导航）；知识库来源以紧凑
+ * 药丸条呈现（点击展开片段摘要），写操作授权卡含参数明细与有效期倒计时。
  * 挂载后懒初始化（init），流式期间组件被 v-show 隐藏不销毁——后台继续输出。
  */
 import { ref, reactive, nextTick, onBeforeUnmount } from 'vue'
@@ -185,15 +214,17 @@ const CONFIRM_EYEBROWS = {
   confirmed: '已确认',
   cancelled: '已取消',
   expired: '授权失效',
+  failed: '办理失败',
 }
 const confirmEyebrow = (state) => CONFIRM_EYEBROWS[state] || '需要你的授权'
 
-// 确认执行：只回传令牌，参数由服务端保存，客户端无法篡改
+// 确认执行：回传令牌与会话 ID，参数由服务端保存，客户端无法篡改
 const onConfirmWrite = async (card) => {
   if (!card || card.state !== 'pending') return
+  stopConfirmCountdown(card)
   card.state = 'submitting'
   try {
-    const res = await aiApi.confirmWrite(card.token, card.tool)
+    const res = await aiApi.confirmWrite(card.token, card.tool, card.conversationId)
     card.state = 'confirmed'
     card.result = res
     const tip = res?.message || '操作已完成'
@@ -203,15 +234,44 @@ const onConfirmWrite = async (card) => {
       scrollToBottom()
     }
   } catch (e) {
-    card.state = 'expired'
-    card.error = e?.message || '授权已失效，请重新发起该操作'
+    // 失败分类：令牌类失效（过期/已被处理/不匹配）→ expired；业务错误 → failed。
+    // 令牌一次性，失败后原卡无法重试，两种状态都只说明结果，不一律谎称过期
+    const message = e?.message || '授权已失效，请重新发起该操作'
+    const tokenInvalid = /失效|过期|已被处理|重新发起/.test(message)
+    card.state = tokenInvalid ? 'expired' : 'failed'
+    card.error = message
   }
 }
 
 // 用户取消：卡片原地转为静默状态
 const onCancelWrite = (card) => {
   if (!card || card.state !== 'pending') return
+  stopConfirmCountdown(card)
   card.state = 'cancelled'
+}
+
+// 授权过期：卡片灰态保留，说明发生过什么而非凭空消失
+const onConfirmExpired = (card) => {
+  if (!card || card.state !== 'pending') return
+  stopConfirmCountdown(card)
+  card.state = 'expired'
+  card.error = '授权已过期，请重新发起该操作'
+}
+
+// 授权卡倒计时：本地每秒递减 remain，归零触发 onConfirmExpired（服务端 TTL 的前端镜像）
+const startConfirmCountdown = (card) => {
+  stopConfirmCountdown(card)
+  card.remain = card.ttlSeconds
+  card._timer = setInterval(() => {
+    card.remain -= 1
+    if (card.remain <= 0) onConfirmExpired(card)
+  }, 1000)
+}
+const stopConfirmCountdown = (card) => {
+  if (card?._timer) {
+    clearInterval(card._timer)
+    card._timer = null
+  }
 }
 
 const quickPrompts = ['我当前借了哪些书？', '查找哲学类图书', '本月借阅最多的书是什么？', '我有未缴罚款吗？']
@@ -225,6 +285,20 @@ let currentConvId = null
 let abortController = null
 let assistantMsg = null
 let inited = false
+
+// 登录态失效统一处理（与 /ai/chat 页 handleUnauthorized 一致，SSE fetch 路径专用）：
+// 清 token → 提示 → 跳登录页（携带 redirect 便于登录后回跳），防重复跳转
+let redirectingToLogin = false
+const handleUnauthorized = (message) => {
+  localStorage.removeItem('library_token')
+  if (redirectingToLogin || window.location.pathname === '/login') return
+  redirectingToLogin = true
+  ElMessage.error(message || '登录已过期，请重新登录')
+  const redirect = encodeURIComponent(window.location.pathname + window.location.search)
+  setTimeout(() => {
+    window.location.href = `/login?redirect=${redirect}`
+  }, 500)
+}
 
 const renderMarkdown = (content) => {
   if (!content) return ''
@@ -432,6 +506,9 @@ const send = async () => {
     _reasonTimer: null,
     _reasonSegOpen: false,
     pending: true,
+    // 知识库来源（SSE rag 事件），ragOpenIndex 为当前展开的片段序号，-1 表示全部收起
+    ragSources: [],
+    ragOpenIndex: -1,
     // 写操作授权卡（SSE confirm 事件）
     confirmCard: null,
     // M4：Agent 决策时间线
@@ -464,10 +541,16 @@ const send = async () => {
     const ct = resp.headers.get('content-type') || ''
     if (!ct.includes('text/event-stream')) {
       let msg = 'AI 请求失败'
+      let code = null
       try {
         const errBody = await resp.json()
         msg = errBody.message || msg
+        code = errBody.code
       } catch { /* 忽略 */ }
+      // 与 /ai/chat 页同约定：未授权返回 body.code=401，SSE fetch 不走 axios 拦截器，这里复刻登出跳转
+      if (code === 401) {
+        handleUnauthorized(msg)
+      }
       throw new Error(msg)
     }
     const reader = resp.body.getReader()
@@ -576,6 +659,22 @@ const send = async () => {
           }
         } catch { /* 忽略 */ }
         scrollToBottom()
+      } else if (event === 'rag') {
+        // 知识库来源：在调用 LLM 之前推送（早于 delta），按「标题 + 摘要」去重后累计
+        msg.pending = false
+        try {
+          const list = JSON.parse(data)
+          if (Array.isArray(list)) {
+            for (const item of list) {
+              const docTitle = item?.docTitle || '未命名文档'
+              const snippet = item?.snippet || ''
+              const dup = msg.ragSources.some(
+                (s) => s.docTitle === docTitle && s.snippet === snippet
+              )
+              if (!dup) msg.ragSources.push({ docTitle, snippet })
+            }
+          }
+        } catch { /* 解析失败不影响对话 */ }
       } else if (event === 'confirm') {
         // 写操作授权请求：模型发起写操作被门禁拦截，改为向用户请求授权。
         // 本轮出现写操作：检索候补不再广播（借书前的 queryBooks 只是流程中间步骤）
@@ -589,6 +688,9 @@ const send = async () => {
             title: info.title || '写操作授权',
             rows: Array.isArray(info.rows) ? info.rows : [],
             ttlSeconds: info.ttlSeconds || 60,
+            // 确认请求回传，供服务端校验令牌与会话归属一致
+            conversationId: currentConvId,
+            // pending: 等待确认 / confirmed: 已确认 / cancelled: 用户取消 / expired: 已过期 / failed: 办理失败
             state: 'pending',
             result: null,
             error: '',
@@ -597,6 +699,7 @@ const send = async () => {
           msg.timeline.push({ kind: 'confirm', tool: info.tool || '' })
           msg.content = msg.content || '请确认上方授权请求后继续。'
           msg.html = renderMarkdown(msg.content)
+          startConfirmCountdown(msg.confirmCard)
           scrollToBottom()
         } catch { /* 解析失败不影响对话 */ }
       } else if (event === 'degrade') {
@@ -631,7 +734,9 @@ const send = async () => {
         turnHasWrite = false
         turnWriteIntent = false
         if (event === 'error') {
-          msg.content = `⚠️ ${data || 'AI 请求出错'}`
+          // 已有正文时保留原内容，错误说明追加其后（避免中途出错抹掉已流出的回答）
+          const errTip = `⚠️ ${data || 'AI 请求出错'}`
+          msg.content = msg.content ? `${msg.content}\n\n${errTip}` : errTip
           msg.html = renderMarkdown(msg.content)
         }
         // 流结束滚动定位：本轮有内联生成式卡片时滚到本轮第一张卡片，否则维持滚底
@@ -659,12 +764,20 @@ const send = async () => {
     if (e.name !== 'AbortError') {
       ElMessage.error(e.message || 'AI 请求失败')
       if (assistantMsg) {
-        assistantMsg.content = `⚠️ ${e.message || 'AI 请求失败'}`
+        // 已有正文时保留原内容，错误说明追加其后
+        const errTip = `⚠️ ${e.message || 'AI 请求失败'}`
+        assistantMsg.content = assistantMsg.content ? `${assistantMsg.content}\n\n${errTip}` : errTip
         assistantMsg.html = renderMarkdown(assistantMsg.content)
       }
     }
   } finally {
     abortController = null
+    // 兜底复位：服务端超时/断网导致流关闭但 done/error 未到达时，
+    // generating 不复位会永久锁死输入框（send 守卫再也过不去）
+    if (generating.value) {
+      generating.value = false
+      emitState(false, true)
+    }
     if (assistantMsg) {
       assistantMsg.pending = false
       stopReasonTimer(assistantMsg)
@@ -682,7 +795,10 @@ const destroy = () => {
   abortController = null
 }
 
-onBeforeUnmount(destroy)
+onBeforeUnmount(() => {
+  destroy()
+  messages.value.forEach((m) => stopConfirmCountdown(m.confirmCard))
+})
 
 /** 预填输入框（不自动发送），供页面唤起 AI 时带入话术 */
 const prefill = (text) => {
@@ -952,6 +1068,96 @@ defineExpose({ init, destroy, send, prefill })
 .confirm-card.confirmed .confirm-eyebrow { color: var(--color-success, #5d8a6b); }
 .confirm-card.cancelled .confirm-eyebrow { color: var(--color-text-tertiary, #9c958d); }
 .confirm-card.expired .confirm-eyebrow { color: var(--color-danger, #a85a4a); }
+.confirm-card.failed .confirm-eyebrow { color: var(--color-danger, #a85a4a); }
+
+/* 授权卡参数明细与有效期（/ai/chat 页样式的紧凑版，变量带兜底色） */
+.confirm-rows {
+  margin-top: 10px;
+  border-top: 1px solid var(--color-divider, #eae6df);
+}
+.confirm-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--color-divider, #eae6df);
+}
+.confirm-row:last-child { border-bottom: none; }
+.confirm-k {
+  flex-shrink: 0;
+  font-size: var(--fs-caption, 12px);
+  color: var(--color-text-tertiary, #9c958d);
+}
+.confirm-v {
+  font-size: var(--fs-caption, 12px);
+  color: var(--color-text, #2c2825);
+  text-align: right;
+  word-break: break-all;
+}
+.confirm-ttl {
+  margin-left: auto;
+  font-size: var(--fs-caption, 12px);
+  color: var(--color-text-tertiary, #9c958d);
+}
+
+/* 知识库来源（紧凑药丸条，点击展开片段摘要） */
+.rag-block {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.rag-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.rag-label {
+  font-size: var(--fs-caption, 12px);
+  color: var(--color-text-tertiary, #9c958d);
+}
+.rag-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 200px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px dashed var(--color-border, #d4cdc2);
+  background: var(--color-bg-elevated, #fff);
+  font-size: var(--fs-caption, 12px);
+  color: var(--color-text-secondary, #5c564f);
+  cursor: pointer;
+}
+.rag-chip:hover { border-color: var(--color-primary, #2f6f4f); color: var(--color-primary, #2f6f4f); }
+.rag-chip.active {
+  border-style: solid;
+  border-color: var(--color-primary, #2f6f4f);
+  color: var(--color-primary, #2f6f4f);
+}
+.rag-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rag-snippet {
+  max-width: 100%;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--color-border, #d4cdc2);
+  background: var(--color-bg-subtle, #f4f4f5);
+  font-size: var(--fs-caption, 12px);
+  color: var(--color-text-secondary, #5c564f);
+}
+.rag-snippet-title { display: block; }
+.rag-snippet p {
+  margin: 4px 0 0;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 
 /* 等待指示 */
 .thinking {

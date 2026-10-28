@@ -1,8 +1,10 @@
 package com.library.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.library.common.exception.BusinessException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.nio.charset.StandardCharsets;
@@ -82,6 +84,11 @@ public class AiConfirmService {
                         Map<String, Object> args, String title,
                         List<Map<String, String>> rows) {
         purgeExpired();
+        // 容量兜底：过期清理后仍堆积过多待确认请求（正常业务远达不到），
+        // 说明遭遇刷接口/异常流量，直接拒绝新的授权请求保护内存
+        if (pending.size() >= 1000) {
+            throw new BusinessException(429, "授权请求过多，请稍后再试");
+        }
         String token = TOKEN_PREFIX + randomToken();
         // 先固化参数副本，再对副本算摘要：
         // Map.copyOf 的迭代顺序与原 Map 可能不同，若摘要基于原 Map 计算、
@@ -109,9 +116,10 @@ public class AiConfirmService {
      * @param token 客户端回传的令牌
      * @param userId 当前登录用户
      * @param expectedTool 期望执行的工具名（防止拿 A 工具的令牌去执行 B 工具）
+     * @param expectedConversationId 当前会话 ID（防止令牌跨会话重放；传 null 跳过校验）
      * @return 校验通过的授权请求；失败返回 null
      */
-    public PendingConfirm consume(String token, Long userId, String expectedTool) {
+    public PendingConfirm consume(String token, Long userId, String expectedTool, Long expectedConversationId) {
         if (token == null || token.isBlank()) {
             return null;
         }
@@ -131,6 +139,11 @@ public class AiConfirmService {
             log.warn("[confirm] 用户不匹配: tokenUser={} curUser={}", pc.userId(), userId);
             return null;
         }
+        // 会话归属不匹配：拒绝但不消费，防止令牌被拿到其他会话中重放
+        if (expectedConversationId != null && !expectedConversationId.equals(pc.conversationId())) {
+            log.warn("[confirm] 会话不匹配: tokenConv={} curConv={}", pc.conversationId(), expectedConversationId);
+            return null;
+        }
         // 工具名不匹配：拒绝但不消费（可能是前端传错工具名，不应让 rightful 用户丢失授权）
         if (expectedTool != null && !expectedTool.equals(pc.toolName())) {
             log.warn("[confirm] 工具不匹配: expected={} actual={}", expectedTool, pc.toolName());
@@ -143,27 +156,6 @@ public class AiConfirmService {
         }
         // 走到这里说明本次消费合法，移除令牌实现一次性语义
         pending.remove(token);
-        return pc;
-    }
-
-    /**
-     * 查询令牌对应的授权请求（不消费），用于「取消」时回填上下文。
-     *
-     * @param token  令牌
-     * @param userId 当前用户
-     * @return 授权请求；不存在或已过期返回 null
-     */
-    public PendingConfirm peek(String token, Long userId) {
-        if (token == null) {
-            return null;
-        }
-        PendingConfirm pc = pending.get(token);
-        if (pc == null || isExpired(pc.createdAt())) {
-            return null;
-        }
-        if (pc.userId() == null || !pc.userId().equals(userId)) {
-            return null;
-        }
         return pc;
     }
 
@@ -186,6 +178,15 @@ public class AiConfirmService {
     /** 清理过期令牌，避免内存无限增长 */
     private void purgeExpired() {
         pending.entrySet().removeIf(e -> isExpired(e.getValue().createdAt()));
+    }
+
+    /**
+     * 定时清理过期令牌：issue 内的 purgeExpired 只在发令牌时被动触发，
+     * 若长时间无人发起新授权，已过期的令牌仍会滞留内存，这里兜底周期清理。
+     */
+    @Scheduled(fixedDelay = 60000)
+    public void scheduledPurge() {
+        purgeExpired();
     }
 
     /** 生成随机令牌主体（256 位熵） */

@@ -1,5 +1,9 @@
 server:
-  port: 8080
+  # 端口用环境变量可覆盖（默认 8090）。
+  # 为何不用 8080/8081：8080 常被其他反代工具占用（如 ZCode 的 zcode-proxy），
+  # 8081 是 Windows IP Helper(svchost) 的动态占用端口；两者冲突都会导致
+  # 前端代理打到错误的服务、登录必然失败。8090 为空闲端口。
+  port: ${SERVER_PORT:8090}
   # 监听所有网卡，局域网设备可通过本机 IP 访问后端（默认虽为 0.0.0.0，显式声明更稳妥）
   address: 0.0.0.0
   servlet:
@@ -51,6 +55,17 @@ pagehelper:
 # 自定义业务配置
 app:
   upload-dir: ./uploads
+  # CORS 白名单：逗号分隔的允许来源（局域网设备访问时把对应来源加入此处）
+  cors:
+    allowed-origins: http://localhost:5173,http://127.0.0.1:5173
+  # AI 接口限流（滑动窗口，每分钟请求数）
+  rate-limit:
+    ai-chat-per-minute: 10
+    ai-confirm-per-minute: 20
+  # 模型请求/响应日志（打印完整 prompt 与工具结果，含个人借阅数据，生产建议 false）
+  ai:
+    log-requests: true
+    log-responses: true
 
 # 自定义 JWT 配置
 jwt:

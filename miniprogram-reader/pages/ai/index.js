@@ -161,6 +161,7 @@ Page({
     if (this.streamTask && this.streamTask.abort) this.streamTask.abort()
     clearTimeout(this._renderTimer)
     if (this._revealTimer) clearTimeout(this._revealTimer)
+    this.stopConfirmCountdown()
   },
 
   // 会话
@@ -421,6 +422,8 @@ Page({
       refSnippet: '',
       pending: true,
       waiting: true, // 等待指示：尚无思考/工具/参考资料/正文产出时显示「正在思考…」跳动
+      // 写操作授权卡（SSE confirm 事件）：不落库，仅存在于当前流式消息
+      confirmCard: null,
       _done: false,
     }
     this._streamIdx = this.data.messages.length + 1
@@ -504,6 +507,21 @@ Page({
     } else if (event === 'done') {
       this.finishStream()
       return
+    } else if (event === 'confirm') {
+      // 写操作授权：在当前消息上挂授权卡，等待用户确认/取消
+      if (!data) return
+      this.mergeConfirmCard(msg, data)
+      this.scrollToBottom()
+    } else if (event === 'degrade') {
+      // 工具循环超限降级：把降级说明追加到正文（后端随后仍会发 done）
+      let info = {}
+      try { info = JSON.parse(data) } catch (e) { /* 无 payload */ }
+      const text = (info && info.message) || '任务较复杂，已为你简化处理。'
+      msg.content += (msg.content ? '\n\n' : '') + text
+      msg.shown = msg.content // 降级提示直接铺满，不走打字机
+      this.setData({ ['messages[' + this._streamIdx + '].shown']: msg.shown })
+      this.ensureReveal()
+      this.scheduleFlush()
     } else if (event === 'error') {
       this.failStream(new Error(data || 'AI 回复失败'))
       return
@@ -528,6 +546,116 @@ Page({
       return
     }
     this.failStream(new Error((body && body.message) || 'AI 服务无响应，请稍后重试'))
+  },
+
+  // 写操作授权卡：解析 confirm 事件 payload，挂到当前流式消息并启动倒计时
+  mergeConfirmCard(msg, raw) {
+    let info = {}
+    try { info = JSON.parse(raw) } catch (e) { /* 无 payload */ }
+    const card = {
+      token: info.token || '',
+      tool: info.tool || '',
+      title: info.title || '写操作授权',
+      rows: Array.isArray(info.rows) ? info.rows : [],
+      ttlSeconds: info.ttlSeconds || 60,
+      state: 'pending',
+      result: null,
+      error: '',
+    }
+    if (!card.token) return
+    // 正文为空时补一句提示，避免卡片孤零零没有上下文
+    if (!msg.content) {
+      msg.content = '请确认上方授权请求后继续。'
+      msg.shown = msg.content
+      this.setData({ ['messages[' + this._streamIdx + '].shown']: msg.shown })
+    }
+    msg.confirmCard = card
+    this.setData({ ['messages[' + this._streamIdx + '].confirmCard']: card })
+    this.startConfirmCountdown()
+  },
+
+  // 授权倒计时：归零自动置为 expired（对齐后端 ttlSeconds）
+  startConfirmCountdown() {
+    this.stopConfirmCountdown()
+    const msg = this._streamMsg
+    if (!msg || !msg.confirmCard) return
+    this._confirmLeft = msg.confirmCard.ttlSeconds || 60
+    this.setData({ ['messages[' + this._streamIdx + '].confirmCard.ttlLeft']: this._confirmLeft })
+    this._confirmTimer = setInterval(() => {
+      this._confirmLeft -= 1
+      if (!this._streamMsg || !this._streamMsg.confirmCard) { this.stopConfirmCountdown(); return }
+      if (this._confirmLeft <= 0) {
+        this.stopConfirmCountdown()
+        const card = this._streamMsg.confirmCard
+        if (card.state === 'pending' || card.state === 'submitting') {
+          card.state = 'expired'
+          card.error = '授权已超时，请重新发起该操作'
+          this.setData({ ['messages[' + this._streamIdx + '].confirmCard']: card })
+        }
+        return
+      }
+      this.setData({ ['messages[' + this._streamIdx + '].confirmCard.ttlLeft']: this._confirmLeft })
+    }, 1000)
+  },
+  stopConfirmCountdown() {
+    if (!this._confirmTimer) return
+    clearInterval(this._confirmTimer)
+    this._confirmTimer = null
+  },
+
+  // 确认办理：POST /ai/confirm，按返回与错误信息归类卡片状态
+  async onConfirmWrite(e) {
+    const msg = this._streamMsg
+    if (!msg || !msg.confirmCard) return
+    const card = msg.confirmCard
+    if (card.state !== 'pending') return
+    card.state = 'submitting'
+    this.setData({ ['messages[' + this._streamIdx + '].confirmCard.state']: 'submitting' })
+    try {
+      const res = await request.post('/ai/confirm', { token: card.token, tool: card.tool })
+      this.stopConfirmCountdown()
+      card.state = 'confirmed'
+      card.result = res || null
+      this.setData({ ['messages[' + this._streamIdx + '].confirmCard']: card })
+      wx.showToast({ title: (res && res.message) || '已办理', icon: 'success' })
+    } catch (err) {
+      const text = (err && err.message) || ''
+      if (/过期|失效|已被处理/.test(text)) {
+        // 令牌已被处理或超时：卡片置为失效态
+        this.stopConfirmCountdown()
+        card.state = 'expired'
+        card.error = text
+        this.setData({ ['messages[' + this._streamIdx + '].confirmCard']: card })
+      } else if (/登录|token/i.test(text) || !auth.getToken()) {
+        // 401 已被 request 层清 token：对齐 handleNonSse 的重新登录出口
+        this.stopConfirmCountdown()
+        card.state = 'expired'
+        card.error = '登录已过期，请重新登录'
+        this.setData({ ['messages[' + this._streamIdx + '].confirmCard']: card })
+        wx.showToast({ title: '登录已过期，请重新登录', icon: 'none' })
+        setTimeout(() => wx.reLaunch({ url: '/pages/auth/login' }), 800)
+      } else {
+        // 网络抖动等业务错误：回到 pending 允许重试
+        card.state = 'pending'
+        card.error = text || '办理失败，请稍后重试'
+        this.setData({ ['messages[' + this._streamIdx + '].confirmCard']: card })
+      }
+      if (!/登录|token/i.test(text)) {
+        wx.showToast({ title: text || '办理失败，请稍后重试', icon: 'none' })
+      }
+    }
+  },
+
+  // 取消：后端无取消端点，仅本地置 cancelled（令牌到期自动失效）
+  onCancelWrite() {
+    const msg = this._streamMsg
+    if (!msg || !msg.confirmCard) return
+    const card = msg.confirmCard
+    if (card.state !== 'pending') return
+    this.stopConfirmCountdown()
+    card.state = 'cancelled'
+    this.setData({ ['messages[' + this._streamIdx + '].confirmCard']: card })
+    wx.showToast({ title: '已取消（令牌将自动过期）', icon: 'none' })
   },
 
   // 工具调用卡片：start 新增，end/error 更新同名 start 卡片（对齐 Web 端逻辑）；

@@ -632,3 +632,65 @@
 }
 .er-go { font-size: 26rpx; color: var(--secondary); flex-shrink: 0; }
 .exlib-foot { font-size: 20rpx; letter-spacing: 4rpx; color: var(--text-3); }
+
+/* 写操作授权卡（SSE confirm 事件）：卡片容器沿工具卡签名（左色边线随状态变化） */
+.confirm-card {
+  margin-top: 16rpx;
+  background: var(--bg-elevated);
+  border: 1rpx solid var(--border);
+  border-left: 4rpx solid var(--warning);
+  border-radius: 14rpx;
+  padding: 18rpx 20rpx;
+  overflow: hidden;
+}
+.confirm-card.confirmed { border-left-color: var(--success); }
+.confirm-card.cancelled { border-left-color: var(--text-3); }
+.confirm-card.expired { border-left-color: var(--danger); }
+.confirm-card.failed { border-left-color: var(--danger); }
+
+.confirm-head { display: flex; align-items: center; }
+.confirm-eyebrow { color: var(--warning); }
+.confirm-card.confirmed .confirm-eyebrow { color: var(--success); }
+.confirm-card.expired .confirm-eyebrow,
+.confirm-card.failed .confirm-eyebrow { color: var(--danger); }
+.confirm-title { display: block; margin-top: 8rpx; font-size: 28rpx; font-weight: 500; color: var(--text); }
+
+/* 待确认明细行：label 左对齐灰字，value 右侧主字色 */
+.confirm-rows { margin-top: 12rpx; display: flex; flex-direction: column; gap: 8rpx; }
+.confirm-row { display: flex; gap: 16rpx; font-size: 24rpx; line-height: 1.5; }
+.confirm-label { flex-shrink: 0; color: var(--text-3); }
+.confirm-value { color: var(--text); word-break: break-all; }
+
+/* 倒计时：细进度条 + 秒数文字 */
+.confirm-ttl { margin-top: 14rpx; display: flex; align-items: center; gap: 12rpx; }
+.confirm-ttl-bar {
+  flex: 1;
+  height: 6rpx;
+  border-radius: 4rpx;
+  background: var(--bg-subtle);
+  overflow: hidden;
+}
+.confirm-ttl-fill { height: 100%; background: var(--warning); transition: width 1s linear; }
+.confirm-ttl-txt { flex-shrink: 0; font-size: 20rpx; color: var(--text-3); }
+
+/* 操作按钮：主按钮实底（对齐 .send-btn 的 primary/inverse 配色），次按钮描边 */
+.confirm-actions { margin-top: 16rpx; display: flex; gap: 16rpx; }
+.confirm-btn {
+  flex: 1;
+  height: 64rpx;
+  border-radius: 32rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26rpx;
+}
+.confirm-btn.primary { background: var(--primary); color: var(--inverse); }
+.confirm-btn.primary:active { background: var(--primary-hover); }
+.confirm-btn.primary.disabled { background: var(--bg-muted); }
+.confirm-btn.ghost { border: 1rpx solid var(--border-strong); color: var(--text-2); background: transparent; }
+.confirm-btn.ghost:active { background: var(--bg-subtle); }
+
+/* 非等待态的状态说明行 */
+.confirm-state { display: block; margin-top: 12rpx; font-size: 24rpx; color: var(--text-3); }
+.confirm-state.ok { color: var(--success); }
+.confirm-state.err { color: var(--danger); }

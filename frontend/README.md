@@ -36,7 +36,7 @@ Vue 3 管理端 + 读者端单页应用
 
 - Node.js 20+
 - pnpm
-- 运行中的后端服务（默认 `http://127.0.0.1:8080`，见 [backend/README.md](../backend/README.md)）
+- 运行中的后端服务（默认 `http://127.0.0.1:8090`，见 [backend/README.md](../backend/README.md)）
 
 ### 安装与运行
 
@@ -47,7 +47,7 @@ pnpm dev    # http://localhost:5173，已配置 0.0.0.0 可局域网访问
 
 ### API 代理
 
-开发与预览模式下 `/api` 请求由 Vite 代理转发到 `http://127.0.0.1:8080`（见 `vite.config.js`）。后端地址变化时同步修改 `server.proxy` 与 `preview.proxy` 两处 `target` 即可，前端代码无需改动。
+开发与预览模式下 `/api` 请求由 Vite 代理转发到 `http://127.0.0.1:8090`（见 `vite.config.js`）。后端地址变化时同步修改 `server.proxy` 与 `preview.proxy` 两处 `target` 即可，前端代码无需改动；也可用环境变量 `VITE_BACKEND_TARGET` 覆盖（需写在 `frontend/.env.local`，并以 `VITE_` 前缀注入）。
 
 ### 构建与预览
 

@@ -195,7 +195,7 @@
                       确认办理
                     </button>
                     <button class="confirm-btn" @click="onCancelWrite(m.confirmCard)">取消</button>
-                    <span class="confirm-ttl">{{ m.confirmCard.ttlSeconds }} 秒内有效</span>
+                    <span class="confirm-ttl">{{ m.confirmCard.remain ?? m.confirmCard.ttlSeconds }} 秒内有效</span>
                   </div>
                   <div v-else-if="m.confirmCard.state === 'submitting'" class="confirm-actions">
                     <span class="confirm-state">
@@ -402,6 +402,7 @@ const CONFIRM_EYEBROWS = {
   confirmed: '已确认',
   cancelled: '已取消',
   expired: '授权失效',
+  failed: '办理失败',
 }
 const confirmEyebrow = (state) => CONFIRM_EYEBROWS[state] || '需要你的授权'
 
@@ -804,36 +805,73 @@ const sendPrompt = (prompt) => {
   send()
 }
 
+// 登录态失效统一处理（与 api/request.js 的 handleUnauthorized 一致，SSE fetch 路径专用）：
+// 清 token → 提示 → 跳登录页（携带 redirect 便于登录后回跳），防重复跳转
+let redirectingToLogin = false
+const handleUnauthorized = (message) => {
+  localStorage.removeItem('library_token')
+  if (redirectingToLogin || window.location.pathname === '/login') return
+  redirectingToLogin = true
+  ElMessage.error(message || '登录已过期，请重新登录')
+  const redirect = encodeURIComponent(window.location.pathname + window.location.search)
+  setTimeout(() => {
+    window.location.href = `/login?redirect=${redirect}`
+  }, 500)
+}
+
 /* —— 写操作授权卡 —— */
 
-// 确认执行：只回传令牌，参数由服务端保存，客户端无法篡改
+// 确认执行：回传令牌与会话 ID，参数由服务端保存，客户端无法篡改
 const onConfirmWrite = async (card) => {
   if (!card || card.state !== 'pending') return
+  stopConfirmCountdown(card)
   card.state = 'submitting'
   try {
-    const res = await aiApi.confirmWrite(card.token, card.tool)
+    const res = await aiApi.confirmWrite(card.token, card.tool, card.conversationId)
     card.state = 'confirmed'
     card.result = res
     // 依据工具真实返回给出简短回执；完整回答交由模型在下一轮生成
     const tip = res?.message || '操作已完成'
     appendAssistantText(tip)
   } catch (e) {
-    card.state = 'expired'
-    card.error = e?.message || '授权已失效，请重新发起该操作'
+    // 失败分类：令牌类失效（过期/已被处理/不匹配）→ expired；业务错误（如库存不足）→ failed。
+    // 令牌一次性，失败后原卡无法重试，两种状态都只说明结果，不一律谎称过期
+    const message = e?.message || '授权已失效，请重新发起该操作'
+    const tokenInvalid = /失效|过期|已被处理|重新发起/.test(message)
+    card.state = tokenInvalid ? 'expired' : 'failed'
+    card.error = message
   }
 }
 
 // 用户取消：卡片原地转为静默状态，不跳变
 const onCancelWrite = (card) => {
   if (!card || card.state !== 'pending') return
+  stopConfirmCountdown(card)
   card.state = 'cancelled'
 }
 
 // 授权过期：卡片灰态保留，说明发生过什么而非凭空消失
 const onConfirmExpired = (card) => {
   if (!card || card.state !== 'pending') return
+  stopConfirmCountdown(card)
   card.state = 'expired'
   card.error = '授权已过期，请重新发起该操作'
+}
+
+// 授权卡倒计时：本地每秒递减 remain，归零触发 onConfirmExpired（服务端 TTL 的前端镜像）
+const startConfirmCountdown = (card) => {
+  stopConfirmCountdown(card)
+  card.remain = card.ttlSeconds
+  card._timer = setInterval(() => {
+    card.remain -= 1
+    if (card.remain <= 0) onConfirmExpired(card)
+  }, 1000)
+}
+const stopConfirmCountdown = (card) => {
+  if (card?._timer) {
+    clearInterval(card._timer)
+    card._timer = null
+  }
 }
 
 /** 在当前助手气泡追加一句文本 */
@@ -959,11 +997,19 @@ const send = async () => {
     const ct = resp.headers.get('content-type') || ''
     if (!ct.includes('text/event-stream')) {
       let msg = 'AI 请求失败'
+      let code = null
       try {
         const errBody = await resp.json()
         msg = errBody.message || msg
+        code = errBody.code
       } catch {
         // 忽略
+      }
+      // 与 api/request.js 的 handleUnauthorized 同约定：未授权返回 body.code=401，
+      // SSE 不走 axios 拦截器，这里复刻同一登出跳转（清 token → 提示 → 跳登录）
+      if (code === 401) {
+        handleUnauthorized(msg)
+        throw new Error(msg)
       }
       throw new Error(msg)
     }
@@ -1184,7 +1230,9 @@ const send = async () => {
             title: info.title || '写操作授权',
             rows: Array.isArray(info.rows) ? info.rows : [],
             ttlSeconds: info.ttlSeconds || 60,
-            // pending: 等待确认 / confirmed: 已确认 / cancelled: 用户取消 / expired: 已过期
+            // 确认请求回传，供服务端校验令牌与会话归属一致
+            conversationId: convId,
+            // pending: 等待确认 / confirmed: 已确认 / cancelled: 用户取消 / expired: 已过期 / failed: 办理失败
             state: 'pending',
             result: null,
             error: '',
@@ -1193,6 +1241,7 @@ const send = async () => {
           msg.timeline.push({ kind: 'confirm', tool: info.tool || '' })
           msg.content = msg.content || '请确认上方授权请求后继续。'
           msg.html = renderMarkdown(msg.content)
+          startConfirmCountdown(msg.confirmCard)
           scrollToBottom()
         } catch {
           // 解析失败时不影响对话
@@ -1227,7 +1276,9 @@ const send = async () => {
         msg._reasonSegOpen = false
         msg.reasoningStreaming = false
         msg.reasoningOpen = false
-        msg.content = `⚠️ ${data || 'AI 请求出错'}`
+        // 已有正文时保留原内容，错误说明追加其后（避免中途出错抹掉已流出的回答）
+        const errTip = `⚠️ ${data || 'AI 请求出错'}`
+        msg.content = msg.content ? `${msg.content}\n\n${errTip}` : errTip
         msg.html = renderMarkdown(msg.content)
         scrollToBottom()
       }
@@ -1254,10 +1305,16 @@ const send = async () => {
     }
     ElMessage.error(e.message || 'AI 请求失败')
     if (assistantMsg) {
-      assistantMsg.content = `⚠️ ${e.message || 'AI 请求失败'}`
+      // 已有正文时保留原内容，错误说明追加其后
+      const errTip = `⚠️ ${e.message || 'AI 请求失败'}`
+      assistantMsg.content = assistantMsg.content ? `${assistantMsg.content}\n\n${errTip}` : errTip
+      assistantMsg.html = renderMarkdown(assistantMsg.content)
     }
   } finally {
     abortController = null
+    // 兜底复位：服务端超时/断网导致流关闭但 done 事件未到达时，
+    // 按钮仍停在「停止生成」态——任何退出路径最终都要回到可输入状态
+    thinking.value = false
     // 流结束（完成/停止/出错）后，仍在加载态的工具卡片停止旋转
     if (assistantMsg && assistantMsg.toolEvents) {
       assistantMsg.toolEvents.forEach((t) => {
@@ -1281,6 +1338,7 @@ const formatTime = (t) => {
 
 onBeforeUnmount(() => {
   if (abortController) abortController.abort()
+  messages.value.forEach((m) => stopConfirmCountdown(m.confirmCard))
 })
 
 onMounted(loadConversations)

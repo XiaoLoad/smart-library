@@ -20,14 +20,24 @@ public class WebMvcConfig implements WebMvcConfigurer {
     @Autowired
     private JwtInterceptor jwtInterceptor;
 
+    @Autowired
+    private RateLimitInterceptor rateLimitInterceptor;
+
     @Value("${app.upload-dir:./uploads}")
     private String uploadDir;
+
+    /** CORS 白名单：逗号分隔的允许来源，默认仅本机前端开发地址 */
+    @Value("${app.cors.allowed-origins:http://localhost:5173,http://127.0.0.1:5173}")
+    private String[] allowedOrigins;
 
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(jwtInterceptor)
                 .addPathPatterns("/**")
                 .excludePathPatterns("/auth/login", "/auth/wechat-login", "/error", "/uploads/**");
+        // 限流拦截器须在 JWT 之后注册：依赖 CurrentUser 识别用户身份做限流 key
+        registry.addInterceptor(rateLimitInterceptor)
+                .addPathPatterns("/**");
     }
 
     @Override
@@ -39,10 +49,11 @@ public class WebMvcConfig implements WebMvcConfigurer {
 
     @Override
     public void addCorsMappings(CorsRegistry registry) {
-        // 局域网访问：其他设备通过 http://本机IP:5173 访问前端，代理失效/直连后端等场景
-        // 会带局域网 Origin，需放开来源（allowedOriginPatterns 支持通配且可配合 allowCredentials）
+        // CORS 收敛为白名单制：仅放行 app.cors.allowed-origins 中配置的来源。
+        // 原先 allowedOriginPatterns("*") + allowCredentials(true) 等于对任意站点
+        // 开放携带凭据的跨域访问，属安全问题；局域网设备请把对应来源加入白名单配置。
         registry.addMapping("/**")
-                .allowedOriginPatterns("*")
+                .allowedOriginPatterns(allowedOrigins)
                 .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
                 .allowedHeaders("*")
                 .exposedHeaders("Authorization")

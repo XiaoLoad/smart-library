@@ -40,7 +40,7 @@
 
    ```js
    const IS_DEV = true
-   const DEV_ORIGIN = 'http://<你电脑的局域网IP>:8080'
+   const DEV_ORIGIN = 'http://<你电脑的局域网IP>:8090'
    ```
 
 4. 开发者工具勾选「详情 → 本地设置 → **不校验合法域名**」；
