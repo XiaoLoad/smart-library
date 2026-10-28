@@ -191,6 +191,14 @@
                     </div>
                   </div>
                   <div v-if="m.confirmCard.state === 'pending'" class="confirm-actions">
+                    <label class="confirm-allow" title="勾选后本会话内同类写操作不再弹卡，直接执行">
+                      <input
+                        v-model="m.confirmCard.alwaysAllow"
+                        type="checkbox"
+                        class="confirm-allow-box"
+                      />
+                      <span>本会话始终允许此类操作</span>
+                    </label>
                     <button class="confirm-btn primary" @click="onConfirmWrite(m.confirmCard)">
                       确认办理
                     </button>
@@ -928,12 +936,14 @@ const onConfirmWrite = async (card) => {
   stopConfirmCountdown(card)
   card.state = 'submitting'
   try {
-    const res = await aiApi.confirmWrite(card.token, card.tool, card.conversationId)
+    const res = await aiApi.confirmWrite(card.token, card.tool, card.conversationId, card.alwaysAllow === true)
     card.state = 'confirmed'
     card.result = res
     // 依据工具真实返回给出简短回执；完整回答交由模型在下一轮生成
     const tip = res?.message || '操作已完成'
     appendAssistantText(tip)
+    // M8 确认续跑：回执展示后自动发起下一轮，模型继续任务链剩余步骤
+    continueAfterConfirm(card.tool)
   } catch (e) {
     // 失败分类：令牌类失效（过期/已被处理/不匹配）→ expired；业务错误（如库存不足）→ failed。
     // 令牌一次性，失败后原卡无法重试，两种状态都只说明结果，不一律谎称过期
@@ -972,6 +982,8 @@ const onConfirmBatch = async (card) => {
     card.state = 'confirmed'
     card.result = res
     appendAssistantText(res?.message || '批量办理完成')
+    // M8 确认续跑：批量办理完成后自动发起下一轮，模型汇总/继续剩余步骤
+    continueAfterConfirm(`批量办理 ${res?.successCount ?? 0} 项成功`)
   } catch (e) {
     const message = e?.message || '批量授权已失效，请重新发起该操作'
     const tokenInvalid = /失效|过期|已被处理|重新发起/.test(message)
@@ -1034,7 +1046,21 @@ const send = async () => {
   if (!input.value.trim()) return
   const content = input.value.trim()
   input.value = ''
-  lastUserText.value = content
+  await sendInternal(content, { continuation: false })
+}
+
+/**
+ * M8 确认续跑：授权确认成功后自动发起的下一轮对话。
+ * 引导语以系统续跑身份发送（不显示用户气泡），模型从系统回执读到结果继续任务链。
+ */
+const continueAfterConfirm = async (toolSummary) => {
+  if (thinking.value || !currentConvId.value) return
+  const guide = `授权已确认并执行完成（${toolSummary}）。请检查任务链中还有哪些步骤未完成，继续执行剩余步骤；若全部完成，请向用户汇总各项办理结果。`
+  await sendInternal(guide, { continuation: true })
+}
+
+const sendInternal = async (content, { continuation }) => {
+  lastUserText.value = continuation ? lastUserText.value : content
   // 新一轮：重置检索联动候补与写操作标记
   pendingAiSearch = null
   turnHasWrite = false
@@ -1056,14 +1082,16 @@ const send = async () => {
   const conv = conversations.value.find((c) => c.id === convId)
   const isFirstMsg = !conv || conv.title === '新对话' || !conv.title
 
-  // 推送用户消息
-  messages.value.push({
-    id: Date.now(),
-    conversationId: convId,
-    role: 'user',
-    content,
-    createTime: new Date().toISOString(),
-  })
+  // 推送用户消息（续跑轮引导语不显示用户气泡，避免伪造用户发言）
+  if (!continuation) {
+    messages.value.push({
+      id: Date.now(),
+      conversationId: convId,
+      role: 'user',
+      content,
+      createTime: new Date().toISOString(),
+    })
+  }
   isAutoFollow.value = true
   showJumpBtn.value = false
   await scrollToBottom()
@@ -1128,7 +1156,7 @@ const send = async () => {
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ conversationId: convId, content }),
+      body: JSON.stringify({ conversationId: convId, content, continuation }),
       signal: abortController.signal,
     })
 
@@ -1371,6 +1399,9 @@ const send = async () => {
             ttlSeconds: info.ttlSeconds || 60,
             // 确认请求回传，供服务端校验令牌与会话归属一致
             conversationId: convId,
+            // M8「本会话始终允许」勾选状态（后端 sessionAllow 开关存在时展示）
+            sessionAllow: info.sessionAllow === true,
+            alwaysAllow: false,
             // pending: 等待确认 / confirmed: 已确认 / cancelled: 用户取消 / expired: 已过期 / failed: 办理失败
             state: 'pending',
             result: null,
@@ -2498,6 +2529,22 @@ onMounted(loadConversations)
   padding: var(--space-3) var(--space-6) var(--space-4);
   background: linear-gradient(to top, var(--color-bg) 70%, transparent);
   z-index: 2;
+}
+
+/* M8 「本会话始终允许」勾选项 */
+.confirm-allow {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-right: auto;
+  font-size: var(--fs-caption, 12px);
+  color: var(--color-text-secondary, #5c564f);
+  cursor: pointer;
+  user-select: none;
+}
+.confirm-allow-box {
+  accent-color: var(--color-primary, #2f6f4f);
+  cursor: pointer;
 }
 
 /* M7 权限档位选择条 */

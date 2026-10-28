@@ -29,6 +29,7 @@ public class AiToolContext {
     public final CategoryService categoryService;
     public final BorrowService borrowService;
     public final StatsService statsService;
+    public final NotificationService notificationService;
     public final ObjectMapper objectMapper;
 
     public AiToolContext(BorrowMapper borrowMapper,
@@ -42,6 +43,7 @@ public class AiToolContext {
                          CategoryService categoryService,
                          BorrowService borrowService,
                          StatsService statsService,
+                         NotificationService notificationService,
                          ObjectMapper objectMapper) {
         this.borrowMapper = borrowMapper;
         this.bookMapper = bookMapper;
@@ -54,6 +56,7 @@ public class AiToolContext {
         this.categoryService = categoryService;
         this.borrowService = borrowService;
         this.statsService = statsService;
+        this.notificationService = notificationService;
         this.objectMapper = objectMapper;
     }
 }

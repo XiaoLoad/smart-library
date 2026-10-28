@@ -2,6 +2,7 @@ package com.library.service;
 
 import com.library.common.exception.BusinessException;
 import com.library.dto.PickupResultVo;
+import com.library.dto.UrgeResultVo;
 import com.library.entity.Borrow;
 import com.library.entity.Fine;
 import com.library.entity.User;
@@ -255,6 +256,64 @@ public class AdminTools extends BaseLibraryTools {
         m.put("failCount", r.getFailCount());
         m.put("results", r.getResults());
         m.put("message", "批量办理完成：成功 " + r.getSuccessCount() + " 条，失败 " + r.getFailCount() + " 条");
+        return m;
+    }
+
+    /**
+     * 逾期催还（管理员，写操作）：向逾期读者下发催还通知（站内信 + 邮件）。
+     * <p>
+     * 复用 NotificationService.urgeReturn 的正式公文催还流程（URGE_RETURN 事件，
+     * 支持重复催还）。仅逾期（状态 3）记录可催还，其余记录跳过并在逐项结果中说明。
+     * 借阅码必须来自 adminQueryBorrows（status=3）查询结果，禁止猜测。
+     */
+    @Tool("【管理员】逾期催还（写操作）：向逾期未还的读者下发催还通知（站内信+邮件）。"
+            + "当管理员要催还逾期图书（如「把逾期的都催一下」）时调用本工具；"
+            + "系统会弹出授权卡列出催还明细，管理员确认后下发。"
+            + "仅逾期（状态3）记录可催还，非逾期记录会被跳过并说明。"
+            + "借阅码必须来自 adminQueryBorrows(status=3) 的查询结果，禁止猜测")
+    public Map<String, Object> adminUrgeOverdue(
+            @P("催还的借阅码列表（来自 adminQueryBorrows 查询的逾期记录，逗号分隔）")
+            String borrowNos) {
+        List<String> nos = new ArrayList<>();
+        if (borrowNos != null && !borrowNos.isBlank()) {
+            for (String s : borrowNos.split("[,，;；\\s]+")) {
+                if (!s.isBlank()) {
+                    nos.add(s.trim());
+                }
+            }
+        }
+        if (nos.isEmpty()) {
+            throw new BusinessException("请提供至少一个借阅码");
+        }
+        List<Map<String, String>> rows = new ArrayList<>();
+        rows.add(row("催还单数", String.valueOf(nos.size())));
+        rows.add(row("借阅码", String.join("、", nos)));
+        return withWriteEvent("adminUrgeOverdue", "逾期催还（" + nos.size() + " 条）",
+                rows,
+                Map.of("borrowNos", String.join(",", nos)),
+                v -> doUrge(nos));
+    }
+
+    /** 执行已确认的催还（授权卡确认后由 {@link AiService} 调用，绕过门禁） */
+    public Map<String, Object> adminUrgeOverdueConfirmed(String borrowNos) {
+        List<String> nos = new ArrayList<>();
+        if (borrowNos != null && !borrowNos.isBlank()) {
+            for (String s : borrowNos.split("[,，;；\\s]+")) {
+                if (!s.isBlank()) {
+                    nos.add(s.trim());
+                }
+            }
+        }
+        return doUrge(nos);
+    }
+
+    /** 催还的实际业务逻辑（门禁与确认后执行共用） */
+    private Map<String, Object> doUrge(List<String> nos) {
+        UrgeResultVo r = ctx.notificationService.urgeReturn(nos, userId);
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("success", true);
+        m.put("message", "催还通知已下发");
+        m.put("result", r);
         return m;
     }
 

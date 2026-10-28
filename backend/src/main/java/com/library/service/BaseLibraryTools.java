@@ -91,6 +91,9 @@ public abstract class BaseLibraryTools {
     /** 当前请求的权限档位，由 AiService 按会话配置注入；默认逐笔确认 */
     private PermissionMode permissionMode = PermissionMode.CONFIRM;
 
+    /** M8：当前会话 ID（会话白名单查询用），由 AiService 注入；null 表示无会话上下文 */
+    private Long conversationId;
+
     /** 批量授权收集器（batch 档位用）：本轮被拦截的写操作在此累积，由 AiService 在流结束前统一弹卡 */
     public interface BatchCollector {
         /**
@@ -127,9 +130,29 @@ public abstract class BaseLibraryTools {
         this.permissionMode = mode == null ? PermissionMode.CONFIRM : mode;
     }
 
+    /** 注入当前会话 ID（M8 会话白名单查询用） */
+    public void setConversationId(Long conversationId) {
+        this.conversationId = conversationId;
+    }
+
     /** 注入批量授权收集器（batch 档位） */
     public void setBatchCollector(BatchCollector collector) {
         this.batchCollector = collector;
+    }
+
+    /**
+     * M8 会话级白名单查询回调：返回 true 表示该会话已「始终允许」本工具，
+     * 写操作直接执行不再弹卡。由 AiService 注入（底层是 AiSessionAllowService）。
+     */
+    public interface SessionAllowChecker {
+        boolean isAllowed(Long conversationId, String toolName);
+    }
+
+    private SessionAllowChecker sessionAllowChecker;
+
+    /** 注入会话白名单查询回调 */
+    public void setSessionAllowChecker(SessionAllowChecker checker) {
+        this.sessionAllowChecker = checker;
     }
 
     protected boolean isAdmin() {
@@ -173,6 +196,10 @@ public abstract class BaseLibraryTools {
         }
         // 自动执行档：跳过拦截，走普通执行路径（回执卡片/轨迹照常记录）
         if (permissionMode == PermissionMode.AUTO) {
+            return withEvent(name, title, action);
+        }
+        // M8 会话白名单：用户在授权卡上勾选「本会话始终允许」的工具直接执行
+        if (sessionAllowChecker != null && sessionAllowChecker.isAllowed(conversationId, name)) {
             return withEvent(name, title, action);
         }
         // 批量授权档：不立即弹卡，累积到本轮批次，由 AiService 在流结束前合并成一张批量卡

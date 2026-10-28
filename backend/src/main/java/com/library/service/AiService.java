@@ -64,6 +64,16 @@ public class AiService {
     /** 单会话保留的最大历史消息条数（窗口记忆） */
     private static final int MAX_MEMORY_MESSAGES = 40;
     /**
+     * M8：单次任务链允许的最大连续续跑轮数。
+     * <p>
+     * 确认成功后前端自动发起续跑，模型可能再次弹卡等待确认、确认后再次续跑——
+     * 不设上限会形成「确认→续跑→确认」循环。3 轮覆盖常规多步任务链
+     * （如查书→借书→续借→归还），超限后用户手动发消息即重置。
+     */
+    private static final int MAX_CONTINUATION_ROUNDS = 3;
+    /** M8：续跑引导消息的落库前缀（连续续跑计数的识别标记） */
+    private static final String CONTINUATION_PREFIX = "[系统续跑] ";
+    /**
      * 单次对话允许的最大工具循环轮次（模型返回「含工具调用的响应」的次数）。
      * <p>
      * 不设置时 LangChain4j 默认允许 100 轮，模型若陷入「查了没结果→再查」的死循环
@@ -109,6 +119,8 @@ public class AiService {
     @Autowired private RagIndexService ragIndexService;
     @Autowired private AiConfirmService aiConfirmService;
     @Autowired private AiBatchConfirmService aiBatchConfirmService;
+    @Autowired private AiSessionAllowService aiSessionAllowService;
+    @Autowired private NotificationService notificationService;
     @Autowired private AiAgentTraceService traceService;
 
     /** 缓存最近构建的流式模型，配置未变时复用，避免重复创建 OkHttpClient */
@@ -195,11 +207,14 @@ public class AiService {
                模型提前宣称结果会造成「界面显示未办理、模型却说已办理」的虚假承诺。
                注：不要因为「还没拿到用户确认」就不调用写工具——直接调用即可，拦截与确认由系统完成。
 
-            6b. 写操作必须真的调用工具，不得只用语言答复：用户表达借阅/续借/归还意图时，
-                必须实际调用对应写工具（applyBorrow / renewMyBorrow / requestReturn），
-                不要只回答「好的，我来帮你借阅」就结束，也不要只查书就停下。
-                正确流程是：先 queryBooks 拿到书名与 ISBN，再调用 applyBorrow 提交申请，
+            6b. 写操作必须真的调用工具，不得只用语言答复：用户表达借阅/续借/归还/催还/柜台办理意图时，
+                必须实际调用对应写工具（applyBorrow / renewMyBorrow / requestReturn /
+                adminUrgeOverdue / adminCounterProcess / adminCounterProcessBatch），
+                不要只回答「好的，我来帮你办理」就结束，也不要只查书就停下。
+                正确流程是：先查询工具核实记录，再立即调用对应写工具提交办理，
                 系统会自动弹出授权卡，由用户在卡片上点击确认。
+                特别注意：说「请在授权卡上确认」之前必须真的调用了写工具（授权卡是系统
+                在你调用写工具后自动弹出的，你不调用就不会有任何卡弹出）。
                 例外：仅当工具返回明确的业务错误（如额度已满、该书不可借、找不到书目）时才停下并转告用户。
 
             7. 业务错误如实转告：工具返回权限或业务错误（如"借阅额度已满""该记录非待取书状态""续借次数已用完"）时，
@@ -297,6 +312,8 @@ public class AiService {
         messageMapper.deleteByConversationId(id);
         conversationMapper.deleteById(id);
         evictMemory(id);
+        // M8：会话删除时清空其「始终允许」白名单
+        aiSessionAllowService.clearConversation(id);
     }
 
     // 流式对话
@@ -324,6 +341,17 @@ public class AiService {
      * 自动维护完整的工具调用上下文。
      */
     public SseEmitter chat(Long conversationId, String content) {
+        return chat(conversationId, content, false);
+    }
+
+    /**
+     * 流式对话（支持确认续跑）。
+     *
+     * @param continuation M8：true 表示由前端在授权确认成功后自动发起的续跑轮。
+     *                     续跑轮限制连续次数（默认 3），防止「确认→续跑→再弹卡→确认」
+     *                     无限循环消耗 token；超限走普通对话路径让用户手动继续。
+     */
+    public SseEmitter chat(Long conversationId, String content, boolean continuation) {
         CurrentUser cu = CurrentUser.get();
         AiConversation conv = conversationMapper.selectById(conversationId);
         if (conv == null) {
@@ -331,6 +359,13 @@ public class AiService {
         }
         if (!conv.getUserId().equals(cu.getUserId())) {
             throw new BusinessException(403, "无权操作该会话");
+        }
+        // M8 续跑循环防护：统计历史里最近的连续续跑引导消息数，达到上限拒绝本轮续跑
+        if (continuation) {
+            long recentContinuations = countTrailingContinuations(conversationId);
+            if (recentContinuations >= MAX_CONTINUATION_ROUNDS) {
+                throw new BusinessException(429, "续跑次数已达上限，请直接输入消息继续");
+            }
         }
 
         AiConfig cfg = loadConfig();
@@ -354,10 +389,12 @@ public class AiService {
         }
 
         // 2. 落库用户消息并使缓存失效（下次请求重新加载完整历史）
+        // M8：续跑轮的引导语加前缀落库——模型历史可见其上下文意图；
+        // countTrailingContinuations 靠该前缀统计连续续跑次数
         com.library.entity.AiMessage userMsg = new com.library.entity.AiMessage();
         userMsg.setConversationId(conversationId);
         userMsg.setRole("user");
-        userMsg.setContent(content);
+        userMsg.setContent(continuation ? CONTINUATION_PREFIX + content : content);
         userMsg.setCreateTime(LocalDateTime.now());
         messageMapper.insert(userMsg);
         evictMemory(conversationId);
@@ -491,6 +528,8 @@ public class AiService {
                 payload.put("title", title);
                 payload.put("rows", rows == null ? List.of() : rows);
                 payload.put("ttlSeconds", 60);
+                // M8：本会话「始终允许」开关，前端渲染为授权卡上的勾选项
+                payload.put("sessionAllow", true);
                 emitter.send(SseEmitter.event().name("confirm")
                         .data(objectMapper.writeValueAsString(payload)));
             } catch (IOException e) {
@@ -522,6 +561,13 @@ public class AiService {
         roleTools.setBatchCollector(batchCb);
         commonTools.setPermissionMode(mode);
         roleTools.setPermissionMode(mode);
+        // M8：会话白名单查询（授权卡「本会话始终允许」的放行依据）
+        BaseLibraryTools.SessionAllowChecker allowCb =
+                (convId, toolName) -> aiSessionAllowService.isAllowed(convId, toolName);
+        commonTools.setSessionAllowChecker(allowCb);
+        roleTools.setSessionAllowChecker(allowCb);
+        commonTools.setConversationId(conversationId);
+        roleTools.setConversationId(conversationId);
 
         try {
             // RAG：知识库启用且索引就绪时挂载检索增强；retriever 每请求构造以携带当前用户的可见范围
@@ -854,6 +900,17 @@ public class AiService {
      * @return 工具执行结果；令牌无效时抛出业务异常（前端提示原因）
      */
     public Map<String, Object> confirmWrite(String token, Long userId, String toolName, Long conversationId) {
+        return confirmWrite(token, userId, toolName, conversationId, false);
+    }
+
+    /**
+     * 执行用户已确认的写操作（支持「本会话始终允许」）。
+     *
+     * @param alwaysAllow M8：true 时确认成功后把该工具登记进会话白名单，
+     *                    本会话后续同类写操作由门禁直接放行
+     */
+    public Map<String, Object> confirmWrite(String token, Long userId, String toolName,
+                                            Long conversationId, boolean alwaysAllow) {
         AiConfirmService.PendingConfirm pc = aiConfirmService.consume(token, userId, toolName, conversationId);
         if (pc == null) {
             throw new BusinessException(400, "授权已失效或已被处理，请重新发起该操作");
@@ -863,7 +920,59 @@ public class AiService {
         Object result = executeConfirmed(userId, pc.toolName(), args);
         @SuppressWarnings("unchecked")
         Map<String, Object> map = (Map<String, Object>) result;
+        // M8：确认成功且用户勾选「始终允许」时登记会话白名单。
+        // 仅在执行成功后登记——失败的写操作不自动放行重试
+        if (alwaysAllow && conversationId != null && Boolean.TRUE.equals(map.get("success"))) {
+            aiSessionAllowService.allow(conversationId, pc.toolName());
+        }
+        // M8 确认续跑：把执行结果落库为助手摘要消息。前端确认成功后以 continuation
+        // 标记发起下一轮对话，模型从历史读到本条结果后继续未完成的任务链
+        if (conversationId != null) {
+            persistConfirmOutcome(conversationId, pc.toolName(), map);
+        }
         return map;
+    }
+
+    /**
+     * M8 确认续跑：把授权执行结果落库为一条助手消息（模型下一轮可见的历史）。
+     * <p>
+     * 落库为 assistant 角色而非伪造 user 消息：避免历史里出现用户没说过的话；
+     * 内容是「系统回执」式的中性陈述（做了什么 + 结果如何），模型据此判断
+     * 任务链剩余步骤，且不会把回执当成用户的新指令。
+     */
+    private void persistConfirmOutcome(Long conversationId, String toolName, Map<String, Object> result) {
+        try {
+            boolean success = Boolean.TRUE.equals(result.get("success"));
+            StringBuilder sb = new StringBuilder("[系统回执] 写操作已完成执行。");
+            sb.append("工具：").append(toolName).append("；结果：").append(success ? "成功" : "失败").append("。");
+            Object msg = result.get("message");
+            if (msg != null && !str(msg, "").isBlank()) {
+                sb.append("详情：").append(str(msg, ""));
+            }
+            // 逐项结果（批量办理时每条的成功/失败），供模型核对剩余任务
+            if (result.get("results") instanceof List<?> results && !results.isEmpty()) {
+                sb.append("；逐项：");
+                for (Object r : results) {
+                    if (r instanceof Map<?, ?> item) {
+                        sb.append(item.get("borrowNo") != null ? item.get("borrowNo") : item.get("title"))
+                          .append("=")
+                          .append(Boolean.TRUE.equals(item.get("success")) ? "成功" : "失败")
+                          .append(" ");
+                    }
+                }
+            }
+            sb.append("。请基于此结果继续处理用户任务链中的剩余步骤；若全部完成，请向用户汇总办理结果。");
+            com.library.entity.AiMessage m = new com.library.entity.AiMessage();
+            m.setConversationId(conversationId);
+            m.setRole("assistant");
+            m.setContent(sb.toString());
+            m.setCreateTime(LocalDateTime.now());
+            messageMapper.insert(m);
+            evictMemory(conversationId);
+        } catch (Exception e) {
+            // 回执落库失败不影响本次确认返回；续跑时模型少一条上下文，用户可手动追问
+            log.warn("[AI] 确认回执落库失败 conversationId={}: {}", conversationId, e.getMessage());
+        }
     }
 
     /** 执行已确认的借阅申请（复用 ReaderTools 的实际办理逻辑） */
@@ -974,7 +1083,32 @@ public class AiService {
         summary.put("failCount", results.size() - success);
         summary.put("results", results);
         summary.put("message", "批量办理完成：成功 " + success + " 项，失败 " + (results.size() - success) + " 项");
+        // M8 确认续跑：批量结果同样落库为系统回执，前端续跑后模型可核对剩余任务
+        if (conversationId != null) {
+            persistConfirmOutcome(conversationId, "adminCounterProcessBatch", summary);
+        }
         return summary;
+    }
+
+    /**
+     * M8：统计会话末尾连续的续跑引导消息数（按落库前缀识别）。
+     * 用户一旦亲自发言（无前缀的 user 消息），计数即被打断归零重新开始。
+     */
+    private long countTrailingContinuations(Long conversationId) {
+        List<com.library.entity.AiMessage> history = messageMapper.selectByConversationId(conversationId);
+        long count = 0;
+        for (int i = history.size() - 1; i >= 0; i--) {
+            com.library.entity.AiMessage m = history.get(i);
+            if (!"user".equalsIgnoreCase(m.getRole())) {
+                continue;
+            }
+            if (m.getContent() != null && m.getContent().startsWith(CONTINUATION_PREFIX)) {
+                count++;
+            } else {
+                break;
+            }
+        }
+        return count;
     }
 
     /** 按工具名分发已确认的写操作执行（批量确认与单笔确认共用） */
@@ -985,6 +1119,7 @@ public class AiService {
             case "requestReturn" -> returnConfirmed(userId, args);
             case "adminCounterProcess" -> counterConfirmed(userId, args);
             case "adminCounterProcessBatch" -> counterBatchConfirmed(userId, args);
+            case "adminUrgeOverdue" -> urgeConfirmed(userId, args);
             default -> throw new BusinessException(400, "不支持的授权操作：" + toolName);
         };
     }
@@ -1000,12 +1135,23 @@ public class AiService {
         return tools.adminCounterProcessBatchConfirmed(str(args.get("borrowNos"), ""));
     }
 
+    /** 执行已确认的逾期催还（授权卡确认后的入口；管理员二次校验同柜台办理） */
+    private Object urgeConfirmed(Long userId, Map<String, Object> args) {
+        Integer userType = currentUserType();
+        if (userType == null || userType != 3) {
+            throw new BusinessException(403, "仅管理员可执行催还");
+        }
+        AiToolContext toolCtx = buildToolContext();
+        AdminTools tools = new AdminTools(userId, currentUserType(), toolCtx);
+        return tools.adminUrgeOverdueConfirmed(str(args.get("borrowNos"), ""));
+    }
+
     /** 构造工具依赖上下文 */
     private AiToolContext buildToolContext() {
         return new AiToolContext(
                 borrowMapper, bookMapper, fineMapper, announcementMapper,
                 borrowLimitMapper, userMapper, categoryMapper, notificationMapper,
-                categoryService, borrowService, statsService, objectMapper);
+                categoryService, borrowService, statsService, notificationService, objectMapper);
     }
 
     /** 当前登录用户的类型（3=管理员） */

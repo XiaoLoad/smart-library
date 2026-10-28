@@ -31,7 +31,8 @@ public final class AiToolRegistry {
             "renewMyBorrow",
             "requestReturn",
             "adminCounterProcess",
-            "adminCounterProcessBatch"
+            "adminCounterProcessBatch",
+            "adminUrgeOverdue"
     );
 
     private AiToolRegistry() {

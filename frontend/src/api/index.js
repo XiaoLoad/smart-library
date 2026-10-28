@@ -88,8 +88,10 @@ export const aiApi = {
   createConversation: () => post('/ai/conversation/create'),
   deleteConversation: (id) => service.delete(`/ai/conversation/${id}`),
   // 确认执行写操作：回传令牌与工具名，参数由服务端保存，客户端无法篡改；
-  // conversationId 供服务端二次校验会话归属（不传时服务端跳过该校验）
-  confirmWrite: (token, tool, conversationId) => post('/ai/confirm', { token, tool, conversationId }),
+  // conversationId 供服务端二次校验会话归属（不传时服务端跳过该校验）；
+  // alwaysAllow=true 同时勾选「本会话始终允许该操作」，确认成功后同类写操作不再弹卡
+  confirmWrite: (token, tool, conversationId, alwaysAllow) =>
+    post('/ai/confirm', { token, tool, conversationId, alwaysAllow }),
   // 批量授权确认（batch 档位）：只回传批次令牌，服务端按保存的批次顺序逐项执行
   confirmBatchWrite: (token, conversationId) => post('/ai/confirm/batch', { token, conversationId }),
   // 设置会话写操作权限档位（confirm=逐笔确认 / batch=批量授权 / auto=自动执行，auto 仅管理员）

@@ -105,7 +105,8 @@ public class AiController {
      */
     @PostMapping(value = "/chat", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter chat(@Valid @RequestBody AiChatRequest req) {
-        return aiService.chat(req.getConversationId(), req.getContent());
+        return aiService.chat(req.getConversationId(), req.getContent(),
+                Boolean.TRUE.equals(req.getContinuation()));
     }
 
     /**
@@ -120,7 +121,8 @@ public class AiController {
     @PostMapping("/confirm")
     public Result<Map<String, Object>> confirm(@Valid @RequestBody AiConfirmRequest req) {
         CurrentUser cu = CurrentUser.get();
-        Map<String, Object> result = aiService.confirmWrite(req.getToken(), cu.getUserId(), req.getTool(), req.getConversationId());
+        Map<String, Object> result = aiService.confirmWrite(req.getToken(), cu.getUserId(), req.getTool(),
+                req.getConversationId(), Boolean.TRUE.equals(req.getAlwaysAllow()));
         return Result.success(result);
     }
 

@@ -1,20 +1,19 @@
 package com.library.dto;
 
 import jakarta.validation.constraints.NotBlank;
+import lombok.Data;
 
 /**
- * 写操作授权确认请求。
- * <p>
- * <b>只传令牌，不传参数</b>：参数保存在服务端（见 {@code AiConfirmService}），
- * 客户端无法篡改要执行的写操作内容——这是授权机制的关键安全设计。
+ * AI 确认请求
  */
+@Data
 public class AiConfirmRequest {
 
-    /** 授权令牌（由 confirm 事件下发） */
+    /** 授权令牌（服务端签发，客户端只回传它） */
     @NotBlank(message = "缺少授权令牌")
     private String token;
 
-    /** 待执行的工具名（用于校验令牌与目标操作是否匹配） */
+    /** 期望执行的工具名（与令牌签发时比对，防拿 A 工具令牌执行 B 工具） */
     @NotBlank(message = "缺少操作标识")
     private String tool;
 
@@ -24,27 +23,9 @@ public class AiConfirmRequest {
      */
     private Long conversationId;
 
-    public String getToken() {
-        return token;
-    }
-
-    public void setToken(String token) {
-        this.token = token;
-    }
-
-    public String getTool() {
-        return tool;
-    }
-
-    public void setTool(String tool) {
-        this.tool = tool;
-    }
-
-    public Long getConversationId() {
-        return conversationId;
-    }
-
-    public void setConversationId(Long conversationId) {
-        this.conversationId = conversationId;
-    }
+    /**
+     * M8：是否同时勾选「本会话始终允许该操作」。
+     * true 时确认成功后把该工具登记进会话白名单，后续同类写操作不再弹卡。
+     */
+    private Boolean alwaysAllow;
 }
