@@ -1,5 +1,7 @@
 <template>
-  <div class="ai-float-root" v-if="!permanentlyDisabled">
+  <!-- AI 助手页/永久关闭时整体不渲染：disabled 直接驱动模板，
+       避免仅靠 watch 收起时「刷新落在 /ai 页」初始状态不触发而漏藏 -->
+  <div class="ai-float-root" v-if="!permanentlyDisabled && !onAiPage">
     <!-- 会话模态框（变形目标）：v-show 而非 v-if，关闭后 SSE 流继续在后台输出 -->
     <div ref="modalRef" class="ai-float-modal" :class="{ generating }" v-show="modalMounted">
       <div class="modal-head" ref="headRef">
@@ -150,11 +152,13 @@ const clampPos = (x, y) => {
 }
 
 const applyPos = (x, y) => {
+  const el = ballWrapRef.value
+  if (!el) return // /ai 页模板被 v-if 卸载，球容器不存在
   const p = clampPos(x, y)
-  ballWrapRef.value.style.left = p.x + 'px'
-  ballWrapRef.value.style.top = p.y + 'px'
-  ballWrapRef.value.style.right = 'auto'
-  ballWrapRef.value.style.bottom = 'auto'
+  el.style.left = p.x + 'px'
+  el.style.top = p.y + 'px'
+  el.style.right = 'auto'
+  el.style.bottom = 'auto'
 }
 
 const savePos = () => {
@@ -435,20 +439,56 @@ onMounted(() => {
   if (!permanentlyDisabled.value) {
     restorePos()
   }
-  ballRef.value.addEventListener('pointerdown', onBallPointerDown)
-  ballRef.value.addEventListener('pointermove', onBallPointerMove)
-  ballRef.value.addEventListener('pointerup', onBallPointerUp)
-  ballRef.value.addEventListener('pointercancel', onBallPointerUp)
-  ballRef.value.addEventListener('mouseenter', onBallEnter)
-  headRef.value.addEventListener('pointerdown', onHeadDown)
-  headRef.value.addEventListener('pointermove', onHeadMove)
-  headRef.value.addEventListener('pointerup', onHeadUp)
-  headRef.value.addEventListener('pointercancel', onHeadUp)
+  // /ai 页模板被 v-if 卸载，球/标题栏节点不存在：事件绑定守卫，
+  // 返回非 AI 页时组件仍存活（App 根挂载），但节点由 v-if 控制延迟出现
+  const ball = ballRef.value
+  if (ball) {
+    ball.addEventListener('pointerdown', onBallPointerDown)
+    ball.addEventListener('pointermove', onBallPointerMove)
+    ball.addEventListener('pointerup', onBallPointerUp)
+    ball.addEventListener('pointercancel', onBallPointerUp)
+    ball.addEventListener('mouseenter', onBallEnter)
+  }
+  const head = headRef.value
+  if (head) {
+    head.addEventListener('pointerdown', onHeadDown)
+    head.addEventListener('pointermove', onHeadMove)
+    head.addEventListener('pointerup', onHeadUp)
+    head.addEventListener('pointercancel', onHeadUp)
+  }
   window.addEventListener('resize', onResize)
   // 全局点击关闭右键菜单（contextmenu 事件本身带 preventDefault，不触发 click）
   window.addEventListener('click', onGlobalClick)
   window.addEventListener('blur', onGlobalClick)
 })
+
+/* ---------- 节点（重）出现后绑定事件 ----------
+ * /ai 页 v-if 卸载球节点；onMounted 时若已在 /ai 也拿不到引用。
+ * 每次从 /ai 导航出来，v-if 重建全新节点，必须重绑事件——旧节点上的
+ * 监听随旧节点丢弃，防重标记反而会导致新节点无监听（球无法拖拽） */
+const bindBallEvents = () => {
+  const ball = ballRef.value
+  const head = headRef.value
+  if (!ball || !head) return
+  ball.addEventListener('pointerdown', onBallPointerDown)
+  ball.addEventListener('pointermove', onBallPointerMove)
+  ball.addEventListener('pointerup', onBallPointerUp)
+  ball.addEventListener('pointercancel', onBallPointerUp)
+  ball.addEventListener('mouseenter', onBallEnter)
+  head.addEventListener('pointerdown', onHeadDown)
+  head.addEventListener('pointermove', onHeadMove)
+  head.addEventListener('pointerup', onHeadUp)
+  head.addEventListener('pointercancel', onHeadUp)
+}
+watch(onAiPage, (onAi) => {
+  if (!onAi) nextTick(() => {
+    // 节点重新渲染后既绑事件也恢复位置：
+    // 落在 /ai 页刷新时 onMounted 里 restorePos 因节点不存在而空转，CSS 默认
+    // left/top 为 0，不补恢复的话球会钉在左上角
+    bindBallEvents()
+    restorePos()
+  })
+}, { immediate: true })
 
 const onResize = () => {
   if (!modalMounted.value || animating) return

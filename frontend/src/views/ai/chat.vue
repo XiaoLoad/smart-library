@@ -480,7 +480,6 @@ import MarkdownIt from 'markdown-it'
 import hljs from 'highlight.js'
 import 'highlight.js/styles/github.css'
 import { aiApi } from '@/api'
-import { useAiSearchStore } from '@/stores/aiSearch'
 import { useUserStore } from '@/stores/user'
 import ConversationNav from '@/components/ConversationNav.vue'
 import AppIcon from '@/components/AppIcon.vue'
@@ -774,12 +773,10 @@ const switchPermMode = async (mode) => {
   }
 }
 
-// AI 检索联动：与悬浮球面板一致，queryBooks/queryHotBooks 结果广播到 aiSearchStore，
-// 图书检索页 watch 到后切换为「AI 检索结果」视图
-const aiSearchStore = useAiSearchStore()
+// AI 检索联动：已收窄到悬浮球面板——AI 助手页自身有完整检索展示（生成式卡片），
+// 查询结果只留在对话内，不再写入 aiSearchStore 跨页投递
 const lastUserText = ref('')
-// 检索联动候补：本轮工具返回的图书快照先暂存，流结束（done）且本轮无写操作时才广播——
-// 借书等写流程中模型也会先调 queryBooks 拿书名，那是流程中间步骤，不应联动图书页筛选
+// 检索联动候补（保留结构以对齐悬浮球面板的 done 处理；助手页不广播，done 时直接清空）
 let pendingAiSearch = null
 // 本轮是否出现写操作授权（confirm 事件，仅写操作会触发门禁）——出现则本轮不广播检索联动
 let turnHasWrite = false
@@ -1571,13 +1568,9 @@ const sendInternal = async (content, { continuation }) => {
         scrollToBottom()
       } else if (event === 'done') {
         thinking.value = false
-        // 流结束：本轮既无写操作（confirm 事件）也无写意图（用户原话）才广播检索候补到馆藏图书页
-        if (pendingAiSearch) {
-          if (!turnHasWrite && !turnWriteIntent) {
-            aiSearchStore.setResult(pendingAiSearch.query, pendingAiSearch.items, pendingAiSearch.total)
-          }
-          pendingAiSearch = null
-        }
+        // 检索联动广播已收窄到悬浮球面板（仅馆藏图书页时写入 aiSearchStore）；
+        // AI 助手页自身有完整检索展示，queryBooks 结果只留在对话内，不跨页投递
+        pendingAiSearch = null
         turnHasWrite = false
         turnWriteIntent = false
         if (assistantMsg) {

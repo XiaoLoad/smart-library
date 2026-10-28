@@ -257,6 +257,7 @@
  * 挂载后懒初始化（init），流式期间组件被 v-show 隐藏不销毁——后台继续输出。
  */
 import { ref, reactive, computed, nextTick, onBeforeUnmount } from 'vue'
+import { useRoute } from 'vue-router'
 import { Loading, Check, Close, Lock, Warning, DataBoard } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import MarkdownIt from 'markdown-it'
@@ -269,7 +270,10 @@ import AiGenUi from '@/components/ai/AiGenUi.vue'
 
 const emit = defineEmits(['state-change'])
 
-// AI 检索联动：queryBooks 等工具返回的图书列表写入该 store，图书检索页 watch 联动
+const route = useRoute()
+
+// AI 检索联动：queryBooks 等工具返回的图书列表写入该 store，图书检索页 watch 联动。
+// 广播有页面条件收窄（见 done 回调）：仅当前在馆藏图书页时写入
 const aiSearchStore = useAiSearchStore()
 
 const md = new MarkdownIt({ html: false, breaks: true, linkify: true })
@@ -1025,9 +1029,12 @@ const sendInternal = async (content, { continuation }) => {
         stopReasonTimer(msg)
         msg._reasonSegOpen = false
         msg.reasoningStreaming = false
-        // 流结束：本轮既无写操作（confirm 事件）也无写意图（用户原话）才广播检索候补到馆藏图书页
+        // 流结束：检索联动广播（双重条件收窄，防止跨页污染馆藏图书页筛选）：
+        // ① 页面条件——当前必须在馆藏图书页（/book），其他页面聊查书结果只留在对话内；
+        // ② 内容条件——本轮既无写操作（confirm 事件）也无写意图（用户原话），借书前的
+        //    queryBooks 只是流程中间步骤，不广播
         if (pendingAiSearch) {
-          if (!turnHasWrite && !turnWriteIntent) {
+          if (route.path.startsWith('/book') && !turnHasWrite && !turnWriteIntent) {
             aiSearchStore.setResult(pendingAiSearch.query, pendingAiSearch.items, pendingAiSearch.total)
           }
           pendingAiSearch = null
