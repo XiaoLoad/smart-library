@@ -18,5 +18,7 @@ public interface AiMessageMapper {
 
     void insert(AiMessage m);
 
+    void updateToolSnapshots(@Param("id") Long id, @Param("toolSnapshots") String toolSnapshots);
+
     void deleteByConversationId(@Param("conversationId") Long conversationId);
 }

@@ -38,6 +38,10 @@
         VALUES (#{conversationId}, #{role}, #{content}, #{toolSummary}, #{toolSnapshots}, #{createTime})
     </insert>
 
+    <update id="updateToolSnapshots">
+        UPDATE ai_messages SET tool_snapshots = #{toolSnapshots} WHERE id = #{id}
+    </update>
+
     <delete id="deleteByConversationId">
         DELETE FROM ai_messages WHERE conversation_id = #{conversationId}
     </delete>

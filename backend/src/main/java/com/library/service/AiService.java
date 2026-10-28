@@ -245,6 +245,12 @@ public class AiService {
                 （无明确主题偏好时调 queryHotBooks 取热门排行；有明确分类/主题时先 queryCategories 再 queryBooks），
                 禁止凭空编造书单、禁止照搬通用书店畅销榜或训练数据里的书名。
                 理由：推荐也属于馆藏事实查询，只有工具返回的数据才能驱动前端「AI 检索结果」视图与真实库存展示。
+
+            12. 回答正文只允许最终答复，禁止输出思考/推理过程：你的内部规划、核对步骤、自我提醒
+                （无论中文还是英文，如 "I'll first verify..." / "Let me check..." / "First, ... then ..."）
+                一律不得出现在回答正文里——用户只看得到你的正文，推理过程属于内部活动。
+                用户与你的对话语言是中文，回答正文必须使用中文。
+                理由：正文里混入推理旁白（尤其英文）会被用户当成回答的一部分，严重干扰阅读且显得失控。
             """;
 
     /**
@@ -1111,6 +1117,64 @@ public class AiService {
         return count;
     }
 
+    /**
+     * M9：把授权卡的决策态存入会话最新一条助手消息的快照通道，
+     * 历史消息据此重建只读授权卡。pending 态不落库（刷新即失效是安全语义），
+     * 仅记录已成事实的决策：confirmed / cancelled / expired / failed。
+     * <p>
+     * 追加到最后一条助手消息而非新建消息：卡片属于产生它的那轮回复的上下文。
+     * 找不到助手消息（如首条消息授权且流未落库）时静默放弃——决策结果仍有
+     * 系统回执文字记录，不丢事实。
+     */
+    public void recordCardDecision(Long conversationId, Long userId, String decision,
+                                   String tool, String title, List<Map<String, String>> rows,
+                                   boolean batch) {
+        // 会话归属校验：只能给自己的会话记录
+        AiConversation conv = conversationMapper.selectById(conversationId);
+        if (conv == null || !conv.getUserId().equals(userId)) {
+            return;
+        }
+        List<com.library.entity.AiMessage> history = messageMapper.selectByConversationId(conversationId);
+        com.library.entity.AiMessage target = null;
+        for (int i = history.size() - 1; i >= 0; i--) {
+            if ("assistant".equalsIgnoreCase(history.get(i).getRole())) {
+                target = history.get(i);
+                break;
+            }
+        }
+        if (target == null) {
+            return;
+        }
+        try {
+            List<Map<String, Object>> snapshots = new ArrayList<>();
+            if (target.getToolSnapshots() != null && !target.getToolSnapshots().isBlank()) {
+                List<?> existing = objectMapper.readValue(target.getToolSnapshots(), List.class);
+                for (Object o : existing) {
+                    if (o instanceof Map<?, ?> m) {
+                        @SuppressWarnings("unchecked")
+                        Map<String, Object> copy = new java.util.LinkedHashMap<>((Map<String, Object>) m);
+                        snapshots.add(copy);
+                    }
+                }
+            }
+            Map<String, Object> rec = new java.util.LinkedHashMap<>();
+            rec.put("kind", "card_decision");
+            rec.put("state", decision);
+            rec.put("tool", tool);
+            rec.put("title", title == null ? "" : title);
+            rec.put("rows", rows == null ? List.of() : rows);
+            rec.put("batch", batch);
+            rec.put("createTime", LocalDateTime.now().toString());
+            snapshots.add(rec);
+            messageMapper.updateToolSnapshots(target.getId(),
+                    objectMapper.writeValueAsString(snapshots));
+            evictMemory(conversationId);
+        } catch (Exception e) {
+            // 展示层记录失败不影响主流程
+            log.warn("[AI] 授权卡决策记录失败 conversationId={}: {}", conversationId, e.getMessage());
+        }
+    }
+
     /** 按工具名分发已确认的写操作执行（批量确认与单笔确认共用） */
     private Object executeConfirmed(Long userId, String toolName, Map<String, Object> args) {
         return switch (toolName) {
@@ -1389,7 +1453,34 @@ public class AiService {
         s = lineOut.toString();
         // 4. 压缩 3+ 连续换行为 2 个，去掉首尾空白
         s = s.replaceAll("\\n{3,}", "\n\n").trim();
+        // 5. M9 推理旁白剔除：部分模型（thinkingEnabled=false 的 DeepSeek 等）把内部规划
+        //    以英文句子混在正文开头（"I'll first verify... processing the returns.两条记录都..."）。
+        //    仅处理「正文以英文开头」的情况：剥掉开头至第一个 CJK 字符之前的英文推理段。
+        //    正文以中文开头时不做任何处理——中英混排的正常回答（如书名 ISBN）不受影响。
+        if (!s.isEmpty() && isAsciiLetter(s.charAt(0))) {
+            int cjk = firstCjkIndex(s);
+            if (cjk > 0) {
+                s = s.substring(cjk).trim();
+            }
+        }
         return s;
+    }
+
+    /** ASCII 字母判定（推理旁白剔除的触发条件） */
+    private boolean isAsciiLetter(char c) {
+        return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
+    }
+
+    /** 第一个 CJK 字符（含中文标点）的下标；无则 -1 */
+    private int firstCjkIndex(String s) {
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if ((c >= 0x4E00 && c <= 0x9FFF) || (c >= 0x3000 && c <= 0x303F)
+                    || (c >= 0xFF00 && c <= 0xFFEF)) {
+                return i;
+            }
+        }
+        return -1;
     }
 
     /** 判断围栏代码块内容是否为工具调用代码（工具名 / 函数调用 JSON 特征） */

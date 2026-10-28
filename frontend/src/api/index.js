@@ -94,6 +94,9 @@ export const aiApi = {
     post('/ai/confirm', { token, tool, conversationId, alwaysAllow }),
   // 批量授权确认（batch 档位）：只回传批次令牌，服务端按保存的批次顺序逐项执行
   confirmBatchWrite: (token, conversationId) => post('/ai/confirm/batch', { token, conversationId }),
+  // M9 授权卡决策回执：把已成事实的决策态（confirmed/cancelled/expired/failed）
+  // 存入消息快照通道，历史消息据此重建只读授权卡。展示层记录，不执行写操作
+  recordCardDecision: (payload) => post('/ai/card-decision', payload),
   // 设置会话写操作权限档位（confirm=逐笔确认 / batch=批量授权 / auto=自动执行，auto 仅管理员）
   setPermissionMode: (id, mode) => post(`/ai/conversation/${id}/permission-mode?mode=${encodeURIComponent(mode)}`),
 }

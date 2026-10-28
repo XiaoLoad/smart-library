@@ -3,6 +3,7 @@ package com.library.controller;
 import com.library.common.Result;
 import com.library.common.exception.BusinessException;
 import com.library.dto.AiBatchConfirmRequest;
+import com.library.dto.AiCardDecisionRequest;
 import com.library.dto.AiChatRequest;
 import com.library.dto.AiConfirmRequest;
 import com.library.entity.AiConversation;
@@ -136,6 +137,19 @@ public class AiController {
     public Result<Map<String, Object>> confirmBatch(@Valid @RequestBody AiBatchConfirmRequest req) {
         CurrentUser cu = CurrentUser.get();
         return Result.success(aiService.confirmBatchWrite(req.getToken(), cu.getUserId(), req.getConversationId()));
+    }
+
+    /**
+     * 授权卡决策回执（M9）：前端在用户对授权卡做出决策（确认/取消/过期/失败）后回传，
+     * 服务端把决策态存入消息快照通道，历史消息据此重建只读授权卡。
+     * 展示层记录：不执行任何写操作，写操作只能由 /ai/confirm 按令牌执行。
+     */
+    @PostMapping("/card-decision")
+    public Result<Void> recordCardDecision(@Valid @RequestBody AiCardDecisionRequest req) {
+        CurrentUser cu = CurrentUser.get();
+        aiService.recordCardDecision(req.getConversationId(), cu.getUserId(), req.getDecision(),
+                req.getTool(), req.getTitle(), req.getRows(), Boolean.TRUE.equals(req.getBatch()));
+        return Result.success("已记录", null);
     }
 
     /**

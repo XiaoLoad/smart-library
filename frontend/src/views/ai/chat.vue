@@ -291,6 +291,30 @@
                   </div>
                 </div>
 
+                <!-- M9 历史授权卡（只读）：决策态落库后，刷新/切会话回来仍能看到
+                     当时的授权卡与决策结果；无按钮，纯展示 -->
+                <div
+                  v-for="(hc, hi) in m.historyCards || []"
+                  :key="'hc-' + hi"
+                  class="confirm-card history"
+                  :class="hc.state"
+                >
+                  <div class="confirm-head">
+                    <span class="confirm-eyebrow">
+                      <el-icon><Lock /></el-icon>
+                      <span>{{ historyCardEyebrow(hc) }}</span>
+                    </span>
+                    <span class="confirm-ttl">{{ formatTime(hc.createTime) }}</span>
+                  </div>
+                  <div class="confirm-title">{{ hc.title }}</div>
+                  <div v-if="hc.rows && hc.rows.length" class="confirm-rows">
+                    <div v-for="(r, ri) in hc.rows" :key="ri" class="confirm-row">
+                      <span class="confirm-k">{{ r.key }}</span>
+                      <span class="confirm-v mono">{{ r.value }}</span>
+                    </div>
+                  </div>
+                </div>
+
                 <!-- 参考资料：本轮注入的知识库来源。
                      后端 rag 事件在调用 LLM 之前推送（早于 delta），故参考资料条先出、正文随后流式出现；
                      点击药丸展开片段摘要（后端只回传截断摘要，不落库，历史消息无此块） -->
@@ -379,7 +403,7 @@
              切换即时生效并持久到会话，读者端不显示 auto 选项 -->
         <div v-if="currentConvId" class="perm-mode-bar">
           <span class="perm-label">写操作权限</span>
-          <div class="perm-seg">
+          <div class="perm-seg" :class="{ danger: permMode === 'auto' }">
             <button
               v-for="opt in permOptions"
               :key="opt.value"
@@ -390,6 +414,11 @@
               @click="switchPermMode(opt.value)"
             >{{ opt.label }}</button>
           </div>
+          <!-- auto 档持续警示（ZCode 同款思路：高权限模式下风险提示常驻） -->
+          <span v-if="permMode === 'auto'" class="perm-warn">
+            <el-icon><Warning /></el-icon>
+            自动执行中：写操作无需确认直接生效
+          </span>
         </div>
         <div class="composer-box" :class="{ active: input }">
           <el-input
@@ -613,6 +642,8 @@ const enrichMsg = (m) => ({
   html: renderMarkdown(m.content),
   // 工具快照落库后历史消息可重建内联生成式卡片；快照是查询时点数据，历史卡片带时点角标
   toolEvents: parseStoredSnapshots(m.toolSnapshots),
+  // M9：历史授权卡（快照通道里的 card_decision 记录）重建为只读卡片
+  historyCards: parseStoredCardDecisions(m.toolSnapshots),
   // 历史消息不持久化思维链（与工具中间态一致），仅本轮流式生成时展示
   reasoningSegments: [],
   reasoningOpen: false,
@@ -623,6 +654,30 @@ const enrichMsg = (m) => ({
   // M4：thought 旁白不落库（与思维链一致），历史消息无时间线
   timeline: [],
 })
+
+/**
+ * M9：从快照通道解析授权卡决策记录为只读历史卡片。
+ * 与查询快照（toolEvents）同通道但 kind=card_decision，互不混淆。
+ */
+const parseStoredCardDecisions = (snapshotsJson) => {
+  if (!snapshotsJson || typeof snapshotsJson !== 'string') return []
+  try {
+    const arr = JSON.parse(snapshotsJson)
+    if (!Array.isArray(arr)) return []
+    return arr
+      .filter((rec) => rec && rec.kind === 'card_decision')
+      .map((rec) => ({
+        tool: rec.tool || '',
+        title: rec.title || '',
+        rows: Array.isArray(rec.rows) ? rec.rows : [],
+        state: rec.state || 'expired',
+        batch: rec.batch === true,
+        createTime: rec.createTime || '',
+      }))
+  } catch {
+    return []
+  }
+}
 
 /**
  * 解析落库的工具快照数组为 toolEvents 形态（供内联卡片渲染）。
@@ -939,6 +994,7 @@ const onConfirmWrite = async (card) => {
     const res = await aiApi.confirmWrite(card.token, card.tool, card.conversationId, card.alwaysAllow === true)
     card.state = 'confirmed'
     card.result = res
+    reportCardDecision(card, 'confirmed')
     // 依据工具真实返回给出简短回执；完整回答交由模型在下一轮生成
     const tip = res?.message || '操作已完成'
     appendAssistantText(tip)
@@ -951,6 +1007,7 @@ const onConfirmWrite = async (card) => {
     const tokenInvalid = /失效|过期|已被处理|重新发起/.test(message)
     card.state = tokenInvalid ? 'expired' : 'failed'
     card.error = message
+    reportCardDecision(card, tokenInvalid ? 'expired' : 'failed')
   }
 }
 
@@ -959,6 +1016,7 @@ const onCancelWrite = (card) => {
   if (!card || card.state !== 'pending') return
   stopConfirmCountdown(card)
   card.state = 'cancelled'
+  reportCardDecision(card, 'cancelled')
 }
 
 /* —— M7 批量授权卡 —— */
@@ -972,6 +1030,18 @@ const batchEyebrow = (card) => {
   return '批量授权失效'
 }
 
+// M9 历史授权卡（只读）的眉标
+const historyCardEyebrow = (hc) => {
+  const prefix = hc.batch ? '批量授权' : '授权'
+  const stateText = {
+    confirmed: '已确认',
+    cancelled: '已取消',
+    expired: '已过期',
+    failed: '办理失败',
+  }[hc.state] || hc.state
+  return `${prefix} · ${stateText}`
+}
+
 // 全部确认：只回传批次令牌，服务端按保存的批次顺序逐项执行
 const onConfirmBatch = async (card) => {
   if (!card || card.state !== 'pending') return
@@ -981,6 +1051,7 @@ const onConfirmBatch = async (card) => {
     const res = await aiApi.confirmBatchWrite(card.token, card.conversationId)
     card.state = 'confirmed'
     card.result = res
+    reportCardDecision(card, 'confirmed', true)
     appendAssistantText(res?.message || '批量办理完成')
     // M8 确认续跑：批量办理完成后自动发起下一轮，模型汇总/继续剩余步骤
     continueAfterConfirm(`批量办理 ${res?.successCount ?? 0} 项成功`)
@@ -989,6 +1060,7 @@ const onConfirmBatch = async (card) => {
     const tokenInvalid = /失效|过期|已被处理|重新发起/.test(message)
     card.state = tokenInvalid ? 'expired' : 'failed'
     card.error = message
+    reportCardDecision(card, tokenInvalid ? 'expired' : 'failed', true)
   }
 }
 
@@ -997,6 +1069,7 @@ const onCancelBatch = (card) => {
   if (!card || card.state !== 'pending') return
   stopConfirmCountdown(card)
   card.state = 'cancelled'
+  reportCardDecision(card, 'cancelled', true)
 }
 
 // 授权过期：卡片灰态保留，说明发生过什么而非凭空消失
@@ -1005,6 +1078,8 @@ const onConfirmExpired = (card) => {
   stopConfirmCountdown(card)
   card.state = 'expired'
   card.error = '授权已过期，请重新发起该操作'
+  // batch 卡无 tool 字段（批次），以 tool 空串上报；batch 标记由卡片自身携带
+  reportCardDecision(card, 'expired', !!card.batchFlag)
 }
 
 // 授权卡倒计时：本地每秒递减 remain，归零触发 onConfirmExpired（服务端 TTL 的前端镜像）
@@ -1021,6 +1096,19 @@ const stopConfirmCountdown = (card) => {
     clearInterval(card._timer)
     card._timer = null
   }
+}
+
+/** M9 上报授权卡决策态（展示层记录，失败不影响主流程） */
+const reportCardDecision = (card, decision, batch = false) => {
+  if (!card || !currentConvId.value) return
+  aiApi.recordCardDecision({
+    conversationId: currentConvId.value,
+    decision,
+    tool: card.tool || '',
+    title: card.title || '',
+    rows: Array.isArray(card.rows) ? card.rows : [],
+    batch,
+  }).catch(() => { /* 展示层记录失败不影响主流程 */ })
 }
 
 /** 在当前助手气泡追加一句文本 */
@@ -1431,6 +1519,7 @@ const sendInternal = async (content, { continuation }) => {
             rows: Array.isArray(info.rows) ? info.rows : [],
             ttlSeconds: info.ttlSeconds || 120,
             conversationId: convId,
+            batchFlag: true,
             // pending: 等待确认 / submitting / confirmed / cancelled / expired / failed
             state: 'pending',
             result: null,
@@ -2547,6 +2636,18 @@ onMounted(loadConversations)
   cursor: pointer;
 }
 
+/* M9 历史授权卡（只读）：灰调、无交互 */
+.confirm-card.history {
+  opacity: 0.75;
+  pointer-events: none;
+}
+.confirm-card.history .confirm-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 /* M7 权限档位选择条 */
 .perm-mode-bar {
   display: flex;
@@ -2590,6 +2691,19 @@ onMounted(loadConversations)
 .perm-opt:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+/* auto 档警示：分段器描红 + 常驻风险提示 */
+.perm-seg.danger {
+  border-color: var(--color-danger, #a85a4a);
+  box-shadow: 0 0 0 1px var(--color-danger, #a85a4a);
+}
+.perm-warn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--fs-caption, 12px);
+  color: var(--color-danger, #a85a4a);
+  font-weight: 600;
 }
 
 /* M7 批量授权卡逐项结果 */
