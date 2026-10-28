@@ -175,58 +175,77 @@
                 </div>
 
                 <!-- 写操作授权卡：AI 发起的写操作被代码级门禁拦截，等待用户授权。
-                     形态刻意区别于工具卡片（卡片 vs pill），避免被当成一次普通查询结果 -->
-                <div v-if="m.confirmCard" class="confirm-card" :class="m.confirmCard.state">
+                     形态刻意区别于工具卡片（卡片 vs pill），避免被当成一次普通查询结果。
+                     M10：confirmCards 为数组——同一轮模型可连续发起多个写操作，
+                     每个写操作一张卡，互不覆盖 -->
+                <div
+                  v-for="(card, ci) in m.confirmCards || []"
+                  :key="'cc-' + ci"
+                  class="confirm-card"
+                  :class="card.state"
+                >
                   <div class="confirm-head">
                     <span class="confirm-eyebrow">
                       <el-icon><Lock /></el-icon>
-                      <span>{{ confirmEyebrow(m.confirmCard.state) }}</span>
+                      <span>{{ confirmEyebrow(card.state) }}</span>
                     </span>
                   </div>
-                  <div class="confirm-title">{{ m.confirmCard.title }}</div>
-                  <div v-if="m.confirmCard.rows && m.confirmCard.rows.length" class="confirm-rows">
-                    <div v-for="(r, ri) in m.confirmCard.rows" :key="ri" class="confirm-row">
+                  <div class="confirm-title">{{ card.title }}</div>
+                  <div v-if="card.rows && card.rows.length" class="confirm-rows">
+                    <div v-for="(r, ri) in card.rows" :key="ri" class="confirm-row">
                       <span class="confirm-k">{{ r.key }}</span>
                       <span class="confirm-v mono">{{ r.value }}</span>
                     </div>
                   </div>
-                  <div v-if="m.confirmCard.state === 'pending'" class="confirm-actions">
+                  <div v-if="card.state === 'pending'" class="confirm-actions">
                     <label class="confirm-allow" title="勾选后本会话内同类写操作不再弹卡，直接执行">
                       <input
-                        v-model="m.confirmCard.alwaysAllow"
+                        v-model="card.alwaysAllow"
                         type="checkbox"
                         class="confirm-allow-box"
                       />
                       <span>本会话始终允许此类操作</span>
                     </label>
-                    <button class="confirm-btn primary" @click="onConfirmWrite(m.confirmCard)">
+                    <button class="confirm-btn primary" @click="onConfirmWrite(card)">
                       确认办理
                     </button>
-                    <button class="confirm-btn" @click="onCancelWrite(m.confirmCard)">取消</button>
-                    <span class="confirm-ttl">{{ m.confirmCard.remain ?? m.confirmCard.ttlSeconds }} 秒内有效</span>
+                    <button class="confirm-btn" @click="onCancelWrite(card)">取消</button>
+                    <span class="confirm-ttl">{{ card.remain ?? card.ttlSeconds }} 秒内有效</span>
                   </div>
-                  <div v-else-if="m.confirmCard.state === 'submitting'" class="confirm-actions">
+                  <div v-else-if="card.state === 'submitting'" class="confirm-actions">
                     <span class="confirm-state">
                       <el-icon class="is-loading"><Loading /></el-icon>
                       <span>正在办理…</span>
                     </span>
                   </div>
-                  <div v-else-if="m.confirmCard.state === 'confirmed'" class="confirm-actions">
+                  <div v-else-if="card.state === 'confirmed'" class="confirm-actions confirm-batch-result">
                     <span class="confirm-state ok">
                       <el-icon><Check /></el-icon>
-                      <span>已确认并执行</span>
+                      <span>{{ card.result?.message || '已确认并执行' }}</span>
                     </span>
+                    <!-- M10：逐项结果内联在卡片上（批量办理/多记录操作），替代回执文字 -->
+                    <div v-if="card.result?.results?.length" class="batch-result-list">
+                      <div
+                        v-for="(r, ri) in card.result.results"
+                        :key="ri"
+                        class="batch-result-item"
+                        :class="{ fail: r.success === false }"
+                      >
+                        <span class="batch-result-title">{{ r.borrowNo || r.title || r.tool }}</span>
+                        <span class="batch-result-msg">{{ r.message || (r.success ? '成功' : '失败') }}</span>
+                      </div>
+                    </div>
                   </div>
-                  <div v-else-if="m.confirmCard.state === 'cancelled'" class="confirm-actions">
+                  <div v-else-if="card.state === 'cancelled'" class="confirm-actions">
                     <span class="confirm-state muted">
                       <el-icon><Close /></el-icon>
                       <span>已取消本次操作</span>
                     </span>
                   </div>
-                  <div v-else-if="m.confirmCard.state === 'expired'" class="confirm-actions">
+                  <div v-else-if="card.state === 'expired'" class="confirm-actions">
                     <span class="confirm-state err">
                       <el-icon><Warning /></el-icon>
-                      <span>{{ m.confirmCard.error || '授权已失效，请重新发起' }}</span>
+                      <span>{{ card.error || '授权已失效，请重新发起' }}</span>
                     </span>
                   </div>
                 </div>
@@ -420,12 +439,12 @@
             自动执行中：写操作无需确认直接生效
           </span>
         </div>
-        <div class="composer-box" :class="{ active: input }">
+        <div class="composer-box" :class="{ active: input, blocked: hasPendingConfirm }">
           <el-input
             v-model="input"
             type="textarea"
             :rows="2"
-            placeholder="输入您的问题，Enter 发送，Shift+Enter 换行"
+            :placeholder="hasPendingConfirm ? '有待确认的授权请求，请先在上方卡片上确认或取消' : '输入您的问题，Enter 发送，Shift+Enter 换行'"
             resize="none"
             class="composer-input"
             @keydown.enter.exact.prevent="send"
@@ -439,7 +458,11 @@
             <el-icon><VideoPause v-if="thinking" /><Promotion v-else /></el-icon>
           </button>
         </div>
-        <p class="composer-tip">AI 助手基于馆藏数据回答，内容仅供参考。</p>
+        <p v-if="hasPendingConfirm" class="composer-tip composer-blocked-tip">
+          <el-icon><Lock /></el-icon>
+          授权请求等待处理中：全部确认或取消后才能继续对话
+        </p>
+        <p v-else class="composer-tip">AI 助手基于馆藏数据回答，内容仅供参考。</p>
       </div>
     </main>
   </div>
@@ -889,7 +912,44 @@ const switchConv = async (id) => {
     messages.value = []
     hasMore.value = false
   }
+  // M10（对齐 ZCode pendingInteractions）：恢复该会话仍待确认的授权卡。
+  // 令牌在服务端有 TTL，恢复的卡带剩余有效期；过期则不再展示
+  await restorePendingCards(id)
   await scrollToBottomForce()
+}
+
+/** M10：从服务端拉取待确认授权请求，重建为可操作的 pending 卡（挂到最后一条助手消息上） */
+const restorePendingCards = async (convId) => {
+  try {
+    const list = await aiApi.pendingInteractions(convId)
+    if (!Array.isArray(list) || !list.length) return
+    let target = null
+    for (let i = messages.value.length - 1; i >= 0; i--) {
+      if (messages.value[i].role === 'assistant') { target = messages.value[i]; break }
+    }
+    if (!target) return
+    // M10：待确认卡可能有多张，全部恢复（confirmCards 数组）
+    if (!target.confirmCards) target.confirmCards = []
+    for (const p of list) {
+      const card = {
+        token: p.token,
+        tool: p.tool,
+        title: p.title || '写操作授权',
+        rows: Array.isArray(p.rows) ? p.rows : [],
+        ttlSeconds: p.ttlSeconds || 60,
+        conversationId: convId,
+        sessionAllow: true,
+        alwaysAllow: false,
+        state: 'pending',
+        result: null,
+        error: '',
+      }
+      target.confirmCards.push(card)
+      startConfirmCountdown(card)
+    }
+  } catch {
+    // 恢复失败静默：令牌本身有 TTL，过期自然失效
+  }
 }
 
 // 向上懒加载更早的历史消息：prepend 后按 DOM 高度差保持视口位置，避免跳动
@@ -990,16 +1050,16 @@ const onConfirmWrite = async (card) => {
   if (!card || card.state !== 'pending') return
   stopConfirmCountdown(card)
   card.state = 'submitting'
+  // 记录卡片所属消息（聚合续跑判断用）
+  const ownerMsg = messages.value.find((m) => (m.confirmCards || []).includes(card))
   try {
     const res = await aiApi.confirmWrite(card.token, card.tool, card.conversationId, card.alwaysAllow === true)
     card.state = 'confirmed'
     card.result = res
     reportCardDecision(card, 'confirmed')
-    // 依据工具真实返回给出简短回执；完整回答交由模型在下一轮生成
-    const tip = res?.message || '操作已完成'
-    appendAssistantText(tip)
-    // M8 确认续跑：回执展示后自动发起下一轮，模型继续任务链剩余步骤
-    continueAfterConfirm(card.tool)
+    // M10：结果直接内联在授权卡上（card.result），不再追加回执文字气泡
+    // M11：全部卡处理完才发起一次续跑
+    maybeContinueAfterAllResolved(ownerMsg, card.tool)
   } catch (e) {
     // 失败分类：令牌类失效（过期/已被处理/不匹配）→ expired；业务错误（如库存不足）→ failed。
     // 令牌一次性，失败后原卡无法重试，两种状态都只说明结果，不一律谎称过期
@@ -1008,6 +1068,8 @@ const onConfirmWrite = async (card) => {
     card.state = tokenInvalid ? 'expired' : 'failed'
     card.error = message
     reportCardDecision(card, tokenInvalid ? 'expired' : 'failed')
+    // M11：失效/失败也算已处理，同样走聚合判定
+    maybeContinueAfterAllResolved(ownerMsg, card.tool)
   }
 }
 
@@ -1017,6 +1079,9 @@ const onCancelWrite = (card) => {
   stopConfirmCountdown(card)
   card.state = 'cancelled'
   reportCardDecision(card, 'cancelled')
+  // M11：取消也是「已处理」，全部卡处理完触发聚合续跑
+  const ownerMsg = messages.value.find((m) => (m.confirmCards || []).includes(card))
+  maybeContinueAfterAllResolved(ownerMsg, card.tool || '')
 }
 
 /* —— M7 批量授权卡 —— */
@@ -1052,7 +1117,7 @@ const onConfirmBatch = async (card) => {
     card.state = 'confirmed'
     card.result = res
     reportCardDecision(card, 'confirmed', true)
-    appendAssistantText(res?.message || '批量办理完成')
+    // M10：批量结果内联在卡片上（confirm-batch-result 区块已有渲染），不再追加文字气泡
     // M8 确认续跑：批量办理完成后自动发起下一轮，模型汇总/继续剩余步骤
     continueAfterConfirm(`批量办理 ${res?.successCount ?? 0} 项成功`)
   } catch (e) {
@@ -1120,6 +1185,36 @@ const appendAssistantText = (text) => {
   scrollToBottom()
 }
 
+/**
+ * M10：把确认执行的写操作结果应用到对应授权卡（对齐 ZCode 的行内状态机）。
+ * tool_result SSE 事件路径：优先按 token 精确匹配（同轮可能有多张同名工具的卡）；
+ * 找不到卡片（SSE 通道空闲时的确认）时静默忽略——确认接口返回值已在本地更新过卡片。
+ */
+const applyToolResult = (info) => {
+  if (!info?.tool) return
+  const candidates = []
+  for (const m of messages.value) {
+    for (const c of m.confirmCards || []) {
+      if (c.tool === info.tool) candidates.push(c)
+    }
+    if (m.batchConfirmCard && (info.tool === 'adminCounterProcessBatch' || m.batchConfirmCard.tool === info.tool)) {
+      candidates.push(m.batchConfirmCard)
+    }
+  }
+  let card = info.token
+    ? candidates.find((c) => c.token === info.token)
+    : candidates.reverse().find((c) => c.state === 'submitting' || c.state === 'pending')
+  if (!card && info.token) {
+    // token 未命中（页面刷新后恢复的卡）退化为按状态匹配
+    card = candidates.reverse().find((c) => c.state === 'submitting' || c.state === 'pending')
+  }
+  if (!card) return
+  stopConfirmCountdown(card)
+  card.state = info.success === false ? 'failed' : 'confirmed'
+  card.result = info
+  if (info.success === false) card.error = info.message || '执行失败'
+}
+
 /** 停止生成：中断当前 SSE 请求 */
 const stopGenerate = () => {
   if (abortController) {
@@ -1129,8 +1224,24 @@ const stopGenerate = () => {
   thinking.value = false
 }
 
+/**
+ * M11（对齐 ZCode 输入区阻塞语义）：存在待确认授权卡时禁止发起新对话。
+ * 权限请求阻塞当前任务——全部卡片处理完（确认/取消/过期）才能继续说话，
+ * 避免「用户中途插话 → 卡片作废 → 模型重发卡」的堆积循环。
+ */
+const hasPendingConfirm = computed(() =>
+  messages.value.some((m) =>
+    (m.confirmCards || []).some((c) => c.state === 'pending') ||
+    m.batchConfirmCard?.state === 'pending'
+  )
+)
+
 const send = async () => {
   if (thinking.value) return
+  if (hasPendingConfirm.value) {
+    ElMessage.warning('请先处理上方待确认的授权请求（确认或取消）后再继续对话')
+    return
+  }
   if (!input.value.trim()) return
   const content = input.value.trim()
   input.value = ''
@@ -1140,11 +1251,24 @@ const send = async () => {
 /**
  * M8 确认续跑：授权确认成功后自动发起的下一轮对话。
  * 引导语以系统续跑身份发送（不显示用户气泡），模型从系统回执读到结果继续任务链。
+ * M11 聚合续跑：本轮全部授权卡处理完毕才调用（由 maybeContinueAfterAllResolved 判定）。
  */
 const continueAfterConfirm = async (toolSummary) => {
   if (thinking.value || !currentConvId.value) return
-  const guide = `授权已确认并执行完成（${toolSummary}）。请检查任务链中还有哪些步骤未完成，继续执行剩余步骤；若全部完成，请向用户汇总各项办理结果。`
+  const guide = `授权已确认并执行完成（${toolSummary}）。请先逐项核对历史回执：哪些项已真正成功、哪些项还没有成功回执；只为尚无成功回执的剩余项发起授权，已成功的项不要重复办理；若全部完成，请逐项列出单号汇总。`
   await sendInternal(guide, { continuation: true })
+}
+
+/**
+ * M11 聚合续跑：检查所属消息的授权卡是否已全部处理（非 pending），
+ * 全部处理完才发起一次续跑，汇总语带各卡结果（成功/取消）。
+ */
+const maybeContinueAfterAllResolved = (msg, toolSummary) => {
+  const cards = (msg?.confirmCards || []).filter((c) => c.tool)
+  if (!cards.length || cards.some((c) => c.state === 'pending')) return
+  const ok = cards.filter((c) => c.state === 'confirmed').length
+  const skipped = cards.length - ok
+  continueAfterConfirm(`${toolSummary}；本轮授权共 ${cards.length} 项：成功 ${ok} 项，跳过 ${skipped} 项`)
 }
 
 const sendInternal = async (content, { continuation }) => {
@@ -1215,8 +1339,8 @@ const sendInternal = async (content, { continuation }) => {
     // 降级标记（SSE degrade 事件）：工具循环超限时的优雅收尾提示
     degraded: false,
     degradeMessage: '',
-    // 写操作授权卡（SSE confirm 事件）
-    confirmCard: null,
+    // 写操作授权卡（SSE confirm 事件；M10 数组——同轮多个写操作各一张卡）
+    confirmCards: [],
     // M7 批量授权卡（SSE batch_confirm 事件，batch 档位）
     batchConfirmCard: null,
     // M4：Agent 决策时间线（thought 旁白节点），与工具卡片交替构成决策链视图
@@ -1479,7 +1603,9 @@ const sendInternal = async (content, { continuation }) => {
         msg.pending = false
         try {
           const info = JSON.parse(data)
-          msg.confirmCard = {
+          // M10：同轮可能有多个写操作，卡进数组互不覆盖
+          if (!msg.confirmCards) msg.confirmCards = []
+          msg.confirmCards.push({
             token: info.token,
             tool: info.tool,
             title: info.title || '写操作授权',
@@ -1494,12 +1620,12 @@ const sendInternal = async (content, { continuation }) => {
             state: 'pending',
             result: null,
             error: '',
-          }
+          })
           // M4：授权请求记入时间线，与旁白、工具卡片构成完整决策链
           msg.timeline.push({ kind: 'confirm', tool: info.tool || '' })
           msg.content = msg.content || '请确认上方授权请求后继续。'
           msg.html = renderMarkdown(msg.content)
-          startConfirmCountdown(msg.confirmCard)
+          startConfirmCountdown(msg.confirmCards[msg.confirmCards.length - 1])
           scrollToBottom()
         } catch {
           // 解析失败时不影响对话
@@ -1532,6 +1658,15 @@ const sendInternal = async (content, { continuation }) => {
           scrollToBottom()
         } catch {
           // 解析失败时不影响对话
+        }
+      } else if (event === 'tool_result') {
+        // M10：确认执行的写操作结果（对齐 ZCode：结果内联在授权卡上原地更新，
+        // 不再出现回执文字气泡）。推送来自确认接口的会话级通道
+        try {
+          const info = JSON.parse(data)
+          applyToolResult(info)
+        } catch {
+          // 忽略解析失败
         }
       } else if (event === 'degrade') {
         // 工具循环超限降级：非报错样式，提示已完成部分 + 建议继续追问
@@ -1626,7 +1761,7 @@ const formatTime = (t) => {
 onBeforeUnmount(() => {
   if (abortController) abortController.abort()
   messages.value.forEach((m) => {
-    stopConfirmCountdown(m.confirmCard)
+    for (const c of m.confirmCards || []) stopConfirmCountdown(c)
     stopConfirmCountdown(m.batchConfirmCard)
   })
 })
@@ -2784,6 +2919,16 @@ onMounted(loadConversations)
   font-size: var(--fs-caption);
   color: var(--color-text-tertiary);
   margin-top: var(--space-2);
+}
+
+/* M11：授权等待中的输入区阻塞态（ZCode 同款语义） */
+.composer-box.blocked { opacity: 0.55; }
+.composer-blocked-tip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  color: var(--color-warning, #a8843c);
 }
 
 /* 响应式 */

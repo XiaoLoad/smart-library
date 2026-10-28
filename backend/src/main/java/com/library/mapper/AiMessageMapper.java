@@ -14,6 +14,13 @@ public interface AiMessageMapper {
                                       @Param("beforeId") Long beforeId,
                                       @Param("pageSize") int pageSize);
 
+    // 前端历史分页：过滤 hidden 机制消息
+    List<AiMessage> selectVisibleHistoryPage(@Param("conversationId") Long conversationId,
+                                             @Param("beforeId") Long beforeId,
+                                             @Param("pageSize") int pageSize);
+
+    int countVisibleByConversationId(@Param("conversationId") Long conversationId);
+
     int countByConversationId(@Param("conversationId") Long conversationId);
 
     void insert(AiMessage m);

@@ -251,6 +251,12 @@ public class AiService {
                 一律不得出现在回答正文里——用户只看得到你的正文，推理过程属于内部活动。
                 用户与你的对话语言是中文，回答正文必须使用中文。
                 理由：正文里混入推理旁白（尤其英文）会被用户当成回答的一部分，严重干扰阅读且显得失控。
+            13. 授权卡的生命周期铁律：写操作只有收到「[系统回执] … 结果：成功」才算完成。
+                授权卡弹出（未确认）≠ 操作已完成；没有任何回执时，严禁向用户宣称任何写操作
+                「已办完/已成功」。若用户要求继续某任务，先核对历史回执确认哪些项真正成功，
+                只为「尚无成功回执的剩余项」发起授权；对已有成功回执的项绝不重弹授权卡。
+                汇总办理结果时必须逐项列出回执中的单号/状态，不允许凭推测总结。
+                理由：模型曾出现未调用工具就宣称三本书全部借出的幻觉——实际只成功两本，严重误导用户。
             """;
 
     /**
@@ -401,6 +407,10 @@ public class AiService {
         userMsg.setConversationId(conversationId);
         userMsg.setRole("user");
         userMsg.setContent(continuation ? CONTINUATION_PREFIX + content : content);
+        // M10：续跑引导语是内部机制消息，对 UI 隐藏（模型历史仍可见）
+        if (continuation) {
+            userMsg.setVisibility("hidden");
+        }
         userMsg.setCreateTime(LocalDateTime.now());
         messageMapper.insert(userMsg);
         evictMemory(conversationId);
@@ -431,6 +441,12 @@ public class AiService {
                 || "新对话".equals(conv.getTitle());
 
         SseEmitter emitter = new SseEmitter(SSE_TIMEOUT_MS);
+        // M10：登记会话级通道，确认执行后可按会话推送 tool_result（授权卡原地更新）
+        AiSseSessionRegistry.register(conversationId, emitter);
+        // 流结束/超时/出错时注销，避免推送到已关闭的通道
+        Runnable unregister = () -> AiSseSessionRegistry.unregister(conversationId, emitter);
+        emitter.onCompletion(unregister);
+        emitter.onTimeout(unregister);
 
         // <think> 标签兜底过滤器：部分本地模型/中转网关不返回 reasoning_content 字段，
         // 而是把思维链以 <think>...</think> 包裹在正文流中输出。此过滤器把标签内
@@ -934,9 +950,53 @@ public class AiService {
         // M8 确认续跑：把执行结果落库为助手摘要消息。前端确认成功后以 continuation
         // 标记发起下一轮对话，模型从历史读到本条结果后继续未完成的任务链
         if (conversationId != null) {
-            persistConfirmOutcome(conversationId, pc.toolName(), map);
+            persistConfirmOutcome(conversationId, pc.toolName(), map, pc.token());
         }
         return map;
+    }
+
+    /**
+     * M10：工具执行结果 SSE 推送。
+     * <p>
+     * 确认执行完成后把结果摘要以 tool_result 事件推给前端，前端据此把对应授权卡
+     * 原地更新为终态（success/error），结果内联在卡片上，替代旧的回执文字气泡。
+     * <p>
+     * 推送方式：确认接口不在 SSE 流内（独立 POST），SSE 通道此时可能已关闭，
+     * 因此走 AiSseSessionRegistry 的会话级通道；找不到活跃通道时静默放弃——
+     * 确认接口本身的返回值已携带结果，前端兜底用它更新卡片。
+     */
+    private void pushToolResult(Long conversationId, String toolName, boolean success,
+                                Map<String, Object> result, String token) {
+        try {
+            SseEmitter emitter = AiSseSessionRegistry.get(conversationId);
+            if (emitter == null) {
+                return;
+            }
+            Map<String, Object> payload = new java.util.LinkedHashMap<>();
+            // token 用于前端精确匹配是哪一张授权卡（同轮可能有多张同名工具的卡）
+            payload.put("token", token);
+            payload.put("tool", toolName);
+            payload.put("success", success);
+            Object msg = result.get("message");
+            if (msg != null) {
+                payload.put("message", str(msg, ""));
+            }
+            if (result.get("results") instanceof List<?> results) {
+                payload.put("results", results);
+            }
+            if (result.get("successCount") instanceof Integer sc) {
+                payload.put("successCount", sc);
+            }
+            if (result.get("failCount") instanceof Integer fc) {
+                payload.put("failCount", fc);
+            }
+            emitter.send(SseEmitter.event().name("tool_result")
+                    .data(objectMapper.writeValueAsString(payload)));
+        } catch (Exception e) {
+            // 推送失败不影响确认返回；前端用 confirm 接口返回值兜底
+            log.debug("[AI] tool_result 推送跳过/失败 conversationId={}: {}",
+                    conversationId, e.getMessage());
+        }
     }
 
     /**
@@ -946,7 +1006,8 @@ public class AiService {
      * 内容是「系统回执」式的中性陈述（做了什么 + 结果如何），模型据此判断
      * 任务链剩余步骤，且不会把回执当成用户的新指令。
      */
-    private void persistConfirmOutcome(Long conversationId, String toolName, Map<String, Object> result) {
+    private void persistConfirmOutcome(Long conversationId, String toolName, Map<String, Object> result,
+                                       String token) {
         try {
             boolean success = Boolean.TRUE.equals(result.get("success"));
             StringBuilder sb = new StringBuilder("[系统回执] 写操作已完成执行。");
@@ -972,9 +1033,14 @@ public class AiService {
             m.setConversationId(conversationId);
             m.setRole("assistant");
             m.setContent(sb.toString());
+            // M10：机制消息对 UI 隐藏（模型历史仍可见，续跑上下文不丢）
+            m.setVisibility("hidden");
             m.setCreateTime(LocalDateTime.now());
             messageMapper.insert(m);
             evictMemory(conversationId);
+            // M10：同步推 tool_result SSE 事件，前端把授权卡原地更新为结果态，
+            // 不再显示回执文字气泡
+            pushToolResult(conversationId, toolName, success, result, token);
         } catch (Exception e) {
             // 回执落库失败不影响本次确认返回；续跑时模型少一条上下文，用户可手动追问
             log.warn("[AI] 确认回执落库失败 conversationId={}: {}", conversationId, e.getMessage());
@@ -1091,7 +1157,7 @@ public class AiService {
         summary.put("message", "批量办理完成：成功 " + success + " 项，失败 " + (results.size() - success) + " 项");
         // M8 确认续跑：批量结果同样落库为系统回执，前端续跑后模型可核对剩余任务
         if (conversationId != null) {
-            persistConfirmOutcome(conversationId, "adminCounterProcessBatch", summary);
+            persistConfirmOutcome(conversationId, "adminCounterProcessBatch", summary, token);
         }
         return summary;
     }
@@ -1137,8 +1203,12 @@ public class AiService {
         List<com.library.entity.AiMessage> history = messageMapper.selectByConversationId(conversationId);
         com.library.entity.AiMessage target = null;
         for (int i = history.size() - 1; i >= 0; i--) {
-            if ("assistant".equalsIgnoreCase(history.get(i).getRole())) {
-                target = history.get(i);
+            com.library.entity.AiMessage m = history.get(i);
+            if ("assistant".equalsIgnoreCase(m.getRole())
+                    // M10：跳过 hidden 的回执消息——它被历史接口过滤，快照挂在它上面
+                    // 会跟着消失；决策卡属于用户可见的上一条正式回复
+                    && !"hidden".equalsIgnoreCase(m.getVisibility())) {
+                target = m;
                 break;
             }
         }

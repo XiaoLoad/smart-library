@@ -99,6 +99,8 @@ export const aiApi = {
   recordCardDecision: (payload) => post('/ai/card-decision', payload),
   // 设置会话写操作权限档位（confirm=逐笔确认 / batch=批量授权 / auto=自动执行，auto 仅管理员）
   setPermissionMode: (id, mode) => post(`/ai/conversation/${id}/permission-mode?mode=${encodeURIComponent(mode)}`),
+  // M10 会话待确认授权请求（对齐 ZCode pendingInteractions）：刷新/切页回来恢复等待确认的卡
+  pendingInteractions: (id) => get(`/ai/conversation/${id}/pending`),
 }
 
 // M6a：Agent 运行轨迹（管理员）

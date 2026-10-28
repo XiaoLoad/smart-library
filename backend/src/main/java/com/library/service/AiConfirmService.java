@@ -170,6 +170,24 @@ public class AiConfirmService {
         }
     }
 
+    /**
+     * M10：列出会话当前仍待确认的授权请求（对齐 ZCode pendingInteractions）。
+     * <p>
+     * 刷新/切页面回来时前端据此恢复「等待确认」卡片。过期令牌顺带清理。
+     * 仅返回属于该用户的请求，防跨用户探测。
+     */
+    public List<PendingConfirm> listPending(Long conversationId, Long userId) {
+        purgeExpired();
+        List<PendingConfirm> out = new java.util.ArrayList<>();
+        for (PendingConfirm pc : pending.values()) {
+            if (conversationId.equals(pc.conversationId()) && userId.equals(pc.userId())) {
+                out.add(pc);
+            }
+        }
+        out.sort(java.util.Comparator.comparingLong(PendingConfirm::createdAt));
+        return out;
+    }
+
     /** 令牌是否已过期 */
     private boolean isExpired(long createdAt) {
         return System.currentTimeMillis() - createdAt > TOKEN_TTL_SECONDS * 1000L;

@@ -236,7 +236,11 @@ public abstract class BaseLibraryTools {
         Map<String, Object> pending = new LinkedHashMap<>();
         pending.put("success", false);
         pending.put("awaitingConfirm", true);
-        pending.put("message", "已向用户发起授权请求，需用户确认后才会执行本操作");
+        // M11 措辞强化：明确告知模型立即停轮 + 未确认≠完成，防两类翻车——
+        // ① 模型误以为要等确认而拒绝为本轮其他项继续弹卡；② 模型把「已弹卡」当成「已办完」
+        pending.put("message", "已向用户发起授权请求（用户界面上已出现授权卡）。本操作尚未执行、尚未完成："
+                + "请立即结束本轮回复等待用户确认，不要在本轮继续调用其他写工具，也绝不可宣称本操作或任务链已完成。"
+                + "用户确认后系统会以回执告知真实执行结果，届时再继续剩余步骤");
         return pending;
     }
 

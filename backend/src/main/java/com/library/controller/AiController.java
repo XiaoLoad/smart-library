@@ -70,8 +70,9 @@ public class AiController {
         }
         // 分页钳制：防止一次拉取过大分页拖垮查询
         pageSize = Math.max(1, Math.min(pageSize, 100));
-        List<AiMessage> list = messageMapper.selectHistoryPage(conversationId, beforeId, pageSize);
-        int total = messageMapper.countByConversationId(conversationId);
+        // M10：过滤 hidden 机制消息（[系统回执]/[系统续跑]），对齐 ZCode 的 internal 不进 UI
+        List<AiMessage> list = messageMapper.selectVisibleHistoryPage(conversationId, beforeId, pageSize);
+        int total = messageMapper.countVisibleByConversationId(conversationId);
         // hasMore：本页满页即可能还有更早消息；前端亦可用 loadedCount < total 判定
         return Result.success(Map.of("list", list, "total", total, "hasMore", list.size() == pageSize));
     }
@@ -150,6 +151,38 @@ public class AiController {
         aiService.recordCardDecision(req.getConversationId(), cu.getUserId(), req.getDecision(),
                 req.getTool(), req.getTitle(), req.getRows(), Boolean.TRUE.equals(req.getBatch()));
         return Result.success("已记录", null);
+    }
+
+    /**
+     * 会话待确认的授权请求（M10，对齐 ZCode pendingInteractions）。
+     * 前端刷新/切页回来时据此恢复「等待确认」的授权卡。
+     */
+    @Autowired
+    private com.library.service.AiConfirmService aiConfirmService;
+
+    @GetMapping("/conversation/{id}/pending")
+    public Result<List<Map<String, Object>>> pendingInteractions(@PathVariable Long id) {
+        AiConversation conv = conversationMapper.selectById(id);
+        if (conv == null) {
+            throw new BusinessException(404, "会话不存在");
+        }
+        CurrentUser cu = CurrentUser.get();
+        if (conv.getUserId() == null || !conv.getUserId().equals(cu.getUserId())) {
+            throw new BusinessException(403, "无权查看该会话");
+        }
+        List<Map<String, Object>> list = new java.util.ArrayList<>();
+        for (com.library.service.AiConfirmService.PendingConfirm pc
+                : aiConfirmService.listPending(id, cu.getUserId())) {
+            Map<String, Object> item = new java.util.LinkedHashMap<>();
+            item.put("token", pc.token());
+            item.put("tool", pc.toolName());
+            item.put("title", pc.title());
+            item.put("rows", pc.rows() == null ? List.of() : pc.rows());
+            item.put("ttlSeconds", 60);
+            item.put("createdAt", pc.createdAt());
+            list.add(item);
+        }
+        return Result.success(list);
     }
 
     /**

@@ -9,13 +9,32 @@
         <result property="content" column="content"/>
         <result property="toolSummary" column="tool_summary"/>
         <result property="toolSnapshots" column="tool_snapshots"/>
+        <result property="visibility" column="visibility"/>
         <result property="createTime" column="create_time"/>
     </resultMap>
 
+    <!-- 给模型加载历史用：全部消息（含 hidden 机制消息，续跑上下文需要） -->
     <select id="selectByConversationId" resultMap="msgMap">
         SELECT * FROM ai_messages
         WHERE conversation_id = #{conversationId}
         ORDER BY create_time ASC
+    </select>
+
+    <!-- 给前端历史分页用：过滤 hidden 机制消息（对齐 ZCode：internal 不进 UI） -->
+    <select id="selectVisibleHistoryPage" resultMap="msgMap">
+        SELECT * FROM ai_messages
+        WHERE conversation_id = #{conversationId}
+        AND visibility = 'visible'
+        <if test="beforeId != null">
+            AND id &lt; #{beforeId}
+        </if>
+        ORDER BY id DESC
+        LIMIT #{pageSize}
+    </select>
+
+    <select id="countVisibleByConversationId" resultType="java.lang.Integer">
+        SELECT COUNT(*) FROM ai_messages
+        WHERE conversation_id = #{conversationId} AND visibility = 'visible'
     </select>
 
     <!-- 窗口分页：beforeId 为空取最新一页（id 倒序），否则取更早一页 -->
@@ -34,8 +53,9 @@
     </select>
 
     <insert id="insert" parameterType="com.library.entity.AiMessage" useGeneratedKeys="true" keyProperty="id">
-        INSERT INTO ai_messages (conversation_id, role, content, tool_summary, tool_snapshots, create_time)
-        VALUES (#{conversationId}, #{role}, #{content}, #{toolSummary}, #{toolSnapshots}, #{createTime})
+        INSERT INTO ai_messages (conversation_id, role, content, tool_summary, tool_snapshots, visibility, create_time)
+        VALUES (#{conversationId}, #{role}, #{content}, #{toolSummary}, #{toolSnapshots},
+                COALESCE(#{visibility, javaType=string, jdbcType=VARCHAR}, 'visible'), #{createTime})
     </insert>
 
     <update id="updateToolSnapshots">

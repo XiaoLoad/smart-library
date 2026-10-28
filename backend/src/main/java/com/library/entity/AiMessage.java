@@ -16,5 +16,10 @@ public class AiMessage {
      * 查询时点数据，前端据此重建历史消息的内联生成式卡片，并对历史卡片标注生成时间。
      */
     private String toolSnapshots;
+    /**
+     * 可见性：visible=正常渲染；hidden=系统机制消息（[系统回执]/[系统续跑]），
+     * 仅落库供模型续跑上下文，前端不渲染（对齐 ZCode 的 internal 消息不进 UI）
+     */
+    private String visibility;
     private LocalDateTime createTime;
 }

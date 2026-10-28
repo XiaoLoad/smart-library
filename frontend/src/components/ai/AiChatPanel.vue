@@ -71,47 +71,65 @@
                 <AiGenUi :snapshot="parseSnapshot(card.data)" />
               </div>
 
-              <!-- 写操作授权卡：含参数明细与有效期倒计时（与 /ai/chat 页一致，样式紧凑版） -->
-              <div v-if="m.confirmCard" class="confirm-card" :class="m.confirmCard.state">
+              <!-- 写操作授权卡：含参数明细与有效期倒计时（与 /ai/chat 页一致，样式紧凑版）。
+                   M10：confirmCards 数组——同轮多个写操作各一张卡，互不覆盖 -->
+              <div
+                v-for="(card, ci) in m.confirmCards || []"
+                :key="'cc-' + ci"
+                class="confirm-card"
+                :class="card.state"
+              >
                 <div class="confirm-eyebrow">
                   <el-icon><Lock /></el-icon>
-                  <span>{{ confirmEyebrow(m.confirmCard.state) }}</span>
+                  <span>{{ confirmEyebrow(card.state) }}</span>
                 </div>
-                <div class="confirm-title">{{ m.confirmCard.title }}</div>
-                <div v-if="m.confirmCard.rows && m.confirmCard.rows.length" class="confirm-rows">
-                  <div v-for="(r, ri) in m.confirmCard.rows" :key="ri" class="confirm-row">
+                <div class="confirm-title">{{ card.title }}</div>
+                <div v-if="card.rows && card.rows.length" class="confirm-rows">
+                  <div v-for="(r, ri) in card.rows" :key="ri" class="confirm-row">
                     <span class="confirm-k">{{ r.key }}</span>
                     <span class="confirm-v">{{ r.value }}</span>
                   </div>
                 </div>
-                <div v-if="m.confirmCard.state === 'pending'" class="confirm-actions">
+                <div v-if="card.state === 'pending'" class="confirm-actions">
                   <label class="confirm-allow" title="勾选后本会话内同类写操作不再弹卡，直接执行">
                     <input
-                      v-model="m.confirmCard.alwaysAllow"
+                      v-model="card.alwaysAllow"
                       type="checkbox"
                       class="confirm-allow-box"
                     />
                     <span>始终允许此类操作</span>
                   </label>
-                  <button class="confirm-btn primary" @click="onConfirmWrite(m.confirmCard)">确认办理</button>
-                  <button class="confirm-btn" @click="onCancelWrite(m.confirmCard)">取消</button>
-                  <span class="confirm-ttl">{{ m.confirmCard.remain ?? m.confirmCard.ttlSeconds }} 秒内有效</span>
+                  <button class="confirm-btn primary" @click="onConfirmWrite(card)">确认办理</button>
+                  <button class="confirm-btn" @click="onCancelWrite(card)">取消</button>
+                  <span class="confirm-ttl">{{ card.remain ?? card.ttlSeconds }} 秒内有效</span>
                 </div>
-                <div v-else-if="m.confirmCard.state === 'submitting'" class="confirm-state">
+                <div v-else-if="card.state === 'submitting'" class="confirm-state">
                   <el-icon class="is-loading"><Loading /></el-icon>
                   <span>正在办理…</span>
                 </div>
-                <div v-else-if="m.confirmCard.state === 'confirmed'" class="confirm-state ok">
+                <div v-else-if="card.state === 'confirmed'" class="confirm-state ok confirm-batch-result">
                   <el-icon><Check /></el-icon>
-                  <span>已确认并执行</span>
+                  <span>{{ card.result?.message || '已确认并执行' }}</span>
+                  <!-- M10：逐项结果内联，替代回执文字 -->
+                  <div v-if="card.result?.results?.length" class="batch-result-list">
+                    <div
+                      v-for="(r, ri) in card.result.results"
+                      :key="ri"
+                      class="batch-result-item"
+                      :class="{ fail: r.success === false }"
+                    >
+                      <span class="batch-result-title">{{ r.borrowNo || r.title || r.tool }}</span>
+                      <span class="batch-result-msg">{{ r.message || (r.success ? '成功' : '失败') }}</span>
+                    </div>
+                  </div>
                 </div>
-                <div v-else-if="m.confirmCard.state === 'cancelled'" class="confirm-state muted">
+                <div v-else-if="card.state === 'cancelled'" class="confirm-state muted">
                   <el-icon><Close /></el-icon>
                   <span>已取消本次操作</span>
                 </div>
                 <div v-else class="confirm-state err">
                   <el-icon><Warning /></el-icon>
-                  <span>{{ m.confirmCard.error || '授权已失效，请重新发起' }}</span>
+                  <span>{{ card.error || '授权已失效，请重新发起' }}</span>
                 </div>
               </div>
 
@@ -215,10 +233,14 @@
         v-model="input"
         type="textarea"
         :rows="2"
-        placeholder="输入您的问题，Enter 发送"
+        :placeholder="hasPendingConfirm ? '有待确认的授权请求，请先确认或取消' : '输入您的问题，Enter 发送'"
         resize="none"
         @keydown.enter.exact.prevent="send"
       />
+      <div v-if="hasPendingConfirm" class="panel-blocked-tip">
+        <el-icon><Lock /></el-icon>
+        <span>授权请求等待处理中：全部确认或取消后才能继续对话</span>
+      </div>
       <div class="input-actions">
         <el-button v-if="generating" size="small" @click="stopGenerate">停止</el-button>
         <el-button v-else type="primary" size="small" @click="send">发送</el-button>
@@ -234,7 +256,7 @@
  * 药丸条呈现（点击展开片段摘要），写操作授权卡含参数明细与有效期倒计时。
  * 挂载后懒初始化（init），流式期间组件被 v-show 隐藏不销毁——后台继续输出。
  */
-import { ref, reactive, nextTick, onBeforeUnmount } from 'vue'
+import { ref, reactive, computed, nextTick, onBeforeUnmount } from 'vue'
 import { Loading, Check, Close, Lock, Warning, DataBoard } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import MarkdownIt from 'markdown-it'
@@ -290,19 +312,16 @@ const onConfirmWrite = async (card) => {
   if (!card || card.state !== 'pending') return
   stopConfirmCountdown(card)
   card.state = 'submitting'
+  // 记录卡片所属消息（M11 聚合续跑判断用）
+  const ownerMsg = messages.value.find((m) => (m.confirmCards || []).includes(card))
   try {
     const res = await aiApi.confirmWrite(card.token, card.tool, card.conversationId, card.alwaysAllow === true)
     card.state = 'confirmed'
     card.result = res
     reportCardDecision(card, 'confirmed')
-    const tip = res?.message || '操作已完成'
-    if (assistantMsg) {
-      assistantMsg.content = assistantMsg.content ? `${assistantMsg.content}\n\n${tip}` : tip
-      assistantMsg.html = renderMarkdown(assistantMsg.content)
-      scrollToBottom()
-    }
-    // M8 确认续跑：回执展示后自动发起下一轮，模型继续任务链剩余步骤
-    continueAfterConfirm(card.tool)
+    // M10：结果内联在授权卡上（card.result），不再追加回执文字气泡
+    // M11：全部卡处理完才发起一次续跑
+    maybeContinueAfterAllResolved(ownerMsg, card.tool)
   } catch (e) {
     // 失败分类：令牌类失效（过期/已被处理/不匹配）→ expired；业务错误 → failed。
     // 令牌一次性，失败后原卡无法重试，两种状态都只说明结果，不一律谎称过期
@@ -311,6 +330,8 @@ const onConfirmWrite = async (card) => {
     card.state = tokenInvalid ? 'expired' : 'failed'
     card.error = message
     reportCardDecision(card, tokenInvalid ? 'expired' : 'failed')
+    // M11：失效/失败也算已处理，同样走聚合判定
+    maybeContinueAfterAllResolved(ownerMsg, card.tool)
   }
 }
 
@@ -320,6 +341,9 @@ const onCancelWrite = (card) => {
   stopConfirmCountdown(card)
   card.state = 'cancelled'
   reportCardDecision(card, 'cancelled')
+  // M11：取消也是「已处理」，全部卡处理完触发聚合续跑
+  const ownerMsg = messages.value.find((m) => (m.confirmCards || []).includes(card))
+  maybeContinueAfterAllResolved(ownerMsg, card.tool || '')
 }
 
 /* —— M7 批量授权卡 —— */
@@ -343,12 +367,7 @@ const onConfirmBatch = async (card) => {
     card.state = 'confirmed'
     card.result = res
     reportCardDecision(card, 'confirmed', true)
-    const tip = res?.message || '批量办理完成'
-    if (assistantMsg) {
-      assistantMsg.content = assistantMsg.content ? `${assistantMsg.content}\n\n${tip}` : tip
-      assistantMsg.html = renderMarkdown(assistantMsg.content)
-      scrollToBottom()
-    }
+    // M10：批量结果内联在卡片上，不再追加回执文字气泡
     // M8 确认续跑：批量办理完成后自动发起下一轮
     continueAfterConfirm(`批量办理 ${res?.successCount ?? 0} 项成功`)
   } catch (e) {
@@ -379,6 +398,35 @@ const reportCardDecision = (card, decision, batch = false) => {
     rows: Array.isArray(card.rows) ? card.rows : [],
     batch,
   }).catch(() => { /* 展示层记录失败不影响主流程 */ })
+}
+
+/**
+ * M10：把确认执行的写操作结果应用到对应授权卡（对齐 ZCode 的行内状态机）。
+ * 找不到 submitting/pending 卡片时静默忽略——确认接口返回值已在本地更新过卡片。
+ */
+const applyToolResult = (info) => {
+  if (!info?.tool) return
+  const candidates = []
+  for (const m of messages.value) {
+    for (const c of m.confirmCards || []) {
+      if (c.tool === info.tool) candidates.push(c)
+    }
+    if (m.batchConfirmCard && (info.tool === 'adminCounterProcessBatch' || m.batchConfirmCard.tool === info.tool)) {
+      candidates.push(m.batchConfirmCard)
+    }
+  }
+  let card = info.token
+    ? candidates.find((c) => c.token === info.token)
+    : candidates.reverse().find((c) => c.state === 'submitting' || c.state === 'pending')
+  if (!card && info.token) {
+    // token 未命中（页面刷新后恢复的卡）退化为按状态匹配
+    card = candidates.reverse().find((c) => c.state === 'submitting' || c.state === 'pending')
+  }
+  if (!card) return
+  stopConfirmCountdown(card)
+  card.state = info.success === false ? 'failed' : 'confirmed'
+  card.result = info
+  if (info.success === false) card.error = info.message || '执行失败'
 }
 
 // M9 历史授权卡（只读）的眉标
@@ -629,8 +677,22 @@ let turnHasWrite = false
 const WRITE_INTENT_RE = /(借阅|帮我借|想借|要借|借下|借一下|借一本|借这本|借了|续借|归还|还书|罚款)/
 let turnWriteIntent = false
 
+/**
+ * M11（对齐 ZCode 输入区阻塞语义）：存在待确认授权卡时禁止发起新对话。
+ */
+const hasPendingConfirm = computed(() =>
+  messages.value.some((m) =>
+    (m.confirmCards || []).some((c) => c.state === 'pending') ||
+    m.batchConfirmCard?.state === 'pending'
+  )
+)
+
 const send = async () => {
   if (generating.value) return
+  if (hasPendingConfirm.value) {
+    ElMessage.warning('请先处理上方待确认的授权请求（确认或取消）后再继续对话')
+    return
+  }
   if (!input.value.trim()) return
   const content = input.value.trim()
   input.value = ''
@@ -639,12 +701,24 @@ const send = async () => {
 
 /**
  * M8 确认续跑：授权确认成功后自动发起的下一轮对话（面板内与助手页行为一致）。
- * 引导语以系统续跑身份发送（不显示用户气泡），模型从系统回执读到结果继续任务链。
+ * M11 聚合续跑：本轮全部授权卡处理完毕才调用。
  */
 const continueAfterConfirm = async (toolSummary) => {
   if (generating.value || !currentConvId) return
-  const guide = `授权已确认并执行完成（${toolSummary}）。请检查任务链中还有哪些步骤未完成，继续执行剩余步骤；若全部完成，请向用户汇总各项办理结果。`
+  const guide = `授权已确认并执行完成（${toolSummary}）。请先逐项核对历史回执：哪些项已真正成功、哪些项还没有成功回执；只为尚无成功回执的剩余项发起授权，已成功的项不要重复办理；若全部完成，请逐项列出单号汇总。`
   await sendInternal(guide, { continuation: true })
+}
+
+/**
+ * M11 聚合续跑：检查所属消息的授权卡是否已全部处理（非 pending），
+ * 全部处理完才发起一次续跑，汇总语带各卡结果（成功/跳过）。
+ */
+const maybeContinueAfterAllResolved = (msg, toolSummary) => {
+  const cards = (msg?.confirmCards || []).filter((c) => c.tool)
+  if (!cards.length || cards.some((c) => c.state === 'pending')) return
+  const ok = cards.filter((c) => c.state === 'confirmed').length
+  const skipped = cards.length - ok
+  continueAfterConfirm(`${toolSummary}；本轮授权共 ${cards.length} 项：成功 ${ok} 项，跳过 ${skipped} 项`)
 }
 
 const sendInternal = async (content, { continuation }) => {
@@ -697,8 +771,8 @@ const sendInternal = async (content, { continuation }) => {
     // 知识库来源（SSE rag 事件），ragOpenIndex 为当前展开的片段序号，-1 表示全部收起
     ragSources: [],
     ragOpenIndex: -1,
-    // 写操作授权卡（SSE confirm 事件）
-    confirmCard: null,
+    // 写操作授权卡（SSE confirm 事件；M10 数组——同轮多个写操作各一张卡）
+    confirmCards: [],
     // M7 批量授权卡（SSE batch_confirm 事件，batch 档位）
     batchConfirmCard: null,
     // M4：Agent 决策时间线
@@ -872,7 +946,9 @@ const sendInternal = async (content, { continuation }) => {
         msg.pending = false
         try {
           const info = JSON.parse(data)
-          msg.confirmCard = {
+          // M10：同轮可能有多个写操作，卡进数组互不覆盖
+          if (!msg.confirmCards) msg.confirmCards = []
+          msg.confirmCards.push({
             token: info.token,
             tool: info.tool,
             title: info.title || '写操作授权',
@@ -887,12 +963,12 @@ const sendInternal = async (content, { continuation }) => {
             state: 'pending',
             result: null,
             error: '',
-          }
+          })
           // M4：授权请求记入时间线
           msg.timeline.push({ kind: 'confirm', tool: info.tool || '' })
           msg.content = msg.content || '请确认上方授权请求后继续。'
           msg.html = renderMarkdown(msg.content)
-          startConfirmCountdown(msg.confirmCard)
+          startConfirmCountdown(msg.confirmCards[msg.confirmCards.length - 1])
           scrollToBottom()
         } catch { /* 解析失败不影响对话 */ }
       } else if (event === 'batch_confirm') {
@@ -921,6 +997,12 @@ const sendInternal = async (content, { continuation }) => {
           startConfirmCountdown(msg.batchConfirmCard)
           scrollToBottom()
         } catch { /* 解析失败不影响对话 */ }
+      } else if (event === 'tool_result') {
+        // M10：确认执行的写操作结果，授权卡原地更新（结果内联），不再出现回执气泡
+        try {
+          const info = JSON.parse(data)
+          applyToolResult(info)
+        } catch { /* 解析失败忽略 */ }
       } else if (event === 'degrade') {
         // 工具循环超限降级：非报错样式，提示已完成部分 + 建议继续追问
         msg.pending = false
@@ -1017,7 +1099,7 @@ const destroy = () => {
 onBeforeUnmount(() => {
   destroy()
   messages.value.forEach((m) => {
-    stopConfirmCountdown(m.confirmCard)
+    for (const c of m.confirmCards || []) stopConfirmCountdown(c)
     stopConfirmCountdown(m.batchConfirmCard)
   })
 })
@@ -1437,9 +1519,39 @@ defineExpose({ init, destroy, send, prefill })
   padding: 10px 14px;
   flex-shrink: 0;
 }
+/* M11：授权等待中的阻塞提示 */
+.panel-blocked-tip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--color-warning, #a8843c);
+}
 .input-actions {
   display: flex;
   justify-content: flex-end;
   margin-top: 8px;
 }
+
+/* M10：授权卡结果内联（与 /ai/chat 页样式一致） */
+.confirm-batch-result {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+.batch-result-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.batch-result-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+}
+.batch-result-item .batch-result-title { color: var(--color-text-secondary, #5c564f); flex-shrink: 0; }
+.batch-result-item .batch-result-msg { color: var(--color-success, #5d8a6b); text-align: right; word-break: break-all; }
+.batch-result-item.fail .batch-result-msg { color: var(--color-danger, #a85a4a); }
 </style>
