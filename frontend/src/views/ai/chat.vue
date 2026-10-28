@@ -419,8 +419,8 @@
       <!-- 输入区：固定在视口底部 -->
       <div class="composer">
         <!-- M7 写操作权限档位：confirm=逐笔确认 / batch=批量授权 / auto=自动执行（仅管理员可切）。
-             切换即时生效并持久到会话，读者端不显示 auto 选项 -->
-        <div v-if="currentConvId" class="perm-mode-bar">
+             切换即时生效并持久到会话；无会话时显示默认档，首次切换/发送时自动建会话 -->
+        <div class="perm-mode-bar">
           <span class="perm-label">写操作权限</span>
           <div class="perm-seg" :class="{ danger: permMode === 'auto' }">
             <button
@@ -763,7 +763,18 @@ const permOptions = [
   { value: 'auto', label: '自动执行', title: '写操作直接执行，仅展示回执（仅管理员）', adminOnly: true },
 ]
 const switchPermMode = async (mode) => {
-  if (mode === permMode.value || !currentConvId.value) return
+  if (mode === permMode.value) return
+  // 无会话时先创建：档位是会话级属性，切换必须落到具体会话上
+  if (!currentConvId.value) {
+    try {
+      const conv = await aiApi.createConversation()
+      conversations.value.unshift(conv)
+      currentConvId.value = conv.id
+    } catch (e) {
+      ElMessage.error('创建会话失败')
+      return
+    }
+  }
   try {
     await aiApi.setPermissionMode(currentConvId.value, mode)
     permMode.value = mode
