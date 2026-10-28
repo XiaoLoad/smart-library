@@ -107,6 +107,44 @@
                 </div>
               </div>
 
+              <!-- M7 批量授权卡（batch 档位）：本轮多个写操作合并一张卡，一次确认整批 -->
+              <div v-if="m.batchConfirmCard" class="confirm-card batch" :class="m.batchConfirmCard.state">
+                <div class="confirm-eyebrow">
+                  <el-icon><Lock /></el-icon>
+                  <span>{{ batchEyebrow(m.batchConfirmCard) }}</span>
+                </div>
+                <div class="confirm-title">{{ m.batchConfirmCard.title }}</div>
+                <div v-if="m.batchConfirmCard.rows && m.batchConfirmCard.rows.length" class="confirm-rows">
+                  <div v-for="(r, ri) in m.batchConfirmCard.rows" :key="ri" class="confirm-row">
+                    <span class="confirm-k">{{ r.key }}</span>
+                    <span class="confirm-v">{{ r.value }}</span>
+                  </div>
+                </div>
+                <div v-if="m.batchConfirmCard.state === 'pending'" class="confirm-actions">
+                  <button class="confirm-btn primary" @click="onConfirmBatch(m.batchConfirmCard)">
+                    全部确认（{{ m.batchConfirmCard.count }} 项）
+                  </button>
+                  <button class="confirm-btn" @click="onCancelBatch(m.batchConfirmCard)">取消</button>
+                  <span class="confirm-ttl">{{ m.batchConfirmCard.remain ?? m.batchConfirmCard.ttlSeconds }} 秒内有效</span>
+                </div>
+                <div v-else-if="m.batchConfirmCard.state === 'submitting'" class="confirm-state">
+                  <el-icon class="is-loading"><Loading /></el-icon>
+                  <span>正在批量办理…</span>
+                </div>
+                <div v-else-if="m.batchConfirmCard.state === 'confirmed'" class="confirm-state ok">
+                  <el-icon><Check /></el-icon>
+                  <span>{{ m.batchConfirmCard.result?.message || '批量办理完成' }}</span>
+                </div>
+                <div v-else-if="m.batchConfirmCard.state === 'cancelled'" class="confirm-state muted">
+                  <el-icon><Close /></el-icon>
+                  <span>已取消本批操作</span>
+                </div>
+                <div v-else class="confirm-state err">
+                  <el-icon><Warning /></el-icon>
+                  <span>{{ m.batchConfirmCard.error || '批量授权已失效，请重新发起' }}</span>
+                </div>
+              </div>
+
               <!-- 参考资料：本轮注入的知识库来源（紧凑药丸条，点击展开片段摘要） -->
               <div v-if="m.ragSources && m.ragSources.length" class="rag-block">
                 <div class="rag-row">
@@ -245,6 +283,47 @@ const onConfirmWrite = async (card) => {
 
 // 用户取消：卡片原地转为静默状态
 const onCancelWrite = (card) => {
+  if (!card || card.state !== 'pending') return
+  stopConfirmCountdown(card)
+  card.state = 'cancelled'
+}
+
+/* —— M7 批量授权卡 —— */
+
+const batchEyebrow = (card) => {
+  const state = card.state
+  if (state === 'pending') return `批量授权 · ${card.count} 项操作待确认`
+  if (state === 'submitting') return '正在批量办理'
+  if (state === 'confirmed') return '批量办理完成'
+  if (state === 'cancelled') return '已取消'
+  return '批量授权失效'
+}
+
+// 全部确认：只回传批次令牌，服务端按保存的批次顺序逐项执行
+const onConfirmBatch = async (card) => {
+  if (!card || card.state !== 'pending') return
+  stopConfirmCountdown(card)
+  card.state = 'submitting'
+  try {
+    const res = await aiApi.confirmBatchWrite(card.token, card.conversationId)
+    card.state = 'confirmed'
+    card.result = res
+    const tip = res?.message || '批量办理完成'
+    if (assistantMsg) {
+      assistantMsg.content = assistantMsg.content ? `${assistantMsg.content}\n\n${tip}` : tip
+      assistantMsg.html = renderMarkdown(assistantMsg.content)
+      scrollToBottom()
+    }
+  } catch (e) {
+    const message = e?.message || '批量授权已失效，请重新发起该操作'
+    const tokenInvalid = /失效|过期|已被处理|重新发起/.test(message)
+    card.state = tokenInvalid ? 'expired' : 'failed'
+    card.error = message
+  }
+}
+
+// 取消本批：批次到期自动失效，本地置灰即可
+const onCancelBatch = (card) => {
   if (!card || card.state !== 'pending') return
   stopConfirmCountdown(card)
   card.state = 'cancelled'
@@ -511,6 +590,8 @@ const send = async () => {
     ragOpenIndex: -1,
     // 写操作授权卡（SSE confirm 事件）
     confirmCard: null,
+    // M7 批量授权卡（SSE batch_confirm 事件，batch 档位）
+    batchConfirmCard: null,
     // M4：Agent 决策时间线
     timeline: [],
     createTime: new Date().toISOString(),
@@ -702,6 +783,31 @@ const send = async () => {
           startConfirmCountdown(msg.confirmCard)
           scrollToBottom()
         } catch { /* 解析失败不影响对话 */ }
+      } else if (event === 'batch_confirm') {
+        // M7 批量授权卡（batch 档位）：本轮多个写操作合并一张卡，一次确认整批。
+        // 后端在 done 前推送；处理逻辑与 /ai/chat 页一致
+        turnHasWrite = true
+        msg.pending = false
+        try {
+          const info = JSON.parse(data)
+          msg.batchConfirmCard = {
+            token: info.token,
+            title: info.title || '批量授权',
+            count: info.count || 0,
+            rows: Array.isArray(info.rows) ? info.rows : [],
+            ttlSeconds: info.ttlSeconds || 120,
+            conversationId: currentConvId,
+            // pending: 等待确认 / submitting / confirmed / cancelled / expired / failed
+            state: 'pending',
+            result: null,
+            error: '',
+          }
+          msg.timeline.push({ kind: 'confirm', tool: 'batch:' + (info.count || 0) })
+          msg.content = msg.content || `本轮共 ${info.count || 0} 项写操作待授权，请在下方批量卡上一并确认。`
+          msg.html = renderMarkdown(msg.content)
+          startConfirmCountdown(msg.batchConfirmCard)
+          scrollToBottom()
+        } catch { /* 解析失败不影响对话 */ }
       } else if (event === 'degrade') {
         // 工具循环超限降级：非报错样式，提示已完成部分 + 建议继续追问
         msg.pending = false
@@ -797,7 +903,10 @@ const destroy = () => {
 
 onBeforeUnmount(() => {
   destroy()
-  messages.value.forEach((m) => stopConfirmCountdown(m.confirmCard))
+  messages.value.forEach((m) => {
+    stopConfirmCountdown(m.confirmCard)
+    stopConfirmCountdown(m.batchConfirmCard)
+  })
 })
 
 /** 预填输入框（不自动发送），供页面唤起 AI 时带入话术 */

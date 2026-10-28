@@ -1101,6 +1101,8 @@ const send = async () => {
     degradeMessage: '',
     // 写操作授权卡（SSE confirm 事件）
     confirmCard: null,
+    // M7 批量授权卡（SSE batch_confirm 事件，batch 档位）
+    batchConfirmCard: null,
     // M4：Agent 决策时间线（thought 旁白节点），与工具卡片交替构成决策链视图
     timeline: [],
     createTime: new Date().toISOString(),

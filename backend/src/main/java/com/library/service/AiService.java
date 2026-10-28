@@ -72,8 +72,13 @@ public class AiService {
      * 取值 8 的依据：覆盖省赛演示主线的最大轮数（查额度→检索图书→确认→办理→推荐→汇总）。
      */
     private static final int MAX_TOOL_ROUNDS = 8;
-    /** M4：单条过渡语（thought）最大字符数，避免长篇旁白淹没时间线 */
-    private static final int THOUGHT_MAX_LEN = 200;
+    /**
+     * M4：单条过渡语（thought）最大字符数。
+     * <p>
+     * M7 起 reset 已移除、正文保留全部叙述，thought 只是时间线上的摘要节点——
+     * 保持短句即可，长文本会与正文重复刷屏。
+     */
+    private static final int THOUGHT_MAX_LEN = 60;
     /** SSE 超时时间（毫秒） */
     private static final long SSE_TIMEOUT_MS = 300_000L;
     /** 首条消息生成标题的最大字符数 */
@@ -418,15 +423,14 @@ public class AiService {
         // 结构化输出：end 阶段携带 data 字段（工具返回的精简 JSON 快照）
         BaseLibraryTools.ToolEventEmitter emitterCb = (toolName, phase, detail, data) -> {
             try {
-                // 工具开始执行标志着一轮工具调用开始：此前流式输出的文本都是
-                // 工具调用前的过渡语（模型也可能误输出工具调用代码块），
-                // 通知前端清空正文——工具调用过程由工具卡片承载，正文只保留最终回答
+                // 工具开始执行标志着一轮工具调用开始。
+                // M7 缺字修复：不再发送 reset 清空正文。此前工具开始时清空正文、
+                // 工具返回后模型从「它认为自己已说到哪」的断点续写，导致气泡开头
+                // 缺一段（被抹掉的字只以截断旁白留在时间线 thought 节点里）。
+                // 改为保留正文原样：模型续写后自然拼成完整句子；过渡语摘要仍改道
+                // thought 事件供时间线展示（截短避免与正文重复刷屏）。
                 if ("start".equals(phase)) {
-                    // M4：过渡语不丢弃，改道为 thought 事件推给前端，
-                    // 渲染成步骤时间线，让 Agent 的「想—做—再想」决策链可见。
-                    // 正文仍需清空（reset），但决策旁白另行保留。
                     emitPendingThought(emitter, thoughtBuffer, trace);
-                    emitter.send(SseEmitter.event().name("reset").data("[RESET]"));
                 }
                 // end 阶段计入摘要（成功执行完的工具；error 阶段不计）
                 if ("end".equals(phase)) {
