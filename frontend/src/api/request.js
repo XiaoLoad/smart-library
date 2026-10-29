@@ -20,6 +20,9 @@ service.interceptors.request.use(
   (error) => Promise.reject(error)
 )
 
+// 登录接口自身的 401 表示「用户名或密码错误」，需要正常提示，不能当作登录态失效静默处理
+const isLoginRequest = (config) => (config?.url || '').includes('/auth/login')
+
 // 登录态失效统一处理：清 token → 提示 → 跳登录页（携带 redirect 便于登录后回跳）
 // 后端约定：JwtInterceptor 未授权时返回 HTTP 200 + body.code=401，故在成功分支拦截
 let redirectingToLogin = false
@@ -48,6 +51,10 @@ service.interceptors.response.use(
       return data === null ? { message } : data
     }
     if (code === 401) {
+      if (isLoginRequest(response.config)) {
+        ElMessage.error(message || '用户名或密码错误')
+        return Promise.reject(new Error(message))
+      }
       return handleUnauthorized(message)
     }
     ElMessage.error(message || '请求失败')
@@ -56,6 +63,11 @@ service.interceptors.response.use(
   (error) => {
     // 兜底：若经代理/网关返回了真实 HTTP 401 也走同一处理
     if (error.response?.status === 401) {
+      if (isLoginRequest(error.config)) {
+        const message = error.response?.data?.message || '用户名或密码错误'
+        ElMessage.error(message)
+        return Promise.reject(new Error(message))
+      }
       return handleUnauthorized('登录已过期，请重新登录')
     }
     ElMessage.error(error.message || '网络异常')

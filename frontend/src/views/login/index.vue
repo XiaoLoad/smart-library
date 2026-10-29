@@ -56,16 +56,15 @@
               size="large"
               :prefix-icon="Lock"
               show-password
-              @keyup.enter="handleLogin"
             />
           </div>
 
           <div class="form-row">
             <el-checkbox v-model="form.remember">保持登录</el-checkbox>
-            <a class="forgot-link" href="#">忘记密码？</a>
+            <button type="button" class="forgot-link" @click="openDoc('forgot')">忘记密码？</button>
           </div>
 
-          <button type="submit" class="submit-btn" :disabled="loading" @click="handleLogin">
+          <button type="submit" class="submit-btn" :disabled="loading">
             <span v-if="!loading">登 录</span>
             <span v-else class="loading-text">
               <span class="dot"></span>
@@ -75,32 +74,32 @@
           </button>
         </form>
 
-        <!-- 演示账号快捷入口 -->
-        <div class="demo-accounts">
-          <div class="demo-title">演示账号 · 一键填充</div>
-          <div class="demo-list">
-            <button
-              v-for="acc in demoAccounts"
-              :key="acc.username"
-              class="demo-chip"
-              @click="fillDemo(acc)"
-            >
-              <span class="chip-label">{{ acc.label }}</span>
-              <span class="chip-user">{{ acc.username }}</span>
-            </button>
-          </div>
-        </div>
-
         <div class="form-footer">
-          登录即表示您同意 <a href="#">服务条款</a> 与 <a href="#">隐私政策</a>
+          登录即表示您同意
+          <button type="button" class="doc-link" @click="openDoc('terms')">服务条款</button>
+          与
+          <button type="button" class="doc-link" @click="openDoc('privacy')">隐私政策</button>
         </div>
       </div>
     </section>
+
+    <el-dialog
+      v-model="docVisible"
+      :title="docTitle"
+      width="560px"
+      class="login-doc"
+      append-to-body
+    >
+      <div class="doc-body" v-html="docHtml"></div>
+      <template #footer>
+        <el-button type="primary" @click="docVisible = false">我知道了</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive } from 'vue'
+import { ref, reactive, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { User, Lock } from '@element-plus/icons-vue'
@@ -111,25 +110,84 @@ const route = useRoute()
 const userStore = useUserStore()
 
 const form = reactive({
-  username: 'admin',
-  password: 'admin123',
+  username: '',
+  password: '',
   remember: true,
 })
 
 const loading = ref(false)
 
-const demoAccounts = [
-  { label: '管理员', username: 'admin', password: 'admin123' },
-  { label: '教师', username: 'teacher01', password: '123456' },
-  { label: '学生', username: 'student01', password: '123456' },
-]
+/* 说明类文档（忘记密码 / 服务条款 / 隐私政策） */
+const docs = {
+  forgot: {
+    title: '忘记密码',
+    html: `
+      <p>为保障账号安全，本系统不提供在线找回密码。若您遗忘登录密码，请按以下方式处理：</p>
+      <ul>
+        <li>携带本人有效证件（学生证、教师工作证或身份证）前往<strong>图书馆前台</strong>；</li>
+        <li>向工作人员说明需重置密码，由工作人员核验身份后为您重置；</li>
+        <li>重置后请使用初始密码登录，并及时在「个人中心」修改为便于记忆的新密码。</li>
+      </ul>
+      <p class="doc-tip">前台服务时间：周一至周五 8:30—17:30，节假日以馆内公告为准。</p>
+      <p>如不便到馆，也可通过所在院系或部门联系图书馆管理员协助处理。</p>
+    `,
+  },
+  terms: {
+    title: '服务条款',
+    html: `
+      <p>欢迎使用智慧图书借阅管理系统（以下简称「本系统」）。您登录并使用本系统，即表示您已阅读并同意以下条款。</p>
+      <h4>一、服务内容</h4>
+      <p>本系统为图书馆读者与馆员提供馆藏查询、借阅管理、续借与归还、违约处理、阅读推荐等服务。具体功能以系统实际提供为准。</p>
+      <h4>二、账号与安全</h4>
+      <p>账号仅限本人使用，不得转借、出租或与他人共用。因保管不善导致的账号被盗用、信息泄露及由此产生的损失，由账号持有人承担。</p>
+      <h4>三、借阅规则</h4>
+      <p>借阅册数、借阅期限、续借次数及逾期违约金标准，以本馆现行借阅规则为准；逾期未还或图书损毁、遗失的，须按规定承担相应责任。</p>
+      <h4>四、使用规范</h4>
+      <p>您不得利用本系统从事任何违法违规活动，不得干扰系统正常运行、批量抓取数据或尝试未授权访问。违反者本馆有权暂停或终止其使用权限。</p>
+      <h4>五、服务变更与终止</h4>
+      <p>本馆可根据业务需要调整服务内容或规则，并通过系统公告等方式告知。因系统维护、升级或不可抗力导致服务中断的，本馆将尽力提前告知。</p>
+      <h4>六、其他</h4>
+      <p>本条款未尽事宜，依照国家法律法规及本馆相关规定执行。若条款发生变更，将在本页面更新，继续使用即视为接受变更后的条款。</p>
+    `,
+  },
+  privacy: {
+    title: '隐私政策',
+    html: `
+      <p>本馆重视您的个人信息保护。本政策说明本系统收集、使用与保护您个人信息的方式。</p>
+      <h4>一、我们收集的信息</h4>
+      <ul>
+        <li>账号信息：用户名、密码（加密存储）、姓名、用户类型及所属院系或部门；</li>
+        <li>业务信息：借阅、续借、归还记录，逾期与违约处理记录，检索与推荐偏好；</li>
+        <li>日志信息：登录时间、操作记录及必要的设备与网络信息，用于安全审计。</li>
+      </ul>
+      <h4>二、信息的使用</h4>
+      <p>上述信息仅用于身份核验、借阅服务办理、逾期提醒、服务改进与安全审计，不会用于与服务无关的商业用途。</p>
+      <h4>三、信息的共享与披露</h4>
+      <p>除法律法规要求、司法机关依法调取或经您另行同意外，本馆不会向第三方提供您的个人信息。</p>
+      <h4>四、存储与保护</h4>
+      <p>您的信息存储于本馆管理的系统服务器，密码采用不可逆加密方式保存。本馆采取访问控制、日志审计等措施防止信息被未授权访问、泄露或篡改。</p>
+      <h4>五、您的权利</h4>
+      <p>您可查询本人账号与借阅信息，并可申请更正错误信息。如需注销账号或删除个人信息，请前往图书馆前台办理。</p>
+      <h4>六、未成年人保护</h4>
+      <p>未成年读者使用本系统，应在监护人知情并同意的前提下进行。</p>
+      <h4>七、联系我们</h4>
+      <p>如对本政策有疑问，请联系图书馆前台工作人员。</p>
+    `,
+  },
+}
 
-const fillDemo = (acc) => {
-  form.username = acc.username
-  form.password = acc.password
+const docVisible = ref(false)
+const docKey = ref('')
+const docTitle = computed(() => docs[docKey.value]?.title || '')
+const docHtml = computed(() => docs[docKey.value]?.html || '')
+
+const openDoc = (key) => {
+  docKey.value = key
+  docVisible.value = true
 }
 
 const handleLogin = async () => {
+  if (loading.value) return
   if (!form.username || !form.password) {
     ElMessage.warning('请输入账号与密码')
     return
@@ -140,7 +198,7 @@ const handleLogin = async () => {
     ElMessage.success('登录成功')
     router.push(route.query.redirect || '/dashboard')
   } catch (e) {
-    // 错误已由拦截器提示
+    // 错误提示已由请求拦截器统一处理
   } finally {
     loading.value = false
   }
@@ -313,6 +371,11 @@ const handleLogin = async () => {
   font-size: var(--fs-small);
   color: var(--color-text-secondary);
   transition: color var(--duration-fast) var(--ease-soft);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font-family: inherit;
 }
 
 .forgot-link:hover {
@@ -368,69 +431,27 @@ const handleLogin = async () => {
   40% { transform: scale(1); opacity: 1; }
 }
 
-/* 演示账号 */
-.demo-accounts {
-  margin-top: var(--space-6);
-  padding-top: var(--space-5);
-  border-top: 1px dashed var(--color-border-strong);
-}
-
-.demo-title {
-  font-size: var(--fs-caption);
-  text-transform: uppercase;
-  letter-spacing: var(--ls-wide);
-  color: var(--color-text-tertiary);
-  margin-bottom: var(--space-3);
-  font-weight: 500;
-}
-
-.demo-list {
-  display: flex;
-  gap: var(--space-2);
-  flex-wrap: wrap;
-}
-
-.demo-chip {
-  flex: 1;
-  min-width: 80px;
-  background: var(--color-bg-subtle);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  padding: var(--space-2) var(--space-3);
-  cursor: pointer;
-  transition: all var(--duration-fast) var(--ease-soft);
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  text-align: left;
-}
-
-.demo-chip:hover {
-  background: var(--color-primary-light);
-  border-color: var(--color-primary);
-}
-
-.chip-label {
-  font-size: var(--fs-small);
-  font-weight: 500;
-  color: var(--color-text);
-}
-
-.chip-user {
-  font-family: var(--font-mono);
-  font-size: var(--fs-caption);
-  color: var(--color-text-tertiary);
-}
-
+/* 说明文档入口 */
 .form-footer {
-  margin-top: var(--space-6);
+  margin-top: var(--space-7);
   text-align: center;
   font-size: var(--fs-caption);
   color: var(--color-text-tertiary);
 }
 
-.form-footer a {
+.doc-link {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: inherit;
   color: var(--color-primary);
+}
+
+.doc-link:hover {
+  color: var(--color-primary-hover);
+  text-decoration: underline;
 }
 
 /* 响应式 */
@@ -449,5 +470,56 @@ const handleLogin = async () => {
 @media (max-width: 480px) {
   .form-wrapper { max-width: 100%; }
   .visual-headline { font-size: 2rem; }
+}
+</style>
+
+<!-- 弹窗内容被 teleport 到 body，需用非 scoped 样式 -->
+<style>
+.login-doc .el-dialog__title {
+  font-family: var(--font-serif);
+  font-weight: 600;
+  letter-spacing: var(--ls-tight);
+}
+
+.login-doc .el-dialog__body {
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.login-doc .doc-body {
+  font-size: var(--fs-small);
+  line-height: var(--lh-relaxed);
+  color: var(--color-text-secondary);
+}
+
+.login-doc .doc-body p {
+  margin: 0 0 var(--space-3);
+}
+
+.login-doc .doc-body h4 {
+  margin: var(--space-4) 0 var(--space-2);
+  font-size: var(--fs-body);
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+.login-doc .doc-body ul {
+  margin: 0 0 var(--space-3);
+  padding-left: var(--space-5);
+}
+
+.login-doc .doc-body li {
+  margin-bottom: var(--space-1);
+}
+
+.login-doc .doc-body .doc-tip {
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-tertiary);
+}
+
+.login-doc .doc-body strong {
+  color: var(--color-text);
 }
 </style>
