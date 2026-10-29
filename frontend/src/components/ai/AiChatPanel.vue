@@ -213,10 +213,20 @@
                 </div>
               </div>
 
-              <!-- 等待指示 -->
-              <div v-if="m.pending && !m.reasoningSegments.length && !m.toolEvents.length && !m.content" class="thinking">
+              <!-- 等待指示：有参考资料后文案随之切换（与 AI 助手页一致） -->
+              <div
+                v-if="m.pending && !m.reasoningSegments.length && !m.toolEvents.length && !(m.ragSources && m.ragSources.length)"
+                class="thinking"
+              >
                 <span class="dot"></span><span class="dot"></span><span class="dot"></span>
                 <span class="thinking-text">正在思考…</span>
+              </div>
+              <div
+                v-else-if="m.pending && (m.ragSources && m.ragSources.length) && !m.reasoningSegments.length && !m.toolEvents.length && !m.content"
+                class="thinking"
+              >
+                <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+                <span class="thinking-text">正在结合参考资料思考…</span>
               </div>
 
               <div class="msg-content markdown" v-html="m.html"></div>
@@ -928,8 +938,8 @@ const sendInternal = async (content, { continuation }) => {
         } catch { /* 忽略 */ }
         scrollToBottom()
       } else if (event === 'rag') {
-        // 知识库来源：在调用 LLM 之前推送（早于 delta），按「标题 + 摘要」去重后累计
-        msg.pending = false
+        // 知识库来源：在调用 LLM 之前推送（早于 delta），按「标题 + 摘要」去重后累计。
+        // 不关 pending：占位文案切换为「正在结合参考资料思考…」，覆盖到模型首个输出之间的空窗
         try {
           const list = JSON.parse(data)
           if (Array.isArray(list)) {

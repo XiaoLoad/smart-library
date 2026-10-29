@@ -1461,9 +1461,10 @@ const sendInternal = async (content, { continuation }) => {
           scrollToBottom()
         }
       } else if (event === 'rag') {
-        // 知识库来源：在调用 LLM 之前推送（早于 delta），气泡内先出「参考资料」条
+        // 知识库来源：在调用 LLM 之前推送（早于 delta），气泡内先出「参考资料」条。
+        // 不关 pending：检索结果不是模型产出，占位文案由「正在思考…」切换为「正在结合参考资料思考…」，
+        // 覆盖 rag 之后到模型首个输出之间的空窗
         const msg = ensureAssistantMsg()
-        msg.pending = false
         try {
           const list = JSON.parse(data)
           if (Array.isArray(list)) {
@@ -1694,6 +1695,9 @@ const sendInternal = async (content, { continuation }) => {
           : msg.degradeMessage
         msg.html = renderMarkdown(msg.content)
         scrollToBottom()
+      } else if (event === 'notice') {
+        // 渠道故障转移等系统级提示：轻提示告知用户（如「主渠道繁忙，已切换到备用渠道」），不打断回答流
+        ElMessage({ type: 'info', message: data, duration: 4000 })
       } else if (event === 'error') {
         thinking.value = false
         const msg = ensureAssistantMsg()
