@@ -41,8 +41,14 @@ export function useSnapshotRefresh({ fetch: fetchSnapshot, apply }) {
     }
   }
 
+  /** 页面自行改动了视图数据（如分页追加）而没走 reload 时，用它把比对基准追平，
+   *  避免下次激活时把「自己刚加载的数据」误判成后端更新而整墙重播 */
+  const markBaseline = (snap) => {
+    current = snap
+  }
+
   // onActivated 在首次挂载后也会触发一次，由 current === null 兜住
   onActivated(check)
 
-  return { reload }
+  return { reload, markBaseline }
 }

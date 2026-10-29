@@ -438,7 +438,7 @@ const applySnapshot = (s) => {
   quota.value = s.quota;
 };
 
-const { reload: loadBooks } = useSnapshotRefresh({
+const { reload: loadBooks, markBaseline } = useSnapshotRefresh({
   fetch: fetchSnapshot,
   apply: applySnapshot,
 });
@@ -486,6 +486,13 @@ const loadMore = async () => {
     books.value = [...books.value, ...added];
     total.value = data.total;
     page.value = next;
+    // 分页追加没走 reload：追平快照基准，否则返回本页时激活刷新会把自己刚加载的数据误判成更新、整墙重播
+    markBaseline({
+      list: books.value,
+      total: data.total,
+      tree: categories.value,
+      quota: quota.value,
+    });
     await nextTick();
     animateAppended(before, added.length);
   } catch {
@@ -750,17 +757,25 @@ const onWindowScroll = () => {
   showTopBtn.value = (window.scrollY || 0) > 360;
 };
 
-// 详情 → 列表：等滚动位置恢复后再量原卡片，交给转场层做「合书放回」
+// 详情 → 列表：等进场动画与滚动恢复结束后再量原卡片，交给转场层做「合书放回」
 onActivated(async () => {
   if (!bookTransition.active || bookTransition.mode !== "return") return
   await nextTick();
-  await new Promise((resolve) =>
-    requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(resolve))),
-  );
+  // 路由进场有 0.3s 的 translateY 位移，等它播完再量，避免取到位移中的坐标
+  await new Promise((resolve) => setTimeout(resolve, 380));
   const id = bookTransition.payload?.id;
   if (id == null) return;
   const el = stageRef.value?.querySelector(`.volume[data-book-id="${id}"] .volume-cover`);
-  if (el) bookTransition.registerTarget(el);
+  if (!el) return;
+  // 书墙停留位置不在视口时先把原卡片带回可视区，避免书飞向屏幕外
+  const rect = el.getBoundingClientRect();
+  if (rect.top >= window.innerHeight || rect.bottom <= 0) {
+    el.scrollIntoView({ block: "center" });
+    await new Promise((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(resolve)),
+    );
+  }
+  bookTransition.registerTarget(el);
 });
 
 onMounted(async () => {

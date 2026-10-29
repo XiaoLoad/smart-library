@@ -321,6 +321,9 @@ import EllipsisText from '@/components/EllipsisText.vue'
 import { ragApi } from '@/api'
 import { formatDateTime } from '@/utils/datetime.js'
 
+// 路由 meta.keepAlive 依赖组件名匹配（见 App.vue cachedViews）
+defineOptions({ name: 'KnowledgeList' })
+
 /* 文档列表 */
 const documents = ref([])
 const total = ref(0)
