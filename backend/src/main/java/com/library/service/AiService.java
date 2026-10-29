@@ -43,6 +43,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static dev.langchain4j.store.embedding.filter.MetadataFilterBuilder.metadataKey;
 
@@ -123,9 +124,8 @@ public class AiService {
     @Autowired private NotificationService notificationService;
     @Autowired private AiAgentTraceService traceService;
 
-    /** 缓存最近构建的流式模型，配置未变时复用，避免重复创建 OkHttpClient */
-    private volatile OpenAiStreamingChatModel cachedModel;
-    private volatile String cachedConfigHash;
+    /** 缓存各渠道配置构建的流式模型（key = 配置 hash）。故障转移时多渠道并存复用，避免重复创建 OkHttpClient */
+    private final Map<String, OpenAiStreamingChatModel> modelCache = new ConcurrentHashMap<>();
 
     // 模型请求/响应日志开关（application.yml app.ai.log-requests/log-responses）
     // 完整 prompt 含用户借阅记录等个人信息，日志打开等于把 PII 写进日志文件——生产必须关闭
@@ -257,6 +257,16 @@ public class AiService {
                 只为「尚无成功回执的剩余项」发起授权；对已有成功回执的项绝不重弹授权卡。
                 汇总办理结果时必须逐项列出回执中的单号/状态，不允许凭推测总结。
                 理由：模型曾出现未调用工具就宣称三本书全部借出的幻觉——实际只成功两本，严重误导用户。
+
+            14. 语言跟随用户，禁止无诱因漂移：用户用中文提问就全程使用简体中文，
+                用户用外语提问就始终用该外语回答，中途不得切换语言。
+                禁止「无诱因漂移」——整个对话上下文都是中文时，突然输出整段韩语/日语等其他语言
+                （这是模型故障，不是翻译需求），也不要在中文句子里交替插入外语句子。
+                此规则对回复的所有部分生效：正文、工具调用前后的过渡旁白、列表条目、结尾引导语。
+                知识库片段、工具返回或书名本身是外文时照常引用，句子的组织语言跟随用户：
+                用户用中文问外文资料时，回答主体用中文，必要的外文原文可保留并附中文说明。
+                理由：部分模型在多轮工具调用场景下会出现语言漂移（中文上下文中突然输出整段外语），
+                必须在系统提示词层面硬性约束；同时「语言跟随用户」避免误伤真正的外语用户与外文资料引用。
             """;
 
     /**
@@ -380,25 +390,15 @@ public class AiService {
             }
         }
 
-        AiConfig cfg = loadConfig();
-        if (cfg.apiKey() == null || cfg.apiKey().isBlank()) {
+        // 渠道故障转移候选：健康渠道按 sort 优先，冷却中的垫底兜底
+        List<AiConfig> candidates = orderedCandidates();
+        if (candidates.isEmpty() || candidates.get(0).apiKey() == null || candidates.get(0).apiKey().isBlank()) {
             throw new BusinessException(400, "AI 助手未启用：请管理员在「系统设置 · AI 渠道」中添加并启用渠道");
         }
-        OpenAiStreamingChatModel model = getOrBuildModel(cfg);
 
-        // 1. 加载历史纯文本消息（优先读缓存，构建窗口记忆；工具中间态不入 DB）
-        ChatMemory memory = MessageWindowChatMemory.withMaxMessages(MAX_MEMORY_MESSAGES);
+        // 1. 加载历史纯文本消息（优先读缓存；工具中间态不入 DB）。
+        // 每轮渠道尝试由 RoundStarter 用 buildMemory(history) 重建记忆：失败的尝试可能已把 user 消息写入旧 memory
         List<com.library.entity.AiMessage> history = loadHistory(conversationId);
-        for (com.library.entity.AiMessage m : history) {
-            if (m.getContent() == null || m.getContent().isBlank()) {
-                continue;
-            }
-            if ("user".equalsIgnoreCase(m.getRole())) {
-                memory.add(UserMessage.from(m.getContent()));
-            } else if ("assistant".equalsIgnoreCase(m.getRole())) {
-                memory.add(AiMessage.from(m.getContent()));
-            }
-        }
 
         // 2. 落库用户消息并使缓存失效（下次请求重新加载完整历史）
         // M8：续跑轮的引导语加前缀落库——模型历史可见其上下文意图；
@@ -596,61 +596,87 @@ public class AiService {
         commonTools.setConversationId(conversationId);
         roleTools.setConversationId(conversationId);
 
-        try {
-            // RAG：知识库启用且索引就绪时挂载检索增强；retriever 每请求构造以携带当前用户的可见范围
-            RetrievalAugmentor augmentor = buildAugmentor(admin);
+        // RAG：知识库启用且索引就绪时挂载检索增强；retriever 每请求构造以携带当前用户的可见范围（与渠道无关，构建一次复用）
+        RetrievalAugmentor augmentor = buildAugmentor(admin);
 
-            AiServices<LibraryAssistant> serviceBuilder = AiServices.builder(LibraryAssistant.class)
-                    .streamingChatModel(model)
-                    // 请求级记忆：持有完整工具调用上下文（含 tool_calls/tool 结果），不落库
-                    .chatMemory(memory)
-                    // 按角色注册工具：管理员工具（admin 开头）不会出现在读者的模型上下文中
-                    .tools(commonTools, roleTools)
-                    // 工具循环上限：防止模型陷入死循环无限消耗 token，超限由 onError 转优雅降级。
-                    // 用 maxToolCallingRoundTrips（1.15.0 起的新名）；maxSequentialToolsInvocations 已废弃。
-                    .maxToolCallingRoundTrips(MAX_TOOL_ROUNDS)
-                    .systemMessageProvider(memoryId -> buildSystemPrompt(displayName, cu.getUserType()));
-            if (augmentor != null) {
-                serviceBuilder.retrievalAugmentor(augmentor);
-            }
-            LibraryAssistant assistant = serviceBuilder.build();
+        // 轮次产物标志：模型一旦有任何输出（正文/思维链/工具响应）就不再切换渠道重跑，
+        // 避免重复输出或重复执行工具副作用。50609 限流发生在请求发起阶段、零输出，可安全切换
+        java.util.concurrent.atomic.AtomicBoolean produced = new java.util.concurrent.atomic.AtomicBoolean(false);
+        // 参考资料只推一次：渠道切换重跑时 onRetrieved 会再次触发，避免前端重复展示
+        java.util.concurrent.atomic.AtomicBoolean ragEmitted = new java.util.concurrent.atomic.AtomicBoolean(false);
+        // 当前尝试的候选下标（onError 回调里据此取下一个候选）
+        java.util.concurrent.atomic.AtomicInteger candidateIdx = new java.util.concurrent.atomic.AtomicInteger(0);
 
-            assistant.chat(content)
-                    // 知识库来源回传：在调用 LLM 之前触发（早于 delta），前端据此展示「参考资料」
-                    .onRetrieved(contents -> emitRagSources(emitter, contents))
-                    .onIntermediateResponse(response -> {
-                        // 工具循环轮次自增：与框架的计数递减点严格对应
-                        // （框架在同一次「模型返回含工具调用的响应」时递减 maxToolCallingRoundTrips）
-                        toolRounds.incrementAndGet();
-                        // M6a：轮次同步写回轨迹收集器，落库取真实轮次而非按工具数估算
-                        trace.setToolRounds(toolRounds.get());
-                    })
-                    .onPartialThinking(partial -> {
-                        // 深度思考思维链增量（reasoning_content）：独立 thinking 事件推给前端展示，
-                        // 不落库、不计入回答正文（与工具中间态一致，避免污染历史）
-                        try {
-                            String t = partial.text();
-                            if (t != null && !t.isEmpty()) {
-                                emitter.send(SseEmitter.event().name("thinking").data(t));
-                            }
-                        } catch (IOException e) {
-                            // 客户端已断开，忽略
-                        }
-                    })
-                    .onPartialResponse(partial -> {
-                        try {
-                            // 经 <think> 标签过滤器分流：标签内 → thinking 事件，标签外 → delta
-                            String routed = thinkFilter.feed(partial);
-                            if (routed != null && !routed.isEmpty()) {
-                                // M4：同时累积到过渡语缓冲，等工具开始时改道为 thought 事件。
-                                // 缓冲内容若最终未被发出（模型直接给最终答案），在 onCompleteResponse 清空即可。
-                                thoughtBuffer.append(routed);
-                                emitter.send(SseEmitter.event().name("delta").data(routed));
-                            }
-                        } catch (IOException e) {
-                            // 客户端已断开，忽略
-                        }
-                    })
+        // 一轮对话尝试：构建 assistant 并发起流式调用；失败且可切换时自动降级到下一个候选渠道。
+        // 局部类直接复用外围上下文（emitter/工具/轨迹/收集器），避免长参数列表
+        class RoundStarter {
+            void start(int idx) {
+                AiConfig cfg = candidates.get(idx);
+                candidateIdx.set(idx);
+                OpenAiStreamingChatModel model = getOrBuildModel(cfg);
+                // 请求级记忆：持有完整工具调用上下文（含 tool_calls/tool 结果），不落库；
+                // 渠道切换重跑时重建，失败的尝试可能已把 user 消息写入旧 memory
+                ChatMemory roundMemory = buildMemory(history);
+                AiServices<LibraryAssistant> serviceBuilder = AiServices.builder(LibraryAssistant.class)
+                        .streamingChatModel(model)
+                        .chatMemory(roundMemory)
+                        // 按角色注册工具：管理员工具（admin 开头）不会出现在读者的模型上下文中
+                        .tools(commonTools, roleTools)
+                        // 工具循环上限：防止模型陷入死循环无限消耗 token，超限由 onError 转优雅降级。
+                        // 用 maxToolCallingRoundTrips（1.15.0 起的新名）；maxSequentialToolsInvocations 已废弃。
+                        .maxToolCallingRoundTrips(MAX_TOOL_ROUNDS)
+                        .systemMessageProvider(memoryId -> buildSystemPrompt(displayName, cu.getUserType()));
+                if (augmentor != null) {
+                    serviceBuilder.retrievalAugmentor(augmentor);
+                }
+                LibraryAssistant assistant = serviceBuilder.build();
+
+                try {
+                    assistant.chat(content)
+                            // 知识库来源回传：在调用 LLM 之前触发（早于 delta），前端据此展示「参考资料」；
+                            // 渠道切换重跑时跳过，避免重复推送
+                            .onRetrieved(contents -> {
+                                if (ragEmitted.compareAndSet(false, true)) {
+                                    emitRagSources(emitter, contents);
+                                }
+                            })
+                            .onIntermediateResponse(response -> {
+                                // 模型已有输出（工具调用响应）：此后失败不再切换渠道重跑
+                                produced.set(true);
+                                // 工具循环轮次自增：与框架的计数递减点严格对应
+                                // （框架在同一次「模型返回含工具调用的响应」时递减 maxToolCallingRoundTrips）
+                                toolRounds.incrementAndGet();
+                                // M6a：轮次同步写回轨迹收集器，落库取真实轮次而非按工具数估算
+                                trace.setToolRounds(toolRounds.get());
+                            })
+                            .onPartialThinking(partial -> {
+                                produced.set(true);
+                                // 深度思考思维链增量（reasoning_content）：独立 thinking 事件推给前端展示，
+                                // 不落库、不计入回答正文（与工具中间态一致，避免污染历史）
+                                try {
+                                    String t = partial.text();
+                                    if (t != null && !t.isEmpty()) {
+                                        emitter.send(SseEmitter.event().name("thinking").data(t));
+                                    }
+                                } catch (IOException e) {
+                                    // 客户端已断开，忽略
+                                }
+                            })
+                            .onPartialResponse(partial -> {
+                                produced.set(true);
+                                try {
+                                    // 经 <think> 标签过滤器分流：标签内 → thinking 事件，标签外 → delta
+                                    String routed = thinkFilter.feed(partial);
+                                    if (routed != null && !routed.isEmpty()) {
+                                        // M4：同时累积到过渡语缓冲，等工具开始时改道为 thought 事件。
+                                        // 缓冲内容若最终未被发出（模型直接给最终答案），在 onCompleteResponse 清空即可。
+                                        thoughtBuffer.append(routed);
+                                        emitter.send(SseEmitter.event().name("delta").data(routed));
+                                    }
+                                } catch (IOException e) {
+                                    // 客户端已断开，忽略
+                                }
+                            })
                     .onCompleteResponse(response -> {
                         // M4：最终回答完成，缓冲里剩余的文本是最终答案的一部分（不是过渡语），
                         // 直接丢弃，避免它在下一次工具调用时被误当作旁白发出。
@@ -727,48 +753,65 @@ public class AiService {
                         }
                         emitter.complete();
                     })
-                    .onError(err -> {
-                        // 工具循环超限：转优雅降级（degrade 事件），而非红色报错。
-                        // 已完成的动作仍然有效，未完成部分提示用户再说一次。
-                        if (isToolRoundLimitExceeded(err, toolRounds.get())) {
-                            handleToolRoundDegrade(emitter, conversationId, toolRounds.get());
-                            // M6a：降级轨迹
-                            trace.markDegraded();
-                            traceService.save(trace);
-                            return;
-                        }
-                        try {
-                            // 提取可读错误信息：LangChain4j 异常 message 常为空，需取 cause
-                            String msg = err.getMessage();
-                            if (msg == null || msg.isBlank()) {
-                                Throwable cause = err.getCause();
-                                if (cause != null) {
-                                    msg = cause.getMessage();
-                                }
-                            }
-                            if (msg == null || msg.isBlank()) {
-                                msg = err.getClass().getSimpleName();
-                            }
-                            emitter.send(SseEmitter.event().name("error").data(msg));
-                            // M6a：异常轨迹
-                            trace.markError(msg);
-                            traceService.save(trace);
-                        } catch (IOException e) {
-                            // 忽略
-                        }
-                        // 注意：不能用 completeWithError，否则 Spring 异常处理器会尝试用 JSON Result 写入 SSE 响应，触发 HttpMessageNotWritableException
-                        emitter.complete();
-                    })
-                    .start();
-        } catch (RuntimeException e) {
-            log.error("[AI] 构建对话失败 conversationId={}", conversationId, e);
-            try {
-                emitter.send(SseEmitter.event().name("error")
-                        .data(e.getMessage() == null ? "AI 服务异常" : e.getMessage()));
-            } catch (IOException ignored) {
+                    .onError(err -> onRoundError(err))
+                            .start();
+                } catch (RuntimeException e) {
+                    // 构建/发起阶段失败（如渠道配置异常）：走同一故障转移路径
+                    onRoundError(e);
+                }
             }
-            emitter.complete();
+
+            void onRoundError(Throwable err) {
+                // 工具循环超限：转优雅降级（degrade 事件），而非红色报错。
+                // 已完成的动作仍然有效，未完成部分提示用户再说一次。
+                if (isToolRoundLimitExceeded(err, toolRounds.get())) {
+                    handleToolRoundDegrade(emitter, conversationId, toolRounds.get());
+                    // M6a：降级轨迹
+                    trace.markDegraded();
+                    traceService.save(trace);
+                    return;
+                }
+                // 零输出且属可切换错误（限流/过载/超时/连接失败）：冷却当前渠道，降级到下一个候选重跑
+                if (!produced.get() && isSwitchableError(err) && candidateIdx.get() + 1 < candidates.size()) {
+                    AiConfig failed = candidates.get(candidateIdx.get());
+                    AiConfig next = candidates.get(candidateIdx.get() + 1);
+                    markCooldown(failed.channelId());
+                    log.warn("[AI] 渠道「{}」请求被上游拒绝，自动切换到「{}」重试", channelLabel(failed), channelLabel(next));
+                    try {
+                        emitter.send(SseEmitter.event().name("notice")
+                                .data("「" + channelLabel(failed) + "」渠道繁忙，已自动切换到「" + channelLabel(next) + "」"));
+                    } catch (Exception ignored) {
+                        // 推送失败不影响切换
+                    }
+                    start(candidateIdx.get() + 1);
+                    return;
+                }
+                try {
+                    // 提取可读错误信息：LangChain4j 异常 message 常为空，需取 cause
+                    String msg = err.getMessage();
+                    if (msg == null || msg.isBlank()) {
+                        Throwable cause = err.getCause();
+                        if (cause != null) {
+                            msg = cause.getMessage();
+                        }
+                    }
+                    if (msg == null || msg.isBlank()) {
+                        msg = err.getClass().getSimpleName();
+                    }
+                    emitter.send(SseEmitter.event().name("error").data(msg));
+                    // M6a：异常轨迹
+                    trace.markError(msg);
+                    traceService.save(trace);
+                } catch (IOException e) {
+                    // 忽略
+                }
+                // 注意：不能用 completeWithError，否则 Spring 异常处理器会尝试用 JSON Result 写入 SSE 响应，触发 HttpMessageNotWritableException
+                emitter.complete();
+            }
         }
+
+        // 从首个候选渠道发起；onError 回调内自动完成后续渠道的降级重试
+        new RoundStarter().start(0);
 
         // 超时收尾先补发 done 再 complete：前端 SSE 解析以事件驱动，只 complete 不发终止事件时，
         // 部分场景（如容器异步超时但连接仍在）前端会一直停在生成态；done 与正常结束同形，UI 才能闭环。
@@ -1664,31 +1707,118 @@ public class AiService {
     }
 
     /**
-     * AI 配置：来自当前启用的 AI 渠道（多渠道中按排序取第一个启用者，见 {@link LibraryConfigService}）。
-     * 无启用渠道时各字段返回空串，由调用方给出「未配置」提示。
+     * AI 配置：来自启用的 AI 渠道（多渠道按 sort 排序，见 {@link LibraryConfigService}）。
+     * channelId/name 用于故障转移的冷却记忆与提示文案；无启用渠道时各字段返回空串，由调用方给出「未配置」提示。
      */
-    private record AiConfig(String provider, String apiKey, String model, String endpoint,
-                            boolean thinkingEnabled) {}
+    private record AiConfig(Long channelId, String name, String provider, String apiKey, String model,
+                            String endpoint, boolean thinkingEnabled) {}
 
     private AiConfig loadConfig() {
-        LibraryConfigService.Channel ch = libraryConfigService.getActiveChannel();
-        if (ch == null) {
-            return new AiConfig("", "", "", "", false);
+        List<AiConfig> configs = loadEnabledConfigs();
+        return configs.isEmpty()
+                ? new AiConfig(null, "", "", "", "", "", false)
+                : configs.get(0);
+    }
+
+    /** 从 DB 历史消息构建窗口记忆（仅纯文本 user/assistant）。渠道切换重跑时每轮重建。 */
+    private ChatMemory buildMemory(List<com.library.entity.AiMessage> history) {
+        ChatMemory memory = MessageWindowChatMemory.withMaxMessages(MAX_MEMORY_MESSAGES);
+        for (com.library.entity.AiMessage m : history) {
+            if (m.getContent() == null || m.getContent().isBlank()) {
+                continue;
+            }
+            if ("user".equalsIgnoreCase(m.getRole())) {
+                memory.add(UserMessage.from(m.getContent()));
+            } else if ("assistant".equalsIgnoreCase(m.getRole())) {
+                memory.add(AiMessage.from(m.getContent()));
+            }
         }
-        return new AiConfig(
-                str(ch.getProvider(), ""),
-                str(ch.getApiKey(), ""),
-                str(ch.getModel(), ""),
-                str(ch.getEndpoint(), ""),
-                Boolean.TRUE.equals(ch.getThinkingEnabled()));
+        return memory;
+    }
+
+    /** 全部启用渠道的配置（按 sort 升序）。 */
+    private List<AiConfig> loadEnabledConfigs() {
+        List<LibraryConfigService.Channel> channels = libraryConfigService.getEnabledChannels();
+        List<AiConfig> configs = new ArrayList<>(channels.size());
+        for (LibraryConfigService.Channel ch : channels) {
+            configs.add(new AiConfig(
+                    ch.getId(),
+                    str(ch.getName(), ""),
+                    str(ch.getProvider(), ""),
+                    str(ch.getApiKey(), ""),
+                    str(ch.getModel(), ""),
+                    str(ch.getEndpoint(), ""),
+                    Boolean.TRUE.equals(ch.getThinkingEnabled())));
+        }
+        return configs;
+    }
+
+    /** 渠道冷却时长：刚被上游拒绝的渠道在此时间内不再作为首选，避免每次对话都先撞一次限流 */
+    private static final long CHANNEL_COOLDOWN_MS = 60_000L;
+
+    /** 渠道冷却表：channelId → 冷却截止时间戳（毫秒） */
+    private final Map<Long, Long> channelCooldownUntil = new ConcurrentHashMap<>();
+
+    private void markCooldown(Long channelId) {
+        if (channelId != null) {
+            channelCooldownUntil.put(channelId, System.currentTimeMillis() + CHANNEL_COOLDOWN_MS);
+        }
+    }
+
+    /**
+     * 对话的渠道尝试顺序：启用渠道按 sort 升序，其中未冷却的排前、冷却中的垫底兜底。
+     */
+    private List<AiConfig> orderedCandidates() {
+        List<AiConfig> all = loadEnabledConfigs();
+        List<AiConfig> healthy = new ArrayList<>(all.size());
+        List<AiConfig> cooling = new ArrayList<>();
+        long now = System.currentTimeMillis();
+        for (AiConfig c : all) {
+            Long until = c.channelId() == null ? null : channelCooldownUntil.get(c.channelId());
+            (until != null && until > now ? cooling : healthy).add(c);
+        }
+        healthy.addAll(cooling);
+        return healthy;
+    }
+
+    /**
+     * 渠道故障转移判定：上游限流/过载/超时/连接失败/key 无效时值得换渠道再试；
+     * 请求参数类错误（400）换渠道结果相同，不切换。
+     * <p>
+     * LangChain4j 异常的 message 通常含 HTTP 状态码与上游响应体（如硅基流动 50609 限流 JSON），
+     * 沿 cause 链做宽松关键字匹配即可；误判的代价只是多试一个渠道，最终仍有统一报错兜底。
+     */
+    private boolean isSwitchableError(Throwable err) {
+        StringBuilder s = new StringBuilder();
+        for (Throwable t = err; t != null && s.length() < 2000; t = t.getCause()) {
+            if (t.getMessage() != null) {
+                s.append(t.getMessage().toLowerCase()).append(' ');
+            }
+            s.append(t.getClass().getSimpleName().toLowerCase()).append(' ');
+        }
+        String msg = s.toString();
+        return msg.contains("50609") || msg.contains("429") || msg.contains("rate limit") || msg.contains("too busy")
+                || msg.contains("503") || msg.contains("502") || msg.contains("bad gateway") || msg.contains("service unavailable")
+                || msg.contains("timeout") || msg.contains("timed out") || msg.contains("connection")
+                || msg.contains("401") || msg.contains("403") || msg.contains("unauthorized") || msg.contains("forbidden")
+                || msg.contains("interrupted");
+    }
+
+    /** 渠道展示名：优先渠道名，缺省回落「模型名」或「主渠道」。 */
+    private String channelLabel(AiConfig cfg) {
+        if (cfg.name() != null && !cfg.name().isBlank()) {
+            return cfg.name();
+        }
+        return cfg.model() == null || cfg.model().isBlank() ? "主渠道" : cfg.model();
     }
 
     private OpenAiStreamingChatModel getOrBuildModel(AiConfig cfg) {
         String hash = cfg.provider() + "|" + cfg.apiKey() + "|" + cfg.model() + "|" + cfg.endpoint()
                 + "|thinking=" + cfg.thinkingEnabled()
                 + "|log=" + logRequestsEnabled + "," + logResponsesEnabled;
-        if (cachedModel != null && hash.equals(cachedConfigHash)) {
-            return cachedModel;
+        OpenAiStreamingChatModel cached = modelCache.get(hash);
+        if (cached != null) {
+            return cached;
         }
         // endpoint 可能是完整 chat/completions URL，需转为 baseUrl（LangChain4j 会自动追加 /chat/completions）
         String baseUrl = normalizeBaseUrl(cfg.endpoint());
@@ -1729,8 +1859,7 @@ public class AiService {
                 .logRequests(logRequestsEnabled)
                 .logResponses(logResponsesEnabled)
                 .build();
-        cachedModel = model;
-        cachedConfigHash = hash;
+        modelCache.put(hash, model);
         return model;
     }
 

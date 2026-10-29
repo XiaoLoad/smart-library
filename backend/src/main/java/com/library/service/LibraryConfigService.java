@@ -125,6 +125,15 @@ public class LibraryConfigService {
     }
 
     /**
+     * 全部启用渠道（按 sort 升序）。渠道故障转移的候选来源：主渠道被上游拒绝时按此顺序降级重试。
+     */
+    public List<Channel> getEnabledChannels() {
+        return listChannels().stream()
+                .filter(c -> Boolean.TRUE.equals(c.getEnabled()))
+                .toList();
+    }
+
+    /**
      * 新增渠道。apiKey 必填；默认追加到末尾（sort 最大）。
      */
     public synchronized Channel addChannel(AiChannelRequest req) {
