@@ -4,9 +4,9 @@
 
 # 智慧图书借阅管理系统
 
-**一个面向毕业设计/学科竞赛的全栈实践项目：以 Web 端与服务端为主，附微信小程序读者端，内置 AI 阅读助手。**
+**一个面向毕业设计/学科竞赛的全栈实践项目：以 Web 端与服务端为主，附微信小程序读者端，内置 AI 助手。**
 
-以 Spring Boot 3 服务端 + Vue 3 Web 端为主体（另含一个维护节奏较慢的微信小程序读者端），内置 AI 阅读助手（LangChain4j + RAG 知识库）。
+以 Spring Boot 3 服务端 + Vue 3 Web 端为主体（另含一个维护节奏较慢的微信小程序读者端），内置 AI 助手（LangChain4j + RAG 知识库）。
 
 ![Version](https://img.shields.io/badge/version-1.1.0-0969DA?logo=semanticrelease&logoColor=white) ![License](https://img.shields.io/badge/license-MIT-green) ![Java](https://img.shields.io/badge/Java-22-007396?logo=openjdk&logoColor=white) ![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.3-6DB33F?logo=springboot&logoColor=white) ![MyBatis](https://img.shields.io/badge/MyBatis-3.x-000000?logo=mybatis&logoColor=white) ![MySQL](https://img.shields.io/badge/MySQL-8.0-4479A1?logo=mysql&logoColor=white) ![Flyway](https://img.shields.io/badge/Flyway-migration-CC0200?logo=flyway&logoColor=white) ![LangChain4j](https://img.shields.io/badge/LangChain4j-1.22-E25A1C?logoColor=white) ![Vue 3](https://img.shields.io/badge/Vue-3-4FC08D?logo=vuedotjs&logoColor=white) ![Vite](https://img.shields.io/badge/Vite-8-646CFF?logo=vite&logoColor=white) ![Element Plus](https://img.shields.io/badge/Element%20Plus-2.x-409EFF?logo=element&logoColor=white) ![Pinia](https://img.shields.io/badge/Pinia-4-FFD859?logo=pinia&logoColor=black) ![ECharts](https://img.shields.io/badge/ECharts-6-AA344D?logo=apacheecharts&logoColor=white) ![WeChat](https://img.shields.io/badge/微信小程序-原生-07C160?logo=wechat&logoColor=white) ![pnpm](https://img.shields.io/badge/pnpm-ready-F69220?logo=pnpm&logoColor=white)
 
@@ -20,7 +20,7 @@
 
 ## 功能特性
 
-> 当前开发重心为 **Web 端与服务端**：下面列出的是已实现并可演示的能力。微信小程序读者端为早期版本，仍在维护但迭代较慢，本文档不再展开其细节。
+> 当前开发重心为 **Web 端与服务端**：下面列出的是已实现并可演示的能力。微信小程序读者端为早期版本，仍在维护但迭代较慢，本文档仅在快速开始中保留最小启动步骤。
 
 ### 馆藏与检索
 
@@ -107,10 +107,10 @@ flowchart LR
 
 1. **流式对话**：`POST /api/ai/chat` 返回 `text/event-stream`，前端逐段渲染；
 2. **工具调用**：`AiToolRegistry` 注册工具，按角色拆分为 `AdminTools`（馆藏/借阅/读者管理）与 `ReaderTools`（个人借阅、续借、罚款），共用 `BaseLibraryTools`/`CommonTools`；
-3. **写操作门禁**：写类工具不直接执行，先生成授权卡（单条/批量），用户确认后由 `AiConfirmService` 续跑；`PermissionMode` 提供逐笔确认 / 批量授权 / 自动执行（仅管理员）三档，`AiSessionAllowService` 支持会话级白名单；
+3. **写操作门禁**：写类工具不直接执行，先生成授权卡（单条/批量），用户确认后由服务端按令牌执行，并由前端以续跑标记发起下一轮；`PermissionMode` 提供逐笔确认 / 批量授权 / 自动执行（仅管理员）三档，`AiSessionAllowService` 支持会话级白名单；
 4. **运行轨迹**：每次工具调用与授权决策写入 `ai_agent_traces`，管理端「Agent 日志」页可查看；
 5. **RAG 知识库**：管理员在「知识库」页上传或录入馆规文档，分块后由本地 `bge-small-zh-v1.5` 中文向量模型（ONNX，零 API 成本）计算向量并落库 `rag_segments`，检索在进程内完成；
-6. **模型渠道**：管理端「系统设置 → AI 服务渠道」按优先级维护 OpenAI 兼容渠道（DeepSeek / 通义千问 / Kimi 等），配置 provider / apiKey / model / endpoint，Key 存库且接口返回脱敏。
+6. **模型渠道**：管理端「系统设置 → AI 渠道」按优先级维护 OpenAI 兼容渠道（DeepSeek / 通义千问 / Kimi 等），配置 provider / apiKey / model / endpoint，Key 存库且接口返回脱敏。
 
 ### 各端职责
 
@@ -148,7 +148,7 @@ cp .env.example .env
 mvn spring-boot:run
 ```
 
-> 首次启动前必填 `DB_PASSWORD` 与 `JWT_SECRET`（缺失时后端拒绝启动，模板内有生成指引）；微信小程序配置可留空。后端自动读取 `backend/.env`，也可改用环境变量或 `application-local.yml` 注入。
+> 首次启动前必填 `DB_PASSWORD` 与 `JWT_SECRET`（缺失时后端拒绝启动，模板内有生成指引）；微信小程序配置可留空。后端自动读取 `backend/.env`，也可改用环境变量注入。
 >
 > 数据库无需手动创建：JDBC 连接带了 `createDatabaseIfNotExist=true`，Flyway 会在首次启动时自动建表并写入种子数据。
 
@@ -175,7 +175,7 @@ pnpm dev
 
 ### 环境变量清单
 
-模板文件：[.env.example](./.env.example)（仓库根）与 [backend/.env.example](./backend/.env.example)，变量项一致（注释措辞略有差异），复制任意一份为 `.env` 放在 `backend/` 或仓库根均可（后端两处都会读取）。
+模板文件：[.env.example](./.env.example)（仓库根）与 [backend/.env.example](./backend/.env.example)，变量项一致（注释措辞略有差异），复制任意一份为 `.env` 放在 `backend/` 或仓库根均可（后端两处都会读取）。模板只收录必填与常用项，下表里的 `SERVER_PORT`、`VITE_BACKEND_TARGET` 按需自行补入。
 
 | 变量 | 必填 | 默认值 | 说明 |
 |---|---|---|---|
@@ -190,7 +190,7 @@ pnpm dev
 | `WECHAT_SECRET` | 否 | 空 | 小程序 AppSecret，同上 |
 | `VITE_BACKEND_TARGET` | 否 | `http://127.0.0.1:8090` | 前端开发代理目标，写在 `frontend/.env.local` |
 
-> AI 模型的 provider / apiKey / model / endpoint **不通过环境变量配置**，在管理端「系统设置 → AI 服务渠道」写入数据库（Key 脱敏返回）。
+> AI 模型的 provider / apiKey / model / endpoint **不通过环境变量配置**，在管理端「系统设置 → AI 渠道」写入数据库（Key 脱敏返回）。
 > 本地开发 profile `dev` 会开启 Mapper SQL 日志；生产请改用 `--spring.profiles.active=prod` 或移除 `dev`。
 
 ### 依赖清单
@@ -199,7 +199,7 @@ pnpm dev
 |---|---|---|
 | 后端 | [backend/pom.xml](./backend/pom.xml) | Spring Boot 3.3.5、mybatis-spring-boot-starter 3.0.4、pagehelper 2.1.0、flyway-core/mysql、mysql-connector-j、jjwt 0.12.6、langchain4j 1.22.0、langchain4j-embeddings-bge-small-zh-v15-q、spring-boot-starter-mail |
 | Web 前端 | [frontend/package.json](./frontend/package.json) + `pnpm-lock.yaml` | vue 3.5、vite 8、element-plus 2.14、pinia 4、echarts 6、gsap 3、axios、markdown-it、highlight.js、qrcode |
-| 小程序 | [miniprogram-reader/package.json](./miniprogram-reader/package.json) | 微信原生运行时，无第三方运行时依赖（`miniprogram_npm` 由开发者工具构建生成，不入库） |
+| 小程序 | [miniprogram-reader/package.json](./miniprogram-reader/package.json) | 微信原生运行时；唯一第三方依赖 `marked`（Markdown 渲染，可选，缺失时降级纯文本），`miniprogram_npm/` 由开发者工具「构建 npm」生成，不入库 |
 
 ### 端口与网络
 
@@ -213,7 +213,7 @@ pnpm dev
 
 AI 助手需要至少一条可用渠道，否则对话会返回未配置提示：
 
-1. 管理员登录 → 系统设置 → AI 服务渠道 → 新增渠道；
+1. 管理员登录 → 系统设置 → AI 渠道 → 新增渠道；
 2. 填写 provider（OpenAI 兼容服务）、endpoint、model 与 apiKey；
 3. 保存后可「测试」连通性并拉取模型列表；渠道按列表顺序生效，停用自动跳过。
 
@@ -240,7 +240,7 @@ smart-library/
 │       ├── stores/ api/ router/ layout/ styles/
 ├── miniprogram-reader/ # 微信小程序读者端（低频维护，可选部署）
 ├── .githooks/          # 提交规范钩子（自动 scope 推断 + 校验）
-├── .github/            # CI/CD 工作流、模板、git-cliff 配置
+├── .github/            # CI/CD 工作流与 git-cliff 配置
 └── docs/images/        # 图片资源（logo 等；设计文档不入库）
 ```
 
@@ -253,7 +253,6 @@ smart-library/
 | 学校 / 学院 | 重庆城市科技学院 |
 | 指导教师 | 左亚玲 |
 | 团队成员 | 肖街伟、刘丹亚、刘欣悦 |
-| 联系方式 | 3395879653@qq.com |
 
 ## 参与贡献
 
