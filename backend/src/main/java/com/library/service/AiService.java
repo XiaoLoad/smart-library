@@ -1801,6 +1801,9 @@ public class AiService {
                 || msg.contains("503") || msg.contains("502") || msg.contains("bad gateway") || msg.contains("service unavailable")
                 || msg.contains("timeout") || msg.contains("timed out") || msg.contains("connection")
                 || msg.contains("401") || msg.contains("403") || msg.contains("unauthorized") || msg.contains("forbidden")
+                // DeepSeek 401 响应体不含状态码，靠语义关键字识别密钥失效（实测消息形如
+                // "Authentication Fails, Your api key: ... is invalid"，code=authentication_error）
+                || msg.contains("authentication") || msg.contains("invalid api key")
                 || msg.contains("interrupted");
     }
 
