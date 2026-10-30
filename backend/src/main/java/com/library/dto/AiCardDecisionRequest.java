@@ -1,5 +1,6 @@
 package com.library.dto;
 
+import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 
@@ -24,9 +25,17 @@ public class AiCardDecisionRequest {
     @NotBlank(message = "缺少决策类型")
     private String decision;
 
-    /** 授权工具名 */
-    @NotBlank(message = "缺少工具名")
+    /** 授权令牌（取消决策时回传，服务端立即作废，防止刷新后被恢复为待确认卡） */
+    private String token;
+
+    /** 授权工具名（批量授权卡是整批确认、无单一工具名，允许为空） */
     private String tool;
+
+    /** 单卡决策必须有工具名；批量卡决策回执豁免 */
+    @AssertTrue(message = "缺少工具名")
+    public boolean isToolValid() {
+        return Boolean.TRUE.equals(batch) || (tool != null && !tool.isBlank());
+    }
 
     /** 授权卡标题 */
     private String title;

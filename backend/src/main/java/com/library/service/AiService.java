@@ -426,11 +426,12 @@ public class AiService {
         // 3. 构建每请求独立的工具实例（烘焙 userId/userType，规避异步线程丢失 CurrentUser）
         AiToolContext toolCtx = buildToolContext();
         boolean admin = cu.getUserType() != null && cu.getUserType() == 3;
-        // M7：会话权限档位。读者端强制逐笔确认（动的是用户本人资产，不做自动执行）；
-        // 管理员可按会话切 batch/auto，未配置时回退 confirm
-        PermissionMode mode = admin
-                ? PermissionMode.of(conv.getPermissionMode())
-                : PermissionMode.CONFIRM;
+        // M7：会话权限档位。auto 仅管理员（动的是用户本人资产，读者端不开放自动执行）；
+        // confirm/batch 两种确认档全员可用，未配置时回退 confirm
+        PermissionMode requested = PermissionMode.of(conv.getPermissionMode());
+        final PermissionMode mode = (requested == PermissionMode.AUTO && !admin)
+                ? PermissionMode.CONFIRM
+                : requested;
         CommonTools commonTools = new CommonTools(cu.getUserId(), cu.getUserType(), toolCtx);
         BaseLibraryTools roleTools = admin
                 ? new AdminTools(cu.getUserId(), cu.getUserType(), toolCtx)
@@ -1281,7 +1282,16 @@ public class AiService {
      */
     public void recordCardDecision(Long conversationId, Long userId, String decision,
                                    String tool, String title, List<Map<String, String>> rows,
-                                   boolean batch) {
+                                   boolean batch, String token) {
+        // 取消决策时同步作废服务端令牌：否则令牌存活期内刷新页面，
+        // pendingInteractions 会把已取消的卡恢复成可点击的待确认卡
+        if ("cancelled".equalsIgnoreCase(decision) && token != null && !token.isBlank()) {
+            if (batch) {
+                aiBatchConfirmService.revoke(token);
+            } else {
+                aiConfirmService.revoke(token);
+            }
+        }
         // 会话归属校验：只能给自己的会话记录
         AiConversation conv = conversationMapper.selectById(conversationId);
         if (conv == null || !conv.getUserId().equals(userId)) {

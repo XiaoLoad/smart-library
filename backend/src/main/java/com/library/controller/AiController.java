@@ -149,7 +149,8 @@ public class AiController {
     public Result<Void> recordCardDecision(@Valid @RequestBody AiCardDecisionRequest req) {
         CurrentUser cu = CurrentUser.get();
         aiService.recordCardDecision(req.getConversationId(), cu.getUserId(), req.getDecision(),
-                req.getTool(), req.getTitle(), req.getRows(), Boolean.TRUE.equals(req.getBatch()));
+                req.getTool(), req.getTitle(), req.getRows(), Boolean.TRUE.equals(req.getBatch()),
+                req.getToken());
         return Result.success("已记录", null);
     }
 
