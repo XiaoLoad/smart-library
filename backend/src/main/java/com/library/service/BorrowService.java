@@ -492,6 +492,31 @@ public class BorrowService {
     }
 
     /**
+     * 借阅可借性预检：可借返回 null，不可借返回拒绝原因（不抛异常）。
+     * 供 AI 工具在弹出授权卡之前预检——把业务拦截提前到用户确认之前，
+     * 避免用户在授权卡上确认后才被 {@link #apply} 的校验打回。校验规则与 apply 保持一致。
+     */
+    public String checkBorrowable(Long userId) {
+        User user = userMapper.selectById(userId);
+        if (user == null || user.getStatus() != 1) {
+            return "用户不存在或已禁用，无法办理借阅";
+        }
+        BorrowLimit limit = borrowLimitMapper.selectByType(user.getUserType());
+        if (limit == null) {
+            return "当前账号类型不可借阅";
+        }
+        int used = borrowMapper.countByUserAndStatuses(userId, List.of(0, 1, 5));
+        if (used >= limit.getMaxBooks()) {
+            return "借阅额度已用满（" + used + "/" + limit.getMaxBooks() + " 本），请先归还部分图书后再申请";
+        }
+        List<Borrow> overdue = borrowMapper.selectOverduePending(userId);
+        if (!overdue.isEmpty()) {
+            return overdueBlockMessage(overdue);
+        }
+        return null;
+    }
+
+    /**
      * 逾期未还拦截文案：区分「书在手逾期」与「逾期归还待确认（罚款未结算）」，带具体书名，
      * 避免笼统的「有逾期未还」让读者误以为是历史罚款未缴清。
      */
