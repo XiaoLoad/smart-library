@@ -416,6 +416,7 @@ const reportCardDecision = (card, decision, batch = false) => {
   aiApi.recordCardDecision({
     conversationId: currentConvId,
     decision,
+    token: card.token || '',
     tool: card.tool || '',
     title: card.title || '',
     rows: Array.isArray(card.rows) ? card.rows : [],

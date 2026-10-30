@@ -939,6 +939,12 @@ const restorePendingCards = async (convId) => {
     // M10：待确认卡可能有多张，全部恢复（confirmCards 数组）
     if (!target.confirmCards) target.confirmCards = []
     for (const p of list) {
+      // 已出终态（取消/过期/已确认）的同工具卡说明决策快照已落库，
+      // 服务端令牌可能只是尚未过期——跳过恢复，避免已取消的卡刷新后变回可点击
+      const settled = (target.confirmCards || []).some(
+        (c) => c.tool === p.tool && c.state !== 'pending'
+      )
+      if (settled) continue
       const card = {
         token: p.token,
         tool: p.tool,
@@ -1179,6 +1185,7 @@ const reportCardDecision = (card, decision, batch = false) => {
   aiApi.recordCardDecision({
     conversationId: currentConvId.value,
     decision,
+    token: card.token || '',
     tool: card.tool || '',
     title: card.title || '',
     rows: Array.isArray(card.rows) ? card.rows : [],
