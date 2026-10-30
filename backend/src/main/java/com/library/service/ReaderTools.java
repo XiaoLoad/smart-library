@@ -158,21 +158,29 @@ public class ReaderTools extends BaseLibraryTools {
             + "若 queryBooks 结果含 isbn，务必一并传入——ISBN 唯一，能精确定位书目，可避免同名多版本借错。"
             + "只传书名且匹配到多本时不会办理，而是返回 candidates 候选清单，"
             + "此时必须把候选书目念给用户、让用户选定，再以选定的书名重新调用，禁止自行挑选。"
-            + "用户存在逾期未还或额度用满时，本工具直接返回 blocked=true 拒绝且不会弹出授权卡，"
-            + "把原因转告用户即可，禁止再重试。"
+            + "用户存在逾期未还、额度用满、或该书已在借（待取书/借阅中/逾期/待确认归还）时，"
+            + "本工具直接返回 blocked=true 拒绝且不会弹出授权卡，把原因转告用户即可，禁止再重试。"
+            + "本工具只用于「借新书」：用户表达归还意图时禁止调用本工具。"
             + "成功后返回借阅码和取书截止时间，需提醒用户在截止时间前到服务台取书")
     public Map<String, Object> applyBorrow(@P("用户确认的书名，来自 queryBooks 返回的 title，禁止猜测") String bookTitle,
                                            @P(value = "图书 ISBN，来自 queryBooks 返回的 isbn；唯一标识，优先于书名，可省略",
                                                    required = false) String isbn) {
-        // 前置预检：把业务拦截提前到授权卡之前——有逾期未还/额度用满时直接拒绝，
+        // 先定位书目（纯查询，无副作用）：候选清单、同书查重都在授权卡之前完成，
+        // 避免用户在卡上确认后才被打回
+        BookMatch match = locateBook(bookTitle, isbn);
+        if (match.book() == null) {
+            return ambiguousBorrow(bookTitle, match.candidates());
+        }
+        // 前置预检：把业务拦截提前到授权卡之前——有逾期未还/额度用满/该书已在借时直接拒绝，
         // 不让用户在授权卡上白确认一次（规则与 BorrowService.apply 一致）
-        String block = ctx.borrowService.checkBorrowable(userId);
+        String block = ctx.borrowService.checkBorrowable(userId, match.book().getId());
         if (block != null) {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("success", false);
             m.put("blocked", true);
             m.put("message", block);
-            m.put("nextAction", "把上述原因转告用户并给出建议（先归还逾期图书或处理逾期记录），本次不要再调用 applyBorrow");
+            m.put("nextAction", "把上述原因转告用户并给出建议，本次不要再调用 applyBorrow；"
+                    + "用户真实意图若是归还，改用归还类工具");
             return m;
         }
         return withWriteEvent("applyBorrow", "借阅《" + bookTitle + "》",
@@ -194,18 +202,19 @@ public class ReaderTools extends BaseLibraryTools {
 
     /** 借阅的实际业务逻辑（门禁与确认后执行共用） */
     private Map<String, Object> doApplyBorrow(String bookTitle, String isbn) {
-        // 确认后兜底校验：门禁发起与用户点击确认之间状态可能变化（如刚产生新的逾期）
-        String block = ctx.borrowService.checkBorrowable(userId);
+        BookMatch match = locateBook(bookTitle, isbn);
+        if (match.book() == null) {
+            return ambiguousBorrow(bookTitle, match.candidates());
+        }
+        // 确认后兜底校验：门禁发起与用户点击确认之间状态可能变化（如刚产生新的逾期、
+        // 同书已被其他渠道借出）
+        String block = ctx.borrowService.checkBorrowable(userId, match.book().getId());
         if (block != null) {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("success", false);
             m.put("blocked", true);
             m.put("message", block);
             return m;
-        }
-        BookMatch match = locateBook(bookTitle, isbn);
-        if (match.book() == null) {
-            return ambiguousBorrow(bookTitle, match.candidates());
         }
         Borrow b = ctx.borrowService.apply(userId, match.book().getId());
         Map<String, Object> m = new LinkedHashMap<>();

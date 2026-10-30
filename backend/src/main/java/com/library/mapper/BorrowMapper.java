@@ -40,6 +40,8 @@ public interface BorrowMapper {
 
     List<Borrow> selectOverduePending(@Param("userId") Long userId);
 
+    Borrow selectActiveByUserAndBook(@Param("userId") Long userId, @Param("bookId") Long bookId);
+
     void updateRenew(@Param("id") Long id, @Param("dueTime") LocalDateTime dueTime,
                      @Param("renewCount") Integer renewCount);
 

@@ -76,6 +76,16 @@
         ORDER BY due_time
     </select>
 
+    <!-- 同书查重：该书仍在借阅人手上（待取书/借阅中/逾期/待确认归还）时禁止重复借阅 -->
+    <select id="selectActiveByUserAndBook" resultMap="borrowMap">
+        SELECT * FROM borrows
+        WHERE user_id = #{userId}
+          AND book_id = #{bookId}
+          AND status IN (0, 1, 3, 5)
+        ORDER BY id DESC
+        LIMIT 1
+    </select>
+
     <select id="selectMaxSeqOfDay" resultType="java.lang.Integer">
         SELECT MAX(CAST(SUBSTRING(borrow_no, 11, 4) AS UNSIGNED))
         FROM borrows

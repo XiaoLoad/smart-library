@@ -117,6 +117,12 @@ public class BorrowService {
         if (book.getAvailableCount() <= 0) {
             throw new BusinessException(400, "该图书暂无库存");
         }
+        // 同书查重：该书仍在借阅人手上（待取书/借阅中/逾期/待确认归还）时禁止重复借阅
+        Borrow active = borrowMapper.selectActiveByUserAndBook(user.getId(), book.getId());
+        if (active != null) {
+            throw new BusinessException(400, "《" + book.getTitle() + "》已在您的借阅中（单号 " + active.getBorrowNo()
+                    + "，" + activeStateText(active.getStatus()) + "），无法重复借阅");
+        }
 
         String today = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
         String prefix = "BR" + today;
@@ -495,8 +501,10 @@ public class BorrowService {
      * 借阅可借性预检：可借返回 null，不可借返回拒绝原因（不抛异常）。
      * 供 AI 工具在弹出授权卡之前预检——把业务拦截提前到用户确认之前，
      * 避免用户在授权卡上确认后才被 {@link #apply} 的校验打回。校验规则与 apply 保持一致。
+     *
+     * @param bookId 目标图书（可空：为空时跳过同书查重，仅做用户级校验）
      */
-    public String checkBorrowable(Long userId) {
+    public String checkBorrowable(Long userId, Long bookId) {
         User user = userMapper.selectById(userId);
         if (user == null || user.getStatus() != 1) {
             return "用户不存在或已禁用，无法办理借阅";
@@ -513,7 +521,26 @@ public class BorrowService {
         if (!overdue.isEmpty()) {
             return overdueBlockMessage(overdue);
         }
+        if (bookId != null) {
+            Borrow active = borrowMapper.selectActiveByUserAndBook(userId, bookId);
+            if (active != null) {
+                return "《" + active.getBookTitle() + "》已在您的借阅中（单号 " + active.getBorrowNo()
+                        + "，" + activeStateText(active.getStatus()) + "），无法重复借阅；如需归还请说明归还意图";
+            }
+        }
         return null;
+    }
+
+    /** 在借状态文案（同书查重的提示语用） */
+    private String activeStateText(Integer status) {
+        if (status == null) return "在借";
+        return switch (status) {
+            case 0 -> "待取书";
+            case 1 -> "借阅中";
+            case 3 -> "已逾期";
+            case 5 -> "待确认归还";
+            default -> "在借";
+        };
     }
 
     /**
