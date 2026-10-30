@@ -406,6 +406,8 @@ const onCancelBatch = (card) => {
   stopConfirmCountdown(card)
   card.state = 'cancelled'
   reportCardDecision(card, 'cancelled', true)
+  // 批量卡取消也必须回执给模型，否则模型误认为操作悬而未决而重发授权卡
+  continueAfterConfirm(card.title || '本批写操作', { rejected: true })
 }
 
 // M9 上报授权卡决策态（展示层记录，失败不影响主流程）
@@ -724,9 +726,13 @@ const send = async () => {
  * M8 确认续跑：授权确认成功后自动发起的下一轮对话（面板内与助手页行为一致）。
  * M11 聚合续跑：本轮全部授权卡处理完毕才调用。
  */
-const continueAfterConfirm = async (toolSummary) => {
+const continueAfterConfirm = async (toolSummary, { rejected = false } = {}) => {
   if (generating.value || !currentConvId) return
-  const guide = `授权已确认并执行完成（${toolSummary}）。请先逐项核对历史回执：哪些项已真正成功、哪些项还没有成功回执；只为尚无成功回执的剩余项发起授权，已成功的项不要重复办理；若全部完成，请逐项列出单号汇总。`
+  // rejected：本轮授权被用户取消。必须把「已拒绝」明确回执给模型——
+  // 否则模型读到「尚无成功回执的剩余项」会反复重发授权卡
+  const guide = rejected
+    ? `本轮的授权请求（${toolSummary}）已被用户取消，所有操作均未执行。用户已明确拒绝本次办理，禁止再发起任何授权卡或写操作工具调用；请简短回应已按用户要求取消，并可询问是否需要其他帮助。`
+    : `授权处理已完成（${toolSummary}）。请逐项核对历史回执：已成功的项不要重复办理；已被用户取消的项是用户明确拒绝，禁止再次发起授权；仅当剩余项是因授权过期未执行时，才可为它们重新发起授权；若全部完成，请逐项列出单号汇总。`
   await sendInternal(guide, { continuation: true })
 }
 
@@ -739,6 +745,11 @@ const maybeContinueAfterAllResolved = (msg, toolSummary) => {
   if (!cards.length || cards.some((c) => c.state === 'pending')) return
   const ok = cards.filter((c) => c.state === 'confirmed').length
   const skipped = cards.length - ok
+  // 全部被取消：走拒绝回执，防止模型误以为操作未完成而重发授权卡
+  if (ok === 0) {
+    continueAfterConfirm(toolSummary, { rejected: true })
+    return
+  }
   continueAfterConfirm(`${toolSummary}；本轮授权共 ${cards.length} 项：成功 ${ok} 项，跳过 ${skipped} 项`)
 }
 
