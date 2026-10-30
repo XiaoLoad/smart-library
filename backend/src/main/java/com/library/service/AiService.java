@@ -221,6 +221,18 @@ public class AiService {
                 在你调用写工具后自动弹出的，你不调用就不会有任何卡弹出）。
                 例外：仅当工具返回明确的业务错误（如额度已满、该书不可借、找不到书目）时才停下并转告用户。
 
+            6c. 意图区分铁律——「借」与「还」是两个方向相反的操作，调用工具前先判定用户本句的意图，
+                以上一句用户消息为准，不受上一轮已成功操作的影响：
+                - 「归还 / 还书 / 还掉 / 退书」类表述一律是归还操作：先调用 queryMyBorrows（管理员帮读者
+                  办理时用 adminQueryBorrows）找到对应借阅单号，再调用 requestReturn（读者本人）或柜台归还
+                  （adminCounterProcess）；把要归还的单号与书名复述给用户核对。
+                - 「借 / 借阅 / 想看」类表述才是借新书，走 6b 的 applyBorrow 流程。
+                - 绝对禁止对归还意图调用 applyBorrow——对用户已在借的书调用它会生成一条重复借阅记录；
+                  若书籍已在借而用户仍说"借"，工具会返回 blocked=true 并说明已在借，此时应询问用户
+                  是否想归还或续借，而不是换本书重试。
+                理由：用户连续完成借阅后说「归还刚刚借的书」，模型曾顺着上文继续调用借阅工具，
+                生成三张借书授权卡且被确认，把归还请求变成了重复借阅，方向完全相反的严重事故。
+
             7. 业务错误如实转告：工具返回权限或业务错误（如"借阅额度已满""该记录非待取书状态""续借次数已用完"）时，
                把错误原话转告用户并给出可行建议，不得假装操作成功。
                理由：错误信息本身就是业务规则的一部分，隐瞒会误导用户。
@@ -630,7 +642,7 @@ public class AiService {
                         // 工具循环上限：防止模型陷入死循环无限消耗 token，超限由 onError 转优雅降级。
                         // 用 maxToolCallingRoundTrips（1.15.0 起的新名）；maxSequentialToolsInvocations 已废弃。
                         .maxToolCallingRoundTrips(MAX_TOOL_ROUNDS)
-                        .systemMessageProvider(memoryId -> buildSystemPrompt(displayName, cu.getUserType()));
+                        .systemMessageProvider(memoryId -> buildSystemPrompt(displayName, cu.getUserType(), mode));
                 if (augmentor != null) {
                     serviceBuilder.retrievalAugmentor(augmentor);
                 }
@@ -803,8 +815,12 @@ public class AiService {
                     if (msg == null || msg.isBlank()) {
                         msg = err.getClass().getSimpleName();
                     }
-                    emitter.send(SseEmitter.event().name("error").data(msg));
-                    // M6a：异常轨迹
+                    // 完整原文进日志与轨迹（排查用），前端只收净化后的文案
+                    log.warn("[AI] 对话流异常 conversationId={}，渠道={}：{}", conversationId,
+                            candidates.get(candidateIdx.get()) == null ? "-" : channelLabel(candidates.get(candidateIdx.get())),
+                            msg, err);
+                    emitter.send(SseEmitter.event().name("error").data(friendlyModelError(msg)));
+                    // M6a：异常轨迹（记原文，管理员在轨迹页可见完整错误）
                     trace.markError(msg);
                     traceService.save(trace);
                 } catch (IOException e) {
@@ -1671,7 +1687,7 @@ public class AiService {
      * @param displayName 当前用户称呼（真实姓名，兜底登录账号；替换 {username}/{name} 占位符）
      * @param userType    当前用户类型（3=管理员，其余=读者），用于角色感知
      */
-    private String buildSystemPrompt(String displayName, Integer userType) {
+    private String buildSystemPrompt(String displayName, Integer userType, PermissionMode mode) {
         // 可调整段（人设/语气）由 LibraryConfigService 统一管理（外部文件热加载 + 在线编辑）
         String customizable = libraryConfigService.loadCustomizablePromptSegment()
                 .replace("{username}", displayName)
@@ -1682,8 +1698,20 @@ public class AiService {
                 + "可查询全馆借阅/罚款/读者数据、统计概览并办理柜台业务；回答管理问题时直接使用这些工具。"
                 : "当前对话用户：" + displayName + "，身份：读者（教师/学生）。你只能查询和操作该读者本人的数据，"
                 + "馆藏图书与公告为全馆公开信息可正常检索；不存在「管理员工具」，不要声称可以执行管理员操作。";
-        // 核心规则在前（权重更高），身份行居中，可调整段在后
-        return CORE_RULES + "\n\n" + roleLine + "\n\n" + customizable;
+        // 写操作确认方式随档位变化：核心规则按逐步确认档表述，这里按当前档位补充说明，
+        // 模型据此组织话术（auto 档下工具调用即执行，不存在授权卡）
+        String modeLine = switch (mode) {
+            case AUTO -> "当前会话权限档位：AI 自动执行。所有写操作在你调用工具的瞬间即被执行，全程不存在授权卡。"
+                    + "禁止提及「授权卡」「请在卡片上确认」「等待用户确认」等字眼；工具返回 success=true 即视为办理完成，"
+                    + "直接以完成口吻汇报办理结果（含单号/明细）。核心规则中关于授权卡与「等待确认」的表述在本档位下不适用，"
+                    + "第 13 条铁律改为：工具返回的真实结果就是办理结果，据实汇报。";
+            case BATCH -> "当前会话权限档位：批量授权。写操作不会立即弹卡，而是加入本轮批量授权清单，"
+                    + "本轮回复结束时系统统一弹出一张批量授权卡，由用户一次性确认。"
+                    + "可以告知用户「已发起办理，稍后会出现一张批量确认卡」；禁止宣称任何操作已完成，禁止说「已弹出授权卡」。";
+            case CONFIRM -> "当前会话权限档位：逐步确认。每个写操作被调用后立即弹出一张独立授权卡，等待用户逐张确认。";
+        };
+        // 核心规则在前（权重更高），档位说明紧随其后，身份行居中，可调整段在后
+        return CORE_RULES + "\n\n" + modeLine + "\n\n" + roleLine + "\n\n" + customizable;
     }
 
     // 对话记忆缓存
@@ -1813,12 +1841,49 @@ public class AiService {
         String msg = s.toString();
         return msg.contains("50609") || msg.contains("429") || msg.contains("rate limit") || msg.contains("too busy")
                 || msg.contains("503") || msg.contains("502") || msg.contains("bad gateway") || msg.contains("service unavailable")
+                // 上游 500/internal_error 同属服务端瞬态故障，零输出时切换下一候选渠道重跑
+                || msg.contains("500") || msg.contains("internal error") || msg.contains("internal_error")
                 || msg.contains("timeout") || msg.contains("timed out") || msg.contains("connection")
                 || msg.contains("401") || msg.contains("403") || msg.contains("unauthorized") || msg.contains("forbidden")
                 // DeepSeek 401 响应体不含状态码，靠语义关键字识别密钥失效（实测消息形如
                 // "Authentication Fails, Your api key: ... is invalid"，code=authentication_error）
                 || msg.contains("authentication") || msg.contains("invalid api key")
                 || msg.contains("interrupted");
+    }
+
+    /**
+     * 把上游原始错误文本（HTTP 响应体 JSON、堆栈片段等）净化为用户可读文案。
+     * <p>
+     * LangChain4j 异常 message 常为上游响应体原文（形如 {@code {"error":{"message":"Internal Server
+     * Error (request_id: ...)","type":"internal_error",...}}}），原样推给用户只是噪音；
+     * 完整原文仅进服务端日志与 Agent 轨迹，前端 error 事件只收净化文案。
+     */
+    private String friendlyModelError(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return "AI 服务暂时不可用，请稍后重试";
+        }
+        String s = raw.toLowerCase();
+        if (s.contains("internal_error") || s.contains("internal error")) {
+            return "模型服务暂时不可用（上游内部错误），请稍后重试";
+        }
+        if (s.contains("authentication") || s.contains("invalid api key")
+                || s.contains("401") || s.contains("403")
+                || s.contains("unauthorized") || s.contains("forbidden")) {
+            return "模型服务认证失败，请检查渠道 API Key 配置";
+        }
+        if (s.contains("429") || s.contains("rate limit") || s.contains("50609") || s.contains("too busy")) {
+            return "模型服务限流中，请稍后重试";
+        }
+        if (s.contains("502") || s.contains("503") || s.contains("bad gateway") || s.contains("service unavailable")) {
+            return "模型服务过载，请稍后重试";
+        }
+        if (s.contains("timeout") || s.contains("timed out") || s.contains("connection") || s.contains("interrupted")) {
+            return "模型服务连接异常，请稍后重试";
+        }
+        if (raw.trim().startsWith("{") || raw.trim().startsWith("<") || raw.length() > 200) {
+            return "模型服务返回异常，请稍后重试";
+        }
+        return raw;
     }
 
     /** 渠道展示名：优先渠道名，缺省回落「模型名」或「主渠道」。 */
