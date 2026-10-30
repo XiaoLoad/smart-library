@@ -469,7 +469,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount, onActivated } from 'vue'
 import {
   Plus, ChatDotRound, MagicStick, Promotion, Delete,
   VideoPause, Loading, Check, Close, ArrowDownBold, ArrowUpBold, Connection,
@@ -1773,6 +1773,49 @@ onBeforeUnmount(() => {
     stopConfirmCountdown(m.batchConfirmCard)
   })
 })
+
+/* ---------- 与悬浮球面板的会话同步 ----------
+ * 悬浮球（AiChatPanel）每次新建会话/发送消息都会广播 ai-session-activity；
+ * 本页被 keep-alive 缓存、切回时不走挂载，onActivated 时据广播同步视图：
+ * 同一会话 → 有新消息才静默重拉，不打扰当前浏览位置；
+ * 不同会话 → 刷新会话列表后直接切到悬浮球的会话 */
+let panelActiveConvId = null
+const onPanelActivity = (e) => {
+  const id = e.detail?.conversationId
+  if (id) panelActiveConvId = id
+}
+window.addEventListener('ai-session-activity', onPanelActivity)
+onBeforeUnmount(() => window.removeEventListener('ai-session-activity', onPanelActivity))
+
+const syncFromPanel = async () => {
+  if (!panelActiveConvId || thinking.value) return
+  if (panelActiveConvId === currentConvId.value) {
+    try {
+      const data = await aiApi.messageList(panelActiveConvId)
+      // 悬浮球没有产生新消息时保持现状，不打断当前滚动位置
+      if ((data.total || 0) === totalMessages.value) return
+      const page = (data.list || []).map(enrichMsg).reverse()
+      messages.value = page
+      loadedCount.value = page.length
+      totalMessages.value = data.total || page.length
+      oldestLoadedId.value = page.length ? page[0].id : null
+      hasMore.value = loadedCount.value < totalMessages.value
+      await scrollToBottomForce()
+    } catch {
+      // 静默
+    }
+  } else {
+    try {
+      const data = await aiApi.conversationList()
+      conversations.value = data.list || []
+    } catch {
+      // 列表刷新失败也继续切换，switchConv 自带容错
+    }
+    await switchConv(panelActiveConvId)
+  }
+}
+
+onActivated(syncFromPanel)
 
 onMounted(loadConversations)
 </script>

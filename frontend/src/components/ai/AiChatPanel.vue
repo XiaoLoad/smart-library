@@ -280,6 +280,13 @@ import AiGenUi from '@/components/ai/AiGenUi.vue'
 
 const emit = defineEmits(['state-change'])
 
+// 会话活动广播：悬浮球每次新建会话/发送消息都通知 AI 助手页。
+// 助手页被 keep-alive 缓存、切回时不走挂载，靠 onActivated 读取该广播同步对话
+const notifySessionActivity = () => {
+  if (!currentConvId) return
+  window.dispatchEvent(new CustomEvent('ai-session-activity', { detail: { conversationId: currentConvId } }))
+}
+
 const route = useRoute()
 
 // AI 检索联动：queryBooks 等工具返回的图书列表写入该 store，图书检索页 watch 联动。
@@ -747,6 +754,7 @@ const sendInternal = async (content, { continuation }) => {
     try {
       const conv = await aiApi.createConversation()
       currentConvId = conv.id
+      notifySessionActivity()
     } catch {
       ElMessage.error('创建会话失败')
       return
@@ -795,6 +803,7 @@ const sendInternal = async (content, { continuation }) => {
   })
   messages.value.push(assistantMsg)
   scrollToBottom()
+  notifySessionActivity()
 
   const stopReasonTimer = (msg) => {
     if (!msg?._reasonTimer) return

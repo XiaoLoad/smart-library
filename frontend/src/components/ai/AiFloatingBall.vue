@@ -364,6 +364,11 @@ const collapse = async (silent = false) => {
     { duration: 280, easing: 'cubic-bezier(0.4, 0, 1, 1)' }
   )
   shrink.onfinish = () => {
+    // 收起动画是异步的，期间悬浮球可能被整体卸载（如切换页面时 v-if 摘除），ref 已为 null
+    if (!ballWrapRef.value || !ballRef.value) {
+      animating = false
+      return
+    }
     modal.style.visibility = 'hidden'
     ballWrapRef.value.style.pointerEvents = ''
     ballRef.value.style.opacity = '1'
@@ -373,6 +378,10 @@ const collapse = async (silent = false) => {
       { duration: 320, easing: bounce }
     ).onfinish = () => {
       // 球的动画结束后同样由 inline 样式接管（展开时球 inline opacity 已置 0，此处补回 1）
+      if (!ballRef.value) {
+        animating = false
+        return
+      }
       ballRef.value.style.transform = ''
       ballRef.value.style.opacity = '1'
       animating = false
