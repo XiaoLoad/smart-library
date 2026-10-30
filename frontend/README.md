@@ -4,14 +4,14 @@
 
 Vue 3 管理端 + 读者端单页应用
 
-![Vue 3](https://img.shields.io/badge/Vue-3-4FC08D?logo=vuedotjs&logoColor=white) ![Vite](https://img.shields.io/badge/Vite-latest-646CFF?logo=vite&logoColor=white) ![Element Plus](https://img.shields.io/badge/Element%20Plus-2.x-409EFF?logo=element&logoColor=white) ![Pinia](https://img.shields.io/badge/Pinia-latest-FFD859?logo=pinia&logoColor=black) ![ECharts](https://img.shields.io/badge/ECharts-5-AA344D?logo=apacheecharts&logoColor=white) ![pnpm](https://img.shields.io/badge/pnpm-ready-F69220?logo=pnpm&logoColor=white)
+![Vue 3](https://img.shields.io/badge/Vue-3.5-4FC08D?logo=vuedotjs&logoColor=white) ![Vite](https://img.shields.io/badge/Vite-8-646CFF?logo=vite&logoColor=white) ![Element Plus](https://img.shields.io/badge/Element%20Plus-2.14-409EFF?logo=element&logoColor=white) ![Pinia](https://img.shields.io/badge/Pinia-4-FFD859?logo=pinia&logoColor=black) ![ECharts](https://img.shields.io/badge/ECharts-6-AA344D?logo=apacheecharts&logoColor=white) ![pnpm](https://img.shields.io/badge/pnpm-ready-F69220?logo=pnpm&logoColor=white)
 
 [← 返回总览](../README.md)
 
 </div>
 
 > [!IMPORTANT]
-> 本项目为毕业设计作品，仅供学习交流，未经生产环境验证。
+> 本项目为毕业设计与学科竞赛作品，仅供学习交流，未经生产环境验证。
 
 ## 功能页面
 
@@ -25,9 +25,10 @@ Vue 3 管理端 + 读者端单页应用
 | `/borrow/list` | 借阅管理 | 申请/取书/归还/确认状态机、取书码 |
 | `/borrow/fine` | 罚款记录 | 逾期罚款结算与查看 |
 | `/user/list` | 用户管理 | 读者（教师/学生）与管理员管理 |
-| `/ai/chat` | AI 助手 | SSE 流式对话、工具调用卡片、锚点导航 |
+| `/ai/chat` | AI 助手 | SSE 流式对话、工具调用卡片、授权卡、锚点导航 |
+| `/ai/trace` | Agent 运行日志 | 工具调用序列、门禁触发与 token 消耗复盘 |
 | `/announce/list` | 公告管理 | 公告发布与通知 |
-| `/knowledge` | 知识库 | RAG 文档上传、启用/停用、分段管理 |
+| `/knowledge/list` | 知识库 | RAG 文档上传、启用/停用、分段管理与检索测试 |
 | `/system/settings` | 系统设置 | AI 多渠道管理、借阅规则、人设在线编辑、邮件配置 |
 
 ## 快速开始
@@ -63,8 +64,11 @@ frontend/
 ├── vite.config.js         # 别名 @ → src；dev/preview 的 /api 代理
 └── src/
     ├── api/               # 接口封装（request.js 为 axios 实例与拦截器）
-    ├── views/             # 页面（与上方路由表一一对应）
-    ├── components/        # 公共组件（AppBreadcrumb 等）
+    ├── views/             # 页面（ai / announcement / book / borrow / dashboard /
+    │                      #   error / knowledge / login / profile / system / user）
+    ├── components/        # 公共组件与 AI 组件（AiChatPanel、AiGenUi、AiFloatingBall 等）
+    ├── composables/       # 组合式函数（如滚动位置恢复）
+    ├── layout/ styles/ assets/
     ├── router/            # 路由与登录守卫（含 403/404 拦截）
     ├── stores/            # Pinia 状态
     └── utils/             # 工具函数

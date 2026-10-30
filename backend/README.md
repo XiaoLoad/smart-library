@@ -11,7 +11,7 @@ Spring Boot 3 单体后端，内置 Flyway 自动建库与 AI 能力（多渠道
 </div>
 
 > [!IMPORTANT]
-> 本项目为毕业设计作品，仅供学习交流，未经生产环境验证。JWT secret、微信 secret 等敏感配置请勿用于真实环境。
+> 本项目为毕业设计与学科竞赛作品，仅供学习交流，未经生产环境验证。JWT secret、微信 secret 等敏感配置请勿用于真实环境。
 
 ## 快速开始
 
@@ -28,7 +28,7 @@ Spring Boot 3 单体后端，内置 Flyway 自动建库与 AI 能力（多渠道
 |------|--------|------|
 | `server.port` / `context-path` | `8090` / `/api` | 所有接口以 `/api` 为前缀；端口可用 `SERVER_PORT` 覆盖 |
 | `spring.datasource.*` | `localhost:3306/library_db` | `createDatabaseIfNotExist` 自动建库 |
-| `spring.flyway.*` | 启用 | 首次启动自动执行 V1~V8 建库表 + 幂等种子数据 |
+| `spring.flyway.*` | 启用 | 首次启动自动执行 V1~V13 建库表 + 幂等种子数据 |
 | `app.upload-dir` | `./uploads` | 封面/头像等静态资源目录 |
 | `jwt.secret` / `jwt.expire-ms` | 见配置文件 | 生产请用环境变量注入新 secret |
 | `wechat.appid` / `wechat.secret` | 见配置文件 | 小程序 `code2session` 登录凭据 |
@@ -51,26 +51,30 @@ mvn package -DskipTests && java -jar target/*.jar
 ```text
 backend/
 ├── src/main/java/com/library/
-│   ├── controller/    # REST 接口（auth/book/borrow/fine/user/category/
-│   │                  #   dashboard/announcement/notification/system-setting/
-│   │                  #   ai/rag/wechat-auth/file）
+│   ├── controller/    # REST 接口，共 15 个（auth/book/borrow/fine/user/
+│   │                  #   category/dashboard/announcement/notification/
+│   │                  #   system-setting/ai/ai-agent-trace/rag/wechat-auth/file）
 │   ├── service/       # 业务逻辑（AI 会话编排在此层）
 │   ├── mapper/        # MyBatis 接口
 │   ├── entity/        # 实体
 │   └── config/        # 安全、MyBatis、Web、LangChain4j 等配置
 └── src/main/resources/
-    ├── db/migration/  # Flyway 迁移（V1~V8，见下方规则）
+    ├── db/migration/  # Flyway 迁移（V1~V13，见下方规则）
     └── mapper/        # MyBatis XML
 ```
 
 ## AI 模块
 
-- **多渠道管理**：LLM 渠道在系统设置页增删改，默认渠道由 AI 助手与 RAG 共用；
-- **RAG 知识库**：Web 端上传文档 → 服务端分段与向量化，AI 对话时检索增强；
-- **工具链**：AI 助手可调用系统工具（如查询借阅状态、图书检索、获取借阅规则），流式输出经 SSE 推送至前端。
+- **多渠道管理**：LLM 渠道在系统设置页增删改，默认渠道由 AI 助手与 RAG 共用，支持优先级与故障降级；
+- **Agent 与工具**：`AiToolRegistry` 注册工具，按角色拆分为 `CommonTools`（4 个）、`ReaderTools`（7 个）、`AdminTools`（7 个），共 18 个业务工具；读者会话不加载管理员工具；
+- **写操作门禁**：写类工具不由模型直接执行，先生成授权卡（单笔 / 批量），用户确认后由服务端按一次性令牌执行；`PermissionMode` 提供逐笔确认 / 批量授权 / 自动执行（仅管理员）三档，`AiSessionAllowService` 支持会话级白名单；
+- **核心规则**：`AiService.CORE_RULES` 硬编码 14 条行为红线（强制工具调用、以本次返回为准、空结果如实告知、写操作由授权卡把关等），不可被外部提示词覆盖；外部人设提示词存于 `resources/prompts/`，可在 Web 端在线编辑；
+- **RAG 知识库**：Web 端上传文档或录入文本 → 服务端分段并使用本地量化模型（bge-small-zh-v1.5）向量化 → 对话时按角色范围过滤并检索增强，回答需标注来源；
+- **流式输出**：13 类 SSE 事件（正文增量、思维链、工具调用与结果、知识来源、授权请求、降级等）推送至前端；
+- **可观测**：`ai_agent_traces` 记录每轮工具序列、门禁触发与 token 消耗，管理端「Agent 运行日志」页可视化查看。
 
 ## Flyway 迁移规则
 
-- `V1~V8` 已发布，**禁止修改**（checksum 校验会失败）；
+- `V1~V13` 已发布，**禁止修改**（checksum 校验会失败）；
 - 新的表结构/数据变更请新增 `V{n}__描述.sql`，文件名递增、内容幂等优先；
 - 已有库但无迁移记录的场景由 `baseline-on-migrate` 自动处理。
