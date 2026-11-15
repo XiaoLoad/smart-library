@@ -14,8 +14,7 @@ import com.library.mapper.RagSegmentMapper;
 import com.library.security.CurrentUser;
 import com.library.service.LibraryConfigService;
 import com.library.service.RagIndexService;
-import dev.langchain4j.data.segment.TextSegment;
-import dev.langchain4j.store.embedding.EmbeddingMatch;
+import com.library.service.rag.RagRetriever;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
@@ -43,6 +42,8 @@ public class RagController {
 
     @Autowired
     private RagIndexService ragIndexService;
+    @Autowired
+    private RagRetriever ragRetriever;
     @Autowired
     private RagDocumentMapper documentMapper;
     @Autowired
@@ -166,6 +167,10 @@ public class RagController {
      * 检索测试：输入 query，返回 Top N 片段与相似度分数。
      * <p>
      * 唯一能直观验证「切分与阈值调得对不对」的入口。
+     * <p>
+     * 走 {@link com.library.service.rag.RagRetriever} seam 而非直连内存索引：
+     * 与对话链路同一检索入口，切换检索实现后本测试页无需改动（分数等实现细节
+     * 由 seam 实现决定，seam 不暴露分数时本接口相应退化）。
      *
      * @param scope 传 public 可模拟读者视角（验证 admin 文档不会被读者检索到）；不传表示不过滤
      */
@@ -175,16 +180,21 @@ public class RagController {
                                                         @RequestParam(required = false) Double minScore,
                                                         @RequestParam(required = false) String scope) {
         requireAdmin();
-        List<EmbeddingMatch<TextSegment>> matches =
-                ragIndexService.search(query, maxResults, minScore, scope);
+        com.library.service.rag.RagSearchResult result = ragRetriever.retrieve(
+                query,
+                maxResults != null ? maxResults : -1,
+                minScore != null ? minScore : -1,
+                scope == null || scope.isBlank() ? null : scope);
         List<Map<String, Object>> list = new ArrayList<>();
-        for (EmbeddingMatch<TextSegment> m : matches) {
+        for (com.library.service.rag.RagSource s : result.sources()) {
             Map<String, Object> item = new LinkedHashMap<>();
-            item.put("segmentId", m.embeddingId());
-            item.put("score", m.score());
-            item.put("docTitle", m.embedded().metadata().getString("docTitle"));
-            item.put("scope", m.embedded().metadata().getString("scope"));
-            item.put("content", m.embedded().text());
+            item.put("sourceNo", s.sourceNo());
+            item.put("docTitle", s.docTitle());
+            item.put("content", s.snippet());
+            // 相似度分数：检索实现暴露时返回（前端展示 0~1 并按分数排序），
+            // 实现不暴露分数时为 null，前端显示为占位
+            item.put("score", s.score());
+            item.put("truncated", result.truncated());
             list.add(item);
         }
         return Result.success(list);
