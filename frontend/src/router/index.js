@@ -27,7 +27,8 @@ const routes = [
         path: 'dashboard',
         name: 'Dashboard',
         component: () => import('@/views/dashboard/index.vue'),
-        meta: { title: '概览', roles: ALL_ROLES },
+        // 缓存概览页：详情页返回时保留滚动位置与推荐轮播状态，onActivated 静默刷新数据
+        meta: { title: '概览', roles: ALL_ROLES, keepAlive: true },
       },
       // 个人中心：侧栏「服务」分节下对读者开放，管理员从顶栏用户菜单进入；两角色共用此页
       {

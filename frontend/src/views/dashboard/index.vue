@@ -1,5 +1,5 @@
 <template>
-  <div class="page dashboard">
+  <div ref="pageRef" class="page dashboard">
     <!-- 页眉 · 报刊式刊头 -->
     <header class="page-header masthead">
       <div class="masthead-copy">
@@ -149,8 +149,8 @@
       </div>
     </section>
 
-    <!-- 04 · 为你推荐（读者） -->
-    <section class="section reveal" v-if="!userStore.isAdmin && recommendItems.length">
+    <!-- 04 · 为你推荐（读者）：加载期显示骨架占位，数据到达后卡片渐进浮现 -->
+    <section class="section reveal" v-if="!userStore.isAdmin && recommendVisible">
       <div class="section-head">
         <span class="section-index">03</span>
         <h2 class="section-title">为你推荐</h2>
@@ -166,7 +166,18 @@
           </div>
           <router-link to="/book/list" class="more-link">馆藏目录</router-link>
         </div>
-        <RecommendStrip :items="recommendItems" />
+        <!-- 骨架屏：推荐接口在途时占位，避免区块突兀插入 -->
+        <div v-if="!recommendItems.length" class="rec-skeleton">
+          <div v-for="i in 4" :key="i" class="rec-skeleton-card">
+            <span class="sk-cover"></span>
+            <span class="sk-lines">
+              <i class="sk-line w60"></i>
+              <i class="sk-line w40"></i>
+              <i class="sk-line w80"></i>
+            </span>
+          </div>
+        </div>
+        <RecommendStrip v-else :items="recommendItems" />
       </div>
     </section>
 
@@ -288,7 +299,7 @@
 </template>
 
 <script setup>
-import { ref, computed, reactive, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, reactive, watch, onMounted, onBeforeUnmount, onActivated } from 'vue'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
 import { LineChart, PieChart, BarChart } from 'echarts/charts'
@@ -300,6 +311,15 @@ import { useUserStore } from '@/stores/user'
 import { useAppStore } from '@/stores/app'
 import EllipsisText from '@/components/EllipsisText.vue'
 import RecommendStrip from '@/components/RecommendStrip.vue'
+import { useScrollRestore } from '@/composables/useScrollRestore'
+
+// keep-alive 缓存名单按组件名匹配（App.vue cachedViews），必须与路由名一致
+defineOptions({ name: 'Dashboard' })
+
+// 缓存页滚动恢复：keep-alive 只保住组件状态，DOM 摘挂会丢文档滚动位置，
+// 由该 composable 在 activated 时静默复位（与图书列表同机制）
+const pageRef = ref(null)
+useScrollRestore(pageRef)
 
 use([CanvasRenderer, LineChart, PieChart, BarChart, GridComponent, TooltipComponent])
 
@@ -627,6 +647,8 @@ const hotBarWidth = (count) => Math.max(6, Math.round((Number(count) / hotMaxCou
 const noticeDate = (t) => (t ? String(t).substring(5, 10).replace('-', '.') : '')
 
 const recommendItems = ref([])
+/** 推荐区块可见性：读者端即显示（加载期骨架屏占位），接口失败后整体隐藏 */
+const recommendVisible = ref(false)
 
 const loadData = async () => {
   const [stats, noticeData] = await Promise.all([
@@ -635,18 +657,32 @@ const loadData = async () => {
   ])
   data.value = stats
   notices.value = (noticeData.list || []).slice(0, 8)
-  // 读者个性化推荐（管理员不展示该区块，不请求）
+  // 读者个性化推荐（管理员不展示该区块，不请求）；先显示骨架占位，失败再整体隐藏
   if (!userStore.isAdmin) {
+    recommendVisible.value = true
     try {
       recommendItems.value = (await recommendApi.personal(8)) || []
     } catch (e) {
       // 推荐失败不打断仪表盘
       recommendItems.value = []
+      recommendVisible.value = false
     }
   }
 }
 
-onMounted(loadData)
+/* 概览页 keep-alive 缓存：返回时滚动位置与推荐轮播状态天然保留（与图书列表同机制）。
+   激活时静默刷新：页面在缓存期间数据可能变化（他人借还、新公告），拉取后直接覆盖，
+   不重置任何视图状态；首次挂载后 activated 也触发一次，由 loaded 标志兜住防双载。 */
+let loaded = false
+
+onMounted(() => {
+  loadData()
+  loaded = true
+})
+
+onActivated(() => {
+  if (loaded) loadData()
+})
 </script>
 
 <style scoped>
@@ -1603,6 +1639,66 @@ onMounted(loadData)
 
   .chart-canvas {
     height: 200px;
+  }
+}
+
+/* —— 推荐区骨架屏：接口在途时的占位，与卡片同构避免加载后跳变 —— */
+.rec-skeleton {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 216px;
+  gap: var(--space-3);
+  overflow: hidden;
+}
+.rec-skeleton-card {
+  display: flex;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-elevated);
+}
+.sk-cover {
+  width: 48px;
+  height: 64px;
+  flex-shrink: 0;
+  border-radius: var(--radius);
+  background: var(--color-bg-muted);
+  animation: sk-pulse 1.4s ease-in-out infinite;
+}
+.sk-lines {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+}
+.sk-line {
+  height: 10px;
+  border-radius: 3px;
+  background: var(--color-bg-muted);
+  animation: sk-pulse 1.4s ease-in-out infinite;
+}
+.sk-line.w60 { width: 60%; }
+.sk-line.w40 { width: 40%; }
+.sk-line.w80 { width: 80%; }
+/* 相邻行错峰闪烁，呼吸感更自然 */
+.rec-skeleton-card:nth-child(2) .sk-line,
+.rec-skeleton-card:nth-child(2) .sk-cover { animation-delay: 0.15s; }
+.rec-skeleton-card:nth-child(3) .sk-line,
+.rec-skeleton-card:nth-child(3) .sk-cover { animation-delay: 0.3s; }
+.rec-skeleton-card:nth-child(4) .sk-line,
+.rec-skeleton-card:nth-child(4) .sk-cover { animation-delay: 0.45s; }
+@keyframes sk-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sk-cover,
+  .sk-line {
+    animation: none;
   }
 }
 </style>
