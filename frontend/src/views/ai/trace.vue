@@ -187,6 +187,17 @@
           <span class="detail-k">异常</span>
           <span class="detail-v err">{{ detail.errorMsg }}</span>
         </div>
+        <!-- B4：渠道尝试链路回放——故障转移不再只发 notice 提示，每轮的 try/fail/switched 序列可查 -->
+        <div v-if="parseAttempts(detail.attemptAudit).length" class="detail-row">
+          <span class="detail-k">渠道尝试</span>
+          <span class="detail-v">
+            <ol class="thought-list attempt-list">
+              <li v-for="(a, ai) in parseAttempts(detail.attemptAudit)" :key="ai" :class="attemptKind(a)">
+                {{ attemptText(a) }}
+              </li>
+            </ol>
+          </span>
+        </div>
       </div>
     </el-drawer>
   </div>
@@ -269,6 +280,25 @@ const parseList = (raw) => {
 }
 const parseTools = (raw) => parseList(raw)
 const parseThoughts = (raw) => parseList(raw)
+/** B4：渠道尝试审计条目解析 */
+const parseAttempts = (raw) => parseList(raw)
+
+/** 尝试事件 → 展示文本（try:0:渠道名 / fail:0:渠道名:错误 / switched:0->1:渠道名 / final-error:错误） */
+const attemptText = (a) => {
+  const parts = String(a).split(':')
+  const kind = parts[0]
+  if (kind === 'try') return `尝试 #${Number(parts[1]) + 1} · ${parts.slice(2).join(':')}`
+  if (kind === 'fail') return `失败 #${Number(parts[1]) + 1} · ${parts[2]}：${parts.slice(3).join(':')}`
+  if (kind === 'switched') return `切换 → ${parts.slice(2).join(':')}`
+  if (kind === 'final-error') return `最终失败：${parts.slice(1).join(':')}`
+  return a
+}
+
+/** 尝试事件 → 样式类（失败/最终失败标红） */
+const attemptKind = (a) => {
+  const kind = String(a).split(':')[0]
+  return kind === 'fail' || kind === 'final-error' ? 'attempt-bad' : ''
+}
 
 /** 工具名 → 中文标签 */
 const TOOL_LABELS = {
@@ -400,6 +430,9 @@ onMounted(loadAll)
   gap: 4px;
 }
 .thought-list li { font-style: italic; color: var(--color-text-secondary); }
+/* B4：渠道尝试条目——正体展示，失败标红（与决策旁白的斜体弱化风格区分） */
+.attempt-list li { font-style: normal; font-family: var(--font-mono); font-size: var(--fs-caption); }
+.attempt-list li.attempt-bad { color: var(--color-danger); }
 
 .pager { display: flex; justify-content: flex-end; padding-top: var(--space-3); }
 </style>

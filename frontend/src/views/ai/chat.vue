@@ -61,9 +61,51 @@
               <span class="day-line"></span>
             </div>
 
-            <!-- 用户消息：右侧气泡（data-anchor 供对话锚点导航定位与判定） -->
+            <!-- 用户消息：右侧气泡（data-anchor 供对话锚点导航定位与判定）。
+                 A2：气泡上方分支导航（同轮有多个编辑重发版本时显示 « 2/3 »）；
+                 悬停气泡出现操作条（编辑重发 / 重新生成） -->
             <div v-if="m.role === 'user'" class="msg-row user" :data-anchor="String(m.id)">
-              <div class="user-bubble">{{ m.content }}</div>
+              <div class="user-col">
+                <div v-if="m.branchInfo && m.branchInfo.total > 1" class="branch-nav">
+                  <button
+                    class="branch-arrow"
+                    :disabled="m.branchInfo.index === 0"
+                    title="上一版本"
+                    @click="switchBranch(m, -1)"
+                  >‹</button>
+                  <span class="branch-pos">{{ m.branchInfo.index + 1 }}/{{ m.branchInfo.total }}</span>
+                  <button
+                    class="branch-arrow"
+                    :disabled="m.branchInfo.index === m.branchInfo.total - 1"
+                    title="下一版本"
+                    @click="switchBranch(m, 1)"
+                  >›</button>
+                </div>
+                <div class="user-bubble">{{ m.content }}</div>
+                <div class="user-actions">
+                  <button class="user-action" title="编辑后重新提问（产生新分支）" @click="startEditResend(m)">编辑</button>
+                  <button
+                    class="user-action"
+                    title="换一个回答（产生新分支）"
+                    :disabled="streamingMap.has(currentConvId)"
+                    @click="regenerate(m)"
+                  >重新生成</button>
+                </div>
+                <div v-if="m.editing" class="edit-box">
+                  <el-input
+                    v-model="m.editText"
+                    type="textarea"
+                    :rows="2"
+                    placeholder="编辑提问内容，发送后产生新分支"
+                  />
+                  <div class="edit-actions">
+                    <el-button size="small" @click="m.editing = false">取消</el-button>
+                    <el-button size="small" type="primary" :disabled="!m.editText?.trim()" @click="confirmEditResend(m)">
+                      发送新分支
+                    </el-button>
+                  </div>
+                </div>
+              </div>
             </div>
 
             <!-- 助手消息：左侧头像 + 空气化排版。
@@ -714,6 +756,7 @@ const handleCitationClick = (m, e) => {
 // 历史/分页消息映射：预渲染 Markdown 为 html 缓存，避免模板内反复重渲染
 const enrichMsg = (m) => ({
   ...m,
+  _fromHistory: true, // A2：历史消息标志——分支导航/编辑重发只对服务端已落库的消息开放
   html: renderMarkdown(m.content),
   // 工具快照落库后历史消息可重建内联生成式卡片；快照是查询时点数据，历史卡片带时点角标
   toolEvents: parseStoredSnapshots(m.toolSnapshots),
@@ -728,7 +771,93 @@ const enrichMsg = (m) => ({
   ragOpenIndex: -1,
   // M4：thought 旁白不落库（与思维链一致），历史消息无时间线
   timeline: [],
+  // A2：分支状态占位（branchInfo 由 loadBranchInfo 异步填充；本地流式消息无此字段）
+  branchInfo: null,
 })
+
+// —— A2 消息分支 ——
+
+/** 拉取一轮的兄弟分支并写入消息的 branchInfo（含在兄弟列表中的位置）。仅历史消息有真实 id */
+const loadBranchInfo = async (m) => {
+  if (!m || m.role !== 'user' || !m._fromHistory) return
+  try {
+    const res = await aiApi.branchSiblings(currentConvId.value, m.id)
+    const list = res?.list || []
+    if (!list.length) return
+    const idx = list.findIndex((s) => s.id === m.id)
+    m.branchInfo = {
+      groupKey: res.groupKey,
+      total: list.length,
+      index: idx >= 0 ? idx : 0,
+    }
+  } catch {
+    // 分支查询失败静默：导航不显示，不影响对话
+  }
+}
+
+/** 切换分支：切到当前消息的相邻兄弟版本（delta = -1 上一版 / 1 下一版），服务端重设激活链后重拉历史 */
+const switchBranch = async (m, delta) => {
+  if (!m.branchInfo || currentConvId.value === null) return
+  try {
+    const res = await aiApi.branchSiblings(currentConvId.value, m.id)
+    const list = res?.list || []
+    const idx = list.findIndex((s) => s.id === m.id)
+    const target = list[idx + delta]
+    if (!target) return
+    await aiApi.switchBranch(currentConvId.value, target.id, m.branchInfo.groupKey)
+    // 激活链已变：清缓存重拉（convStates 里该会话的快照已过期）
+    const st = stateOf(currentConvId.value)
+    st.messages = []
+    st.totalMessages = 0
+    await switchConv(currentConvId.value)
+  } catch (e) {
+    ElMessage.error(e?.message || '分支切换失败')
+  }
+}
+
+/** 编辑重发：展开编辑框（不覆盖原消息，发送后产生新分支） */
+const startEditResend = (m) => {
+  m.editing = true
+  m.editText = m.content
+}
+
+/** 确认编辑重发：以原消息的分支组发起新分支轮 */
+const confirmEditResend = async (m) => {
+  const content = m.editText?.trim()
+  if (!content || currentConvId.value === null) return
+  m.editing = false
+  // 分支组可能尚未建立（历史首轮无 group_key）：先查一次触发服务端懒初始化
+  let groupKey = m.branchInfo?.groupKey
+  if (!groupKey) {
+    try {
+      const res = await aiApi.branchSiblings(currentConvId.value, m.id)
+      groupKey = res?.groupKey
+    } catch { /* 拿不到组则按普通消息发送 */ }
+  }
+  m.branchInfo = null // 落库后重拉，先清掉避免过期的 index/total
+  await sendInternal(content, { continuation: false, branchGroupKey: groupKey || undefined })
+}
+
+/** 重新生成：同一提问换一个回答（新分支），仅历史消息可用（流式中的消息 id 是本地临时 id） */
+const regenerate = async (m) => {
+  if (currentConvId.value === null) return
+  // 找到本轮的 user 消息（助手消息向前找最近的 user）
+  const idx = messages.value.indexOf(m)
+  let userMsg = null
+  for (let i = Math.max(idx, 0); i >= 0; i--) {
+    if (messages.value[i].role === 'user') { userMsg = messages.value[i]; break }
+  }
+  if (!userMsg || !userMsg._fromHistory) return
+  let groupKey = userMsg.branchInfo?.groupKey
+  if (!groupKey) {
+    try {
+      const res = await aiApi.branchSiblings(currentConvId.value, userMsg.id)
+      groupKey = res?.groupKey
+      if (userMsg.branchInfo) userMsg.branchInfo.groupKey = groupKey
+    } catch { /* 拿不到组则按普通轮重发 */ }
+  }
+  await sendInternal(userMsg.content, { continuation: false, branchGroupKey: groupKey || undefined })
+}
 
 /**
  * M9：从快照通道解析授权卡决策记录为只读历史卡片。
@@ -1011,6 +1140,8 @@ const switchConv = async (id) => {
     st.totalMessages = data.total || page.length
     st.oldestLoadedId = page.length ? page[0].id : null
     st.hasMore = st.loadedCount < st.totalMessages
+    // A2：为可见 user 消息拉取分支导航（有兄弟版本才显示 « 2/3 »）；逐条异步不阻塞渲染
+    page.filter((mm) => mm.role === 'user').forEach((mm) => loadBranchInfo(mm))
   } catch (e) {
     const st = stateOf(id)
     st.messages = []
@@ -1439,7 +1570,7 @@ const maybeContinueAfterAllResolved = (msg, toolSummary, convId) => {
   continueAfterConfirm(`${toolSummary}；本轮授权共 ${cards.length} 项：成功 ${ok} 项，跳过 ${skipped} 项`, { convId })
 }
 
-const sendInternal = async (content, { continuation, convId: explicitConvId }) => {
+const sendInternal = async (content, { continuation, convId: explicitConvId, branchGroupKey }) => {
   // 多会话并行：目标会话由显式 convId 决定（排队 flush / 授权续跑各自的会话），
   // 未显式给出时用当前会话；目标会话与当前视图解耦，切换不影响已发起的流
   let convId = explicitConvId ?? currentConvId.value
@@ -1463,7 +1594,8 @@ const sendInternal = async (content, { continuation, convId: explicitConvId }) =
   const conv = conversations.value.find((c) => c.id === convId)
   const isFirstMsg = !conv || conv.title === '新对话' || !conv.title
 
-  // 推送用户消息（续跑轮引导语不显示用户气泡，避免伪造用户发言）
+  // 推送用户消息（续跑轮引导语不显示用户气泡，避免伪造用户发言）。
+  // A2：本地临时消息不带 _fromHistory——分支操作仅对服务端已落库的历史消息开放
   if (!continuation) {
     st.messages.push({
       id: Date.now(),
@@ -1555,7 +1687,13 @@ const sendInternal = async (content, { continuation, convId: explicitConvId }) =
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ conversationId: convId, content, continuation }),
+      body: JSON.stringify({
+        conversationId: convId,
+        content,
+        continuation,
+        // A2：分支轮携带原轮分组标识（新消息落库到同组，前端分支导航聚合）
+        branchGroupKey: branchGroupKey || undefined,
+      }),
       signal: abortController.signal,
     })
 
@@ -1793,6 +1931,13 @@ const sendInternal = async (content, { continuation, convId: explicitConvId }) =
         }
         if (isFirstMsg && conv) {
           conv.title = content.length > 20 ? content.substring(0, 20) + '…' : content
+        }
+        // A2：本轮流结束（消息已落库），为本轮 user 消息拉取分支导航——
+        // 分支轮（编辑重发/重新生成）落库后同组出现新兄弟，导航立即更新
+        const localUserMsg = !continuation ? st.messages[st.messages.length - 2] : null
+        if (localUserMsg && localUserMsg.role === 'user') {
+          localUserMsg._fromHistory = true
+          loadBranchInfo(localUserMsg)
         }
       } else if (event === 'confirm') {
         // 写操作授权请求：模型发起写操作被门禁拦截，改为向用户请求授权。
@@ -2297,6 +2442,70 @@ onMounted(loadConversations)
 /* 用户：右对齐气泡 */
 .msg-row.user {
   justify-content: flex-end;
+}
+/* A2：用户消息右列——分支导航 / 气泡 / 操作条纵向排列 */
+.user-col {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  max-width: 100%;
+}
+/* 分支导航：« 2/3 » 版本切换（chat-demo 同款交互） */
+.branch-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-caption);
+  color: var(--color-text-tertiary);
+}
+.branch-arrow {
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  transition: all var(--duration-fast) var(--ease-soft);
+}
+.branch-arrow:hover:not(:disabled) {
+  background: var(--color-bg-subtle);
+  color: var(--color-primary);
+}
+.branch-arrow:disabled { opacity: 0.3; cursor: default; }
+.branch-pos { font-family: var(--font-mono); min-width: 28px; text-align: center; }
+/* 悬停操作条：编辑 / 重新生成（默认隐藏，悬停气泡列时浮现） */
+.user-actions {
+  display: flex;
+  gap: 10px;
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-soft);
+}
+.msg-row.user:hover .user-actions { opacity: 1; }
+.user-action {
+  border: none;
+  background: transparent;
+  color: var(--color-text-tertiary);
+  font-size: var(--fs-caption);
+  cursor: pointer;
+  padding: 2px 0;
+  transition: color var(--duration-fast) var(--ease-soft);
+}
+.user-action:hover:not(:disabled) { color: var(--color-primary); }
+.user-action:disabled { opacity: 0.4; cursor: default; }
+/* 编辑框：就地展开在气泡下方（右对齐） */
+.edit-box {
+  width: min(480px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 .user-bubble {
   max-width: 78%;

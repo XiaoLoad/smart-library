@@ -107,6 +107,10 @@ export const aiApi = {
   setPermissionMode: (id, mode) => post(`/ai/conversation/${id}/permission-mode?mode=${encodeURIComponent(mode)}`),
   // M10 会话待确认授权请求（对齐 ZCode pendingInteractions）：刷新/切页回来恢复等待确认的卡
   pendingInteractions: (id) => get(`/ai/conversation/${id}/pending`),
+  // A2 消息分支：查询一轮对话的兄弟分支（编辑重发/重新生成的历史版本）；切换激活分支
+  branchSiblings: (conversationId, messageId) => get(`/ai/message/${messageId}/branches`, { conversationId }),
+  switchBranch: (conversationId, messageId, groupKey) =>
+    post(`/ai/message/${messageId}/switch-branch?conversationId=${conversationId}&groupKey=${encodeURIComponent(groupKey)}`),
 }
 
 // M6a：Agent 运行轨迹（管理员）
