@@ -314,6 +314,7 @@ public abstract class BaseLibraryTools {
     private static final Map<String, String> SNAPSHOT_TYPES = Map.ofEntries(
             Map.entry("queryBooks", "book_grid"),
             Map.entry("queryHotBooks", "rank_list"),
+            Map.entry("recommendBooks", "book_grid"),
             Map.entry("queryBorrowQuota", "quota_bar"),
             Map.entry("queryMyBorrows", "borrow_table"),
             Map.entry("queryMyFines", "fine_table"),

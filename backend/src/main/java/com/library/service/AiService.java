@@ -122,6 +122,7 @@ public class AiService {
     @Autowired private AiBatchConfirmService aiBatchConfirmService;
     @Autowired private AiSessionAllowService aiSessionAllowService;
     @Autowired private NotificationService notificationService;
+    @Autowired private RecommendService recommendService;
     @Autowired private AiAgentTraceService traceService;
 
     /** 缓存各渠道配置构建的流式模型（key = 配置 hash）。故障转移时多渠道并存复用，避免重复创建 OkHttpClient */
@@ -1398,7 +1399,8 @@ public class AiService {
         return new AiToolContext(
                 borrowMapper, bookMapper, fineMapper, announcementMapper,
                 borrowLimitMapper, userMapper, categoryMapper, notificationMapper,
-                categoryService, borrowService, statsService, notificationService, objectMapper);
+                categoryService, borrowService, statsService, notificationService,
+                recommendService, objectMapper);
     }
 
     /** 当前登录用户的类型（3=管理员） */

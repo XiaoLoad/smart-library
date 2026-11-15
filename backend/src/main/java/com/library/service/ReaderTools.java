@@ -145,6 +145,18 @@ public class ReaderTools extends BaseLibraryTools {
     }
 
     /**
+     * 个性化图书推荐（三层混合：借阅共现协同过滤 + 向量语义相似 + 画像热门兜底）。
+     */
+    @Tool("为当前用户生成个性化图书推荐（基于 TA 的真实借阅历史、内容相似度与所在院系专业热门）。"
+            + "用于回答「给我推荐几本书/有什么书适合我/我接下来读什么」类问题。"
+            + "每本推荐附带 reason 推荐理由，转述时必须带上理由；用户想借其中某本时，"
+            + "按推荐项的 title 与 isbn 调用 applyBorrow 办理")
+    public Map<String, Object> recommendBooks() {
+        return withEvent("recommendBooks", null, v ->
+                ctx.recommendService.recommendForUserTool(userId, 8));
+    }
+
+    /**
      * 提交借阅申请（写操作）。
      * <p>
      * 入参刻意不接收图书 ID：ID 需要模型自行在上下文中挑选，曾发生「确认《围城》却按错 ID
