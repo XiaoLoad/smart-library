@@ -149,6 +149,27 @@
       </div>
     </section>
 
+    <!-- 04 · 为你推荐（读者） -->
+    <section class="section reveal" v-if="!userStore.isAdmin && recommendItems.length">
+      <div class="section-head">
+        <span class="section-index">03</span>
+        <h2 class="section-title">为你推荐</h2>
+        <span class="section-rule"></span>
+        <span class="section-note">共现 × 语义 × 画像</span>
+      </div>
+
+      <div class="card panel">
+        <div class="panel-head">
+          <div>
+            <span class="panel-eyebrow">FOR YOU</span>
+            <h3 class="panel-title">根据您的借阅历史与院系画像生成</h3>
+          </div>
+          <router-link to="/book/list" class="more-link">馆藏目录</router-link>
+        </div>
+        <RecommendStrip :items="recommendItems" />
+      </div>
+    </section>
+
     <!-- 04 · 馆藏结构（管理员） -->
     <section class="section reveal" v-if="userStore.isAdmin && data.stats.length">
       <div class="section-head">
@@ -157,7 +178,6 @@
         <span class="section-rule"></span>
         <span class="section-note">按一级分类</span>
       </div>
-
       <div class="card panel chart-panel">
         <div class="panel-head">
           <div>
@@ -193,7 +213,7 @@
     <!-- 05 · 排行与馆讯 -->
     <section class="section reveal" v-if="data.stats.length">
       <div class="section-head">
-        <span class="section-index">{{ userStore.isAdmin ? '05' : '03' }}</span>
+        <span class="section-index">{{ userStore.isAdmin ? '05' : '04' }}</span>
         <h2 class="section-title">{{ userStore.isAdmin ? '借阅榜与馆讯' : '我的热门与馆讯' }}</h2>
         <span class="section-rule"></span>
         <span class="section-note">按实际取书次数</span>
@@ -275,10 +295,11 @@ import { LineChart, PieChart, BarChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent } from 'echarts/components'
 import VChart from 'vue-echarts'
 import { ArrowRight } from '@element-plus/icons-vue'
-import { dashboardApi, announcementApi } from '@/api'
+import { dashboardApi, announcementApi, recommendApi } from '@/api'
 import { useUserStore } from '@/stores/user'
 import { useAppStore } from '@/stores/app'
 import EllipsisText from '@/components/EllipsisText.vue'
+import RecommendStrip from '@/components/RecommendStrip.vue'
 
 use([CanvasRenderer, LineChart, PieChart, BarChart, GridComponent, TooltipComponent])
 
@@ -605,6 +626,8 @@ const hotBarWidth = (count) => Math.max(6, Math.round((Number(count) / hotMaxCou
 
 const noticeDate = (t) => (t ? String(t).substring(5, 10).replace('-', '.') : '')
 
+const recommendItems = ref([])
+
 const loadData = async () => {
   const [stats, noticeData] = await Promise.all([
     dashboardApi.stats(userStore.userType),
@@ -612,6 +635,15 @@ const loadData = async () => {
   ])
   data.value = stats
   notices.value = (noticeData.list || []).slice(0, 8)
+  // 读者个性化推荐（管理员不展示该区块，不请求）
+  if (!userStore.isAdmin) {
+    try {
+      recommendItems.value = (await recommendApi.personal(8)) || []
+    } catch (e) {
+      // 推荐失败不打断仪表盘
+      recommendItems.value = []
+    }
+  }
 }
 
 onMounted(loadData)

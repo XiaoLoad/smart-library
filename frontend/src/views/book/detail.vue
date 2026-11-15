@@ -116,6 +116,12 @@
             </div>
           </dl>
         </div>
+
+        <!-- 相似图书：借阅共现 + 内容语义 -->
+        <div class="catalog-section fade-in d3" v-if="similarItems.length">
+          <div class="section-label">读过此书的人还读 <i>YOU MAY ALSO LIKE</i></div>
+          <RecommendStrip :items="similarItems" />
+        </div>
       </section>
     </article>
 
@@ -145,11 +151,12 @@ import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { useRoute, onBeforeRouteLeave } from 'vue-router'
 import { Loading } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { bookApi, borrowApi } from '@/api'
+import { bookApi, borrowApi, recommendApi } from '@/api'
 import { useUserStore } from '@/stores/user'
 import { useBookTransitionStore } from '@/stores/bookTransition'
 import BorrowCodeDialog from '@/components/BorrowCodeDialog.vue'
 import BookFormDialog from '@/components/BookFormDialog.vue'
+import RecommendStrip from '@/components/RecommendStrip.vue'
 
 const route = useRoute()
 const userStore = useUserStore()
@@ -197,7 +204,18 @@ const loadDetail = async () => {
     crumbs[crumbs.length - 1].title = book.value ? `${book.value.title} 详情` : '图书详情'
   }
   document.title = book.value ? `${book.value.title} · 智图` : '图书详情 · 智图'
+  // 相似图书（借阅共现 + 向量语义），失败静默不打断详情页
+  similarItems.value = []
+  if (book.value) {
+    try {
+      similarItems.value = (await recommendApi.similar(book.value.id, 6)) || []
+    } catch {
+      similarItems.value = []
+    }
+  }
 }
+
+const similarItems = ref([])
 
 const loadQuota = async () => {
   if (userStore.isAdmin) return

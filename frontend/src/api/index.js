@@ -80,6 +80,12 @@ export const dashboardApi = {
   stats: (userType) => get('/dashboard/stats', { userType }),
 }
 
+// 图书推荐
+export const recommendApi = {
+  personal: (limit = 8) => get('/recommend/personal', { limit }),
+  similar: (bookId, limit = 6) => get(`/recommend/similar/${bookId}`, { limit }),
+}
+
 // AI
 // 注：流式对话 SSE 不走 axios（不支持流式解析），在 chat.vue 内用 fetch+ReadableStream 实现
 export const aiApi = {
