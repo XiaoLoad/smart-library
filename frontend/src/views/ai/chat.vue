@@ -396,6 +396,15 @@
             </div>
           </template>
 
+          <!-- 排队气泡：本会话流未结束时发送的消息先排队，轮到时自动发出（chat-demo 同款）。
+               单条展示即可——每会话队列 FIFO，多条排队时重复的提示没有信息量 -->
+          <div v-if="queuedForCurrent" class="msg-row user">
+            <div class="user-bubble queued">
+              {{ pendingQueue.find((q) => q.convId === currentConvId)?.content }}
+              <span class="queued-tag">排队中 · 上一轮回复结束后自动发送</span>
+            </div>
+          </div>
+
           <!-- 底部留白，保证最后一条不被输入框遮挡 -->
           <div class="msg-bottom-gap"></div>
         </div>
@@ -452,11 +461,11 @@
           />
           <button
             class="composer-btn"
-            :class="thinking ? 'stop' : 'send'"
-            :title="thinking ? '停止生成' : '发送'"
-            @click="thinking ? stopGenerate() : send()"
+            :class="currentStreaming ? 'stop' : 'send'"
+            :title="currentStreaming ? '停止生成' : '发送'"
+            @click="currentStreaming ? stopGenerate() : send()"
           >
-            <el-icon><VideoPause v-if="thinking" /><Promotion v-else /></el-icon>
+            <el-icon><VideoPause v-if="currentStreaming" /><Promotion v-else /></el-icon>
           </button>
         </div>
         <p v-if="hasPendingConfirm" class="composer-tip composer-blocked-tip">
@@ -485,6 +494,8 @@ import { useUserStore } from '@/stores/user'
 import ConversationNav from '@/components/ConversationNav.vue'
 import AppIcon from '@/components/AppIcon.vue'
 import AiGenUi from '@/components/ai/AiGenUi.vue'
+import { createStreamRenderer } from '@/utils/streamRender'
+import { classifyAiError, describeWithAction, withRetry, AiErrorKind } from '@/utils/aiErrors'
 
 // keep-alive 缓存名单按路由 name 匹配，故显式声明组件名
 defineOptions({ name: 'AIChat' })
@@ -789,10 +800,56 @@ const needDivider = (i) => {
 
 const conversations = ref([])
 const currentConvId = ref(null)
-const messages = ref([])
+// —— 多会话并行支持（对齐 deepseek-ai/chat-demo 的 per-session streaming 模型）——
+// convStates：按会话缓存消息与分页状态。切走再切回时内存态即时恢复（不等接口），
+// 并行流的增量写入各自会话的缓存，切换不打断任何一路流。
+// { messages: [...], loadedCount, totalMessages, oldestLoadedId, hasMore }
+const convStates = reactive(new Map())
+// 当前会话投影：模板与既有逻辑继续用 messages/loadedCount 等 ref，读写都落到 convStates
+const messages = computed(() => {
+  const st = convStates.get(currentConvId.value)
+  return st ? st.messages : []
+})
+const loadedCount = computed(() => convStates.get(currentConvId.value)?.loadedCount ?? 0)
+const totalMessages = computed(() => convStates.get(currentConvId.value)?.totalMessages ?? 0)
+const oldestLoadedId = computed(() => convStates.get(currentConvId.value)?.oldestLoadedId ?? null)
+const hasMore = computed(() => convStates.get(currentConvId.value)?.hasMore ?? false)
+
+/** 取（或创建）会话状态条目 */
+const stateOf = (convId) => {
+  let st = convStates.get(convId)
+  if (!st) {
+    st = reactive({ messages: [], loadedCount: 0, totalMessages: 0, oldestLoadedId: null, hasMore: false })
+    convStates.set(convId, st)
+  }
+  return st
+}
+
 const input = ref('')
-const thinking = ref(false)
+// streamingMap：每会话一路独立流（对齐 chat-demo 的 streaming: Record<sessionId, AbortController>）。
+// key = 会话 ID，value = 该会话当前流的 AbortController；按钮与守卫按「当前会话是否在流中」判定，
+// 其他会话的流不影响当前输入区
+const streamingMap = reactive(new Map())
+// 当前会话是否正在流式回复（派生）：控制停止/发送按钮形态与切会话守卫
+const currentStreaming = computed(() => currentConvId.value !== null && streamingMap.has(currentConvId.value))
+// 排队中的待发消息（每会话一条队列）：当前会话流未结束时发送 → 先入队，
+// done/error/停止后自动发出。对齐 chat-demo「发送排队等待上一轮结束再自动发送」的行为
+// { convId, content }；排队气泡挂在对应会话消息列表尾部
+const pendingQueue = reactive([])
+// 排队气泡展示用：当前会话是否存在排队消息
+const queuedForCurrent = computed(() => pendingQueue.some((q) => q.convId === currentConvId.value))
+
 const msgListRef = ref(null)
+
+// A1/A6：流式渲染与中断判定所需的模块级上下文（每路流一组，随流结束置 null）。
+// 旧实现为单流单实例；多会话并行后按 convId 存取，handleEvent 等闭包经 getStreamCtx 取用
+const streamCtxMap = new Map() // convId → { abortController, streamRenderer, doneReceived, assistantMsg, ... }
+const getStreamCtx = (convId) => streamCtxMap.get(convId)
+
+// 思考占位指示（「正在思考…」点状跳动）：按会话记录。首个流事件到达即关闭（单流语义不变），
+// 按钮形态不再挂在此处——由 currentStreaming 控制
+const thinkingMap = reactive(new Map())
+const thinking = computed(() => currentConvId.value !== null && !!thinkingMap.get(currentConvId.value))
 
 // M7 写操作权限档位：随会话切换加载，切换时即时调 API 持久到会话
 const permMode = ref('confirm')
@@ -829,24 +886,8 @@ const switchPermMode = async (mode) => {
 // AI 检索联动：已收窄到悬浮球面板——AI 助手页自身有完整检索展示（生成式卡片），
 // 查询结果只留在对话内，不再写入 aiSearchStore 跨页投递
 const lastUserText = ref('')
-// 检索联动候补（保留结构以对齐悬浮球面板的 done 处理；助手页不广播，done 时直接清空）
-let pendingAiSearch = null
-// 本轮是否出现写操作授权（confirm 事件，仅写操作会触发门禁）——出现则本轮不广播检索联动
-let turnHasWrite = false
-// 写意图关键词：用户原话带借/还/续借等写意图时同样不广播——模型在借书前常先查库存、
-// 确认版本（不调写工具、无 confirm 事件），如「请先选定一版，我再提交借阅申请」
-const WRITE_INTENT_RE = /(借阅|帮我借|想借|要借|借下|借一下|借一本|借这本|借了|续借|归还|还书|罚款)/
-let turnWriteIntent = false
-// 历史分页加载状态
-const oldestLoadedId = ref(null)   // 当前已加载消息中最老的 id（更早一页的游标）
-const loadedCount = ref(0)         // 已加载消息数
-const totalMessages = ref(0)       // 会话消息总数
-const hasMore = ref(false)         // 是否还有更早消息
+// 历史分页加载状态（分页字段已并入 convStates 投影，见声明区；此处仅保留拉取守卫）
 const loadingOlder = ref(false)    // 防重复拉取守卫
-// 当前流式请求的 AbortController（用于取消）
-let abortController = null
-// 当前流式回复的助手消息引用（send 中创建，stopGenerate/catch/finally 中复用）
-let assistantMsg = null
 
 // 智能滚动控制
 const isAutoFollow = ref(true)
@@ -932,7 +973,8 @@ const onJumpAnchor = () => {
 
 const loadConversations = async () => {
   try {
-    const data = await aiApi.conversationList()
+    // A5：列表加载带退避重试（网络抖动/服务瞬时不可用时自动再试，最多 2 次）
+    const data = await withRetry(() => aiApi.conversationList())
     conversations.value = data.list || []
     if (conversations.value.length) {
       await switchConv(conversations.value[0].id)
@@ -943,24 +985,41 @@ const loadConversations = async () => {
 }
 
 const switchConv = async (id) => {
-  if (thinking.value) return // 流式输出中不切换
+  // 多会话并行：切会话不再被流守卫拦截——后台流的增量写入各自会话的 convStates，
+  // 与当前视图无关（对齐 chat-demo 任意切换行为）
+  if (currentConvId.value === id) return
   currentConvId.value = id
   isAutoFollow.value = true
+  showJumpBtn.value = false
   // M7：加载该会话的权限档位（切会话即切档位视图；接口失败按默认逐笔确认显示）
   const convMeta = conversations.value.find((c) => c.id === id)
   permMode.value = convMeta?.permissionMode || 'confirm'
+  // 内存态即时恢复：该会话此前打开过（含后台仍在流式的），直接用缓存渲染，不等接口
+  if (stateOf(id).messages.length || stateOf(id).totalMessages > 0) {
+    await restorePendingCards(id)
+    await scrollToBottomForce()
+    return
+  }
   try {
-    const data = await aiApi.messageList(id)
+    // A5：消息加载同样走退避重试；全部失败按空会话展示并提示类目化原因
+    const data = await withRetry(() => aiApi.messageList(id))
     // 后端返回最新一页（id DESC），倒转为正序后再渲染
     const page = (data.list || []).map(enrichMsg).reverse()
-    messages.value = page
-    loadedCount.value = page.length
-    totalMessages.value = data.total || page.length
-    oldestLoadedId.value = page.length ? page[0].id : null
-    hasMore.value = loadedCount.value < totalMessages.value
+    const st = stateOf(id)
+    st.messages = page
+    st.loadedCount = page.length
+    st.totalMessages = data.total || page.length
+    st.oldestLoadedId = page.length ? page[0].id : null
+    st.hasMore = st.loadedCount < st.totalMessages
   } catch (e) {
-    messages.value = []
-    hasMore.value = false
+    const st = stateOf(id)
+    st.messages = []
+    st.hasMore = false
+    const { kind, message } = classifyAiError(e)
+    // 404（会话已被其他端删除）静默清空即可；其余类目给可操作的提示
+    if (kind !== AiErrorKind.NOT_FOUND) {
+      ElMessage.warning(describeWithAction({ kind, message }))
+    }
   }
   // M10（对齐 ZCode pendingInteractions）：恢复该会话仍待确认的授权卡。
   // 令牌在服务端有 TTL，恢复的卡带剩余有效期；过期则不再展示
@@ -1018,14 +1077,15 @@ const loadOlder = async () => {
   try {
     const data = await aiApi.messageList(currentConvId.value, { beforeId: oldestLoadedId.value })
     const older = (data.list || []).map(enrichMsg).reverse()
+    const st = stateOf(currentConvId.value)
     if (!older.length) {
-      hasMore.value = false
+      st.hasMore = false
       return
     }
-    messages.value = [...older, ...messages.value]
-    loadedCount.value += older.length
-    oldestLoadedId.value = older[0].id
-    hasMore.value = loadedCount.value < (data.total || totalMessages.value)
+    st.messages = [...older, ...st.messages]
+    st.loadedCount += older.length
+    st.oldestLoadedId = older[0].id
+    st.hasMore = st.loadedCount < (data.total || st.totalMessages)
   } catch (e) {
     // 加载失败静默
   } finally {
@@ -1040,12 +1100,13 @@ const loadOlder = async () => {
 }
 
 const newConv = async () => {
-  if (thinking.value) return
+  // 多会话并行：新建会话不再被流守卫拦截（当前会话的流在后台继续）
   try {
     const conv = await aiApi.createConversation()
     conversations.value.unshift(conv)
+    // 空状态预建：新会话无历史，直接展示空列表（切走再切回不重复拉取）
+    stateOf(conv.id)
     currentConvId.value = conv.id
-    messages.value = []
     isAutoFollow.value = true
     showJumpBtn.value = false
   } catch (e) {
@@ -1064,12 +1125,24 @@ const deleteConv = async (id) => {
     return
   }
   try {
+    // 该会话仍有流在跑：先中断（删除会话后流已无意义，避免后台继续写已删会话的缓存）
+    const ctrl = streamingMap.get(id)
+    if (ctrl) {
+      ctrl.abort()
+      streamingMap.delete(id)
+    }
+    streamCtxMap.delete(id)
+    thinkingMap.delete(id)
+    convStates.delete(id)
+    // 移除该会话的排队消息
+    for (let i = pendingQueue.length - 1; i >= 0; i--) {
+      if (pendingQueue[i].convId === id) pendingQueue.splice(i, 1)
+    }
     await aiApi.deleteConversation(id)
     const idx = conversations.value.findIndex((c) => c.id === id)
     if (idx >= 0) conversations.value.splice(idx, 1)
     if (currentConvId.value === id) {
       currentConvId.value = null
-      messages.value = []
       if (conversations.value.length) {
         await switchConv(conversations.value[0].id)
       }
@@ -1101,7 +1174,8 @@ const handleUnauthorized = (message) => {
 
 /* —— 写操作授权卡 —— */
 
-// 确认执行：回传令牌与会话 ID，参数由服务端保存，客户端无法篡改
+// 确认执行：回传令牌与会话 ID，参数由服务端保存，客户端无法篡改。
+// 卡片渲染在当前视图，但其 conversationId 才是续跑归属（多会话并行下视图 ≠ 流归属）
 const onConfirmWrite = async (card) => {
   if (!card || card.state !== 'pending') return
   stopConfirmCountdown(card)
@@ -1112,10 +1186,10 @@ const onConfirmWrite = async (card) => {
     const res = await aiApi.confirmWrite(card.token, card.tool, card.conversationId, card.alwaysAllow === true)
     card.state = 'confirmed'
     card.result = res
-    reportCardDecision(card, 'confirmed')
+    reportCardDecision(card, 'confirmed', card.conversationId)
     // M10：结果直接内联在授权卡上（card.result），不再追加回执文字气泡
     // M11：全部卡处理完才发起一次续跑
-    maybeContinueAfterAllResolved(ownerMsg, card.tool)
+    maybeContinueAfterAllResolved(ownerMsg, card.tool, card.conversationId)
   } catch (e) {
     // 失败分类：令牌类失效（过期/已被处理/不匹配）→ expired；业务错误（如库存不足）→ failed。
     // 令牌一次性，失败后原卡无法重试，两种状态都只说明结果，不一律谎称过期
@@ -1123,9 +1197,9 @@ const onConfirmWrite = async (card) => {
     const tokenInvalid = /失效|过期|已被处理|重新发起/.test(message)
     card.state = tokenInvalid ? 'expired' : 'failed'
     card.error = message
-    reportCardDecision(card, tokenInvalid ? 'expired' : 'failed')
+    reportCardDecision(card, tokenInvalid ? 'expired' : 'failed', card.conversationId)
     // M11：失效/失败也算已处理，同样走聚合判定
-    maybeContinueAfterAllResolved(ownerMsg, card.tool)
+    maybeContinueAfterAllResolved(ownerMsg, card.tool, card.conversationId)
   }
 }
 
@@ -1134,10 +1208,10 @@ const onCancelWrite = (card) => {
   if (!card || card.state !== 'pending') return
   stopConfirmCountdown(card)
   card.state = 'cancelled'
-  reportCardDecision(card, 'cancelled')
+  reportCardDecision(card, 'cancelled', card.conversationId)
   // M11：取消也是「已处理」，全部卡处理完触发聚合续跑
   const ownerMsg = messages.value.find((m) => (m.confirmCards || []).includes(card))
-  maybeContinueAfterAllResolved(ownerMsg, card.tool || '')
+  maybeContinueAfterAllResolved(ownerMsg, card.tool || '', card.conversationId)
 }
 
 /* —— M7 批量授权卡 —— */
@@ -1172,16 +1246,16 @@ const onConfirmBatch = async (card) => {
     const res = await aiApi.confirmBatchWrite(card.token, card.conversationId)
     card.state = 'confirmed'
     card.result = res
-    reportCardDecision(card, 'confirmed', true)
+    reportCardDecision(card, 'confirmed', card.conversationId, true)
     // M10：批量结果内联在卡片上（confirm-batch-result 区块已有渲染），不再追加文字气泡
     // M8 确认续跑：批量办理完成后自动发起下一轮，模型汇总/继续剩余步骤
-    continueAfterConfirm(`批量办理 ${res?.successCount ?? 0} 项成功`)
+    continueAfterConfirm(`批量办理 ${res?.successCount ?? 0} 项成功`, { convId: card.conversationId })
   } catch (e) {
     const message = e?.message || '批量授权已失效，请重新发起该操作'
     const tokenInvalid = /失效|过期|已被处理|重新发起/.test(message)
     card.state = tokenInvalid ? 'expired' : 'failed'
     card.error = message
-    reportCardDecision(card, tokenInvalid ? 'expired' : 'failed', true)
+    reportCardDecision(card, tokenInvalid ? 'expired' : 'failed', card.conversationId, true)
   }
 }
 
@@ -1190,9 +1264,9 @@ const onCancelBatch = (card) => {
   if (!card || card.state !== 'pending') return
   stopConfirmCountdown(card)
   card.state = 'cancelled'
-  reportCardDecision(card, 'cancelled', true)
+  reportCardDecision(card, 'cancelled', card.conversationId, true)
   // 批量卡取消也必须回执给模型，否则模型误认为操作悬而未决而重发授权卡
-  continueAfterConfirm(card.title || '本批写操作', { rejected: true })
+  continueAfterConfirm(card.title || '本批写操作', { rejected: true, convId: card.conversationId })
 }
 
 // 授权过期：卡片灰态保留，说明发生过什么而非凭空消失
@@ -1202,7 +1276,7 @@ const onConfirmExpired = (card) => {
   card.state = 'expired'
   card.error = '授权已过期，请重新发起该操作'
   // batch 卡无 tool 字段（批次），以 tool 空串上报；batch 标记由卡片自身携带
-  reportCardDecision(card, 'expired', !!card.batchFlag)
+  reportCardDecision(card, 'expired', card.conversationId, !!card.batchFlag)
 }
 
 // 授权卡倒计时：本地每秒递减 remain，归零触发 onConfirmExpired（服务端 TTL 的前端镜像）
@@ -1221,11 +1295,15 @@ const stopConfirmCountdown = (card) => {
   }
 }
 
-/** M9 上报授权卡决策态（展示层记录，失败不影响主流程） */
-const reportCardDecision = (card, decision, batch = false) => {
-  if (!card || !currentConvId.value) return
+/**
+ * M9 上报授权卡决策态（展示层记录，失败不影响主流程）。
+ * convId 显式传入（多会话并行下卡片可能属于后台会话），未传时回退当前会话。
+ */
+const reportCardDecision = (card, decision, convId, batch = false) => {
+  const target = convId ?? currentConvId.value
+  if (!card || !target) return
   aiApi.recordCardDecision({
-    conversationId: currentConvId.value,
+    conversationId: target,
     decision,
     token: card.token || '',
     tool: card.tool || '',
@@ -1233,15 +1311,6 @@ const reportCardDecision = (card, decision, batch = false) => {
     rows: Array.isArray(card.rows) ? card.rows : [],
     batch,
   }).catch(() => { /* 展示层记录失败不影响主流程 */ })
-}
-
-/** 在当前助手气泡追加一句文本 */
-const appendAssistantText = (text) => {
-  const msg = assistantMsg
-  if (!msg) return
-  msg.content = msg.content ? `${msg.content}\n\n${text}` : text
-  msg.html = renderMarkdown(msg.content, msg.ragSources)
-  scrollToBottom()
 }
 
 /**
@@ -1252,12 +1321,16 @@ const appendAssistantText = (text) => {
 const applyToolResult = (info) => {
   if (!info?.tool) return
   const candidates = []
-  for (const m of messages.value) {
-    for (const c of m.confirmCards || []) {
-      if (c.tool === info.tool) candidates.push(c)
-    }
-    if (m.batchConfirmCard && (info.tool === 'adminCounterProcessBatch' || m.batchConfirmCard.tool === info.tool)) {
-      candidates.push(m.batchConfirmCard)
+  // 多会话并行：tool_result 推送来自确认接口的会话级通道，但卡片可能在任一会话的缓存里
+  // （后台会话流已结束时推送落空，确认接口返回值已在本地更新过卡片，此处兜底搜索）
+  for (const [, st] of convStates) {
+    for (const m of st.messages) {
+      for (const c of m.confirmCards || []) {
+        if (c.tool === info.tool) candidates.push(c)
+      }
+      if (m.batchConfirmCard && (info.tool === 'adminCounterProcessBatch' || m.batchConfirmCard.tool === info.tool)) {
+        candidates.push(m.batchConfirmCard)
+      }
     }
   }
   let card = info.token
@@ -1274,13 +1347,22 @@ const applyToolResult = (info) => {
   if (info.success === false) card.error = info.message || '执行失败'
 }
 
-/** 停止生成：中断当前 SSE 请求 */
+/**
+ * 停止生成（按会话）：中断当前会话的 SSE 请求并清掉其排队消息。
+ * stop 只作用于当前会话——其他会话的后台流不受影响。
+ */
 const stopGenerate = () => {
-  if (abortController) {
-    abortController.abort()
-    abortController = null
+  const convId = currentConvId.value
+  if (convId === null) return
+  const ctx = getStreamCtx(convId)
+  if (ctx?.abortController) {
+    ctx.abortController.abort()
   }
-  thinking.value = false
+  // 同会话的排队消息一并清除（用户明确不想继续这轮对话链）
+  for (let i = pendingQueue.length - 1; i >= 0; i--) {
+    if (pendingQueue[i].convId === convId) pendingQueue.splice(i, 1)
+  }
+  // streaming/thinking 复位交给 sendInternal 的 finally 统一收口
 }
 
 /**
@@ -1296,75 +1378,94 @@ const hasPendingConfirm = computed(() =>
 )
 
 const send = async () => {
-  if (thinking.value) return
   if (hasPendingConfirm.value) {
     ElMessage.warning('请先处理上方待确认的授权请求（确认或取消）后再继续对话')
     return
   }
   if (!input.value.trim()) return
   const content = input.value.trim()
+  // 排队模型（对齐 chat-demo）：当前会话流未结束时发送不拒绝，先入队显示「排队中」气泡，
+  // 本轮流 done/error/停止后由 flushQueue 自动发出；其他会话在流则直接并行发起
+  const convId = currentConvId.value
+  if (convId !== null && streamingMap.has(convId)) {
+    pendingQueue.push({ convId, content })
+    input.value = ''
+    await nextTick()
+    scrollToBottom()
+    return
+  }
   input.value = ''
   await sendInternal(content, { continuation: false })
+}
+
+/** 排队出口：当前会话流结束后按 FIFO 发出其排队消息（一次一条，发出后若流又占线则继续排队） */
+const flushQueue = async (convId) => {
+  const idx = pendingQueue.findIndex((q) => q.convId === convId)
+  if (idx < 0) return
+  const next = pendingQueue.splice(idx, 1)[0]
+  await sendInternal(next.content, { continuation: false, convId })
 }
 
 /**
  * M8 确认续跑：授权确认成功后自动发起的下一轮对话。
  * 引导语以系统续跑身份发送（不显示用户气泡），模型从系统回执读到结果继续任务链。
  * M11 聚合续跑：本轮全部授权卡处理完毕才调用（由 maybeContinueAfterAllResolved 判定）。
+ * 续跑属于确认所在会话：sendInternal 已支持显式 convId，与当前视图解耦
  */
-const continueAfterConfirm = async (toolSummary, { rejected = false } = {}) => {
-  if (thinking.value || !currentConvId.value) return
+const continueAfterConfirm = async (toolSummary, { rejected = false, convId } = {}) => {
   // rejected：本轮授权被用户取消。必须把「已拒绝」明确回执给模型——
   // 否则模型读到「尚无成功回执的剩余项」会反复重发授权卡
   const guide = rejected
     ? `本轮的授权请求（${toolSummary}）已被用户取消，所有操作均未执行。用户已明确拒绝本次办理，禁止再发起任何授权卡或写操作工具调用；请简短回应已按用户要求取消，并可询问是否需要其他帮助。`
     : `授权处理已完成（${toolSummary}）。请逐项核对历史回执：已成功的项不要重复办理；已被用户取消的项是用户明确拒绝，禁止再次发起授权；仅当剩余项是因授权过期未执行时，才可为它们重新发起授权；若全部完成，请逐项列出单号汇总。`
-  await sendInternal(guide, { continuation: true })
+  await sendInternal(guide, { continuation: true, convId })
 }
 
 /**
  * M11 聚合续跑：检查所属消息的授权卡是否已全部处理（非 pending），
  * 全部处理完才发起一次续跑，汇总语带各卡结果（成功/取消）。
+ * convId：卡片所属会话（多会话并行下续跑归属卡片的会话，而非当前视图）
  */
-const maybeContinueAfterAllResolved = (msg, toolSummary) => {
+const maybeContinueAfterAllResolved = (msg, toolSummary, convId) => {
   const cards = (msg?.confirmCards || []).filter((c) => c.tool)
   if (!cards.length || cards.some((c) => c.state === 'pending')) return
   const ok = cards.filter((c) => c.state === 'confirmed').length
   const skipped = cards.length - ok
   // 全部被取消：走拒绝回执，防止模型误以为操作未完成而重发授权卡
   if (ok === 0) {
-    continueAfterConfirm(toolSummary, { rejected: true })
+    continueAfterConfirm(toolSummary, { rejected: true, convId })
     return
   }
-  continueAfterConfirm(`${toolSummary}；本轮授权共 ${cards.length} 项：成功 ${ok} 项，跳过 ${skipped} 项`)
+  continueAfterConfirm(`${toolSummary}；本轮授权共 ${cards.length} 项：成功 ${ok} 项，跳过 ${skipped} 项`, { convId })
 }
 
-const sendInternal = async (content, { continuation }) => {
-  lastUserText.value = continuation ? lastUserText.value : content
-  // 新一轮：重置检索联动候补与写操作标记
-  pendingAiSearch = null
-  turnHasWrite = false
-  turnWriteIntent = WRITE_INTENT_RE.test(content)
+const sendInternal = async (content, { continuation, convId: explicitConvId }) => {
+  // 多会话并行：目标会话由显式 convId 决定（排队 flush / 授权续跑各自的会话），
+  // 未显式给出时用当前会话；目标会话与当前视图解耦，切换不影响已发起的流
+  let convId = explicitConvId ?? currentConvId.value
 
-  // 无会话时先创建
-  if (!currentConvId.value) {
+  // 无会话时先创建（欢迎屏直接发送的场景）
+  if (convId === null || convId === undefined) {
     try {
       const conv = await aiApi.createConversation()
       conversations.value.unshift(conv)
+      stateOf(conv.id)
+      convId = conv.id
+      // 欢迎屏发送后停留在新建会话（与旧行为一致）
       currentConvId.value = conv.id
+      isAutoFollow.value = true
     } catch (e) {
       ElMessage.error('创建会话失败')
       return
     }
   }
-
-  const convId = currentConvId.value
+  const st = stateOf(convId)
   const conv = conversations.value.find((c) => c.id === convId)
   const isFirstMsg = !conv || conv.title === '新对话' || !conv.title
 
   // 推送用户消息（续跑轮引导语不显示用户气泡，避免伪造用户发言）
   if (!continuation) {
-    messages.value.push({
+    st.messages.push({
       id: Date.now(),
       conversationId: convId,
       role: 'user',
@@ -1372,18 +1473,34 @@ const sendInternal = async (content, { continuation }) => {
       createTime: new Date().toISOString(),
     })
   }
-  isAutoFollow.value = true
-  showJumpBtn.value = false
-  await scrollToBottom()
-  thinking.value = true
-  scrollToBottom() // 思考占位渲染增高，保持视口在底部
+  // 目标即当前会话：强制跟随到底部；后台会话不碰滚动状态（用户可能正在阅读当前会话）
+  if (convId === currentConvId.value) {
+    isAutoFollow.value = true
+    showJumpBtn.value = false
+  }
+  // 按会话登记流状态：思考占位 + 停止按钮守卫（streamingMap.has(convId) 即在流中）
+  thinkingMap.set(convId, true)
 
-  // SSE 流式请求
-  abortController = new AbortController()
+  // SSE 流式请求（每会话一路，abortController 等上下文存入 streamCtxMap）
+  const abortController = new AbortController()
+  // A1：本条流的自适应节流渲染器
+  const streamRenderer = createStreamRenderer()
+  // A6：是否收到过服务端 done 事件（流提前断开时用于判定 interrupted）
+  let doneReceived = false
+  // 本条流自己的 turn 状态（检索联动/写操作标记），替代旧全局变量
+  let pendingAiSearch = null
+  let turnHasWrite = false
+  const streamCtx = {
+    abortController,
+    streamRenderer,
+  }
+  streamCtxMap.set(convId, streamCtx)
+  // 登记在流状态：停止按钮形态（streamingMap.has(convId)）与排队判定都以此为准
+  streamingMap.set(convId, abortController)
 
   // 立即创建助手消息气泡（pending=true 显示「正在思考…」跳动），
   // 不等首个 SSE 事件——避免首事件前的空窗期没有任何反馈
-  assistantMsg = reactive({
+  const assistantMsg = reactive({
     id: Date.now() + 1,
     conversationId: convId,
     role: 'assistant',
@@ -1415,8 +1532,10 @@ const sendInternal = async (content, { continuation }) => {
     timeline: [],
     createTime: new Date().toISOString(),
   })
-  messages.value.push(assistantMsg)
-  scrollToBottom()
+  st.messages.push(assistantMsg)
+  if (convId === currentConvId.value) {
+    scrollToBottom()
+  }
 
   // 思考耗时收尾：最后一段时间写入 reasoningSeconds 后停止计时（耗时保留展示）。
   // 定义在 try 之外：catch/finally 兜底路径也要调用（否则流中断时计时器泄漏）
@@ -1467,11 +1586,17 @@ const sendInternal = async (content, { continuation }) => {
 
     const ensureAssistantMsg = () => {
       // 气泡已在发送时创建（pending=true），这里只是返回引用；
-      // 首个实际事件到达时关闭单独的「思考中」占位
-      if (thinking.value) {
-        thinking.value = false
+      // 首个实际事件到达时关闭「正在思考…」占位——按钮停止/发送形态由
+      // streamingMap 控制（首事件后流仍在传输，停止按钮必须保持）
+      if (thinkingMap.get(convId)) {
+        thinkingMap.set(convId, false)
       }
       return assistantMsg
+    }
+
+    /** 滚动收口：仅当本流所属会话是当前视图会话时才滚动，后台流不干扰当前阅读 */
+    const scrollToBottomIfCurrent = () => {
+      if (convId === currentConvId.value) scrollToBottom()
     }
 
     const handleEvent = (block) => {
@@ -1494,7 +1619,7 @@ const sendInternal = async (content, { continuation }) => {
         msg.pending = false
         if (data) {
           msg.timeline.push({ kind: 'thought', text: data })
-          scrollToBottom()
+          scrollToBottomIfCurrent()
         }
       } else if (event === 'thinking') {
         // 深度思考思维链增量：流式追加到当前思考段，面板保持展开
@@ -1518,7 +1643,7 @@ const sendInternal = async (content, { continuation }) => {
           }
           const segs = msg.reasoningSegments
           segs[segs.length - 1] += data
-          scrollToBottom()
+          scrollToBottomIfCurrent()
         }
       } else if (event === 'rag') {
         // 知识库来源：在调用 LLM 之前推送（早于 delta），气泡内先出「参考资料」条。
@@ -1552,8 +1677,11 @@ const sendInternal = async (content, { continuation }) => {
         msg.reasoningStreaming = false
         msg.reasoningOpen = false
         msg.content += data
-        msg.html = renderMarkdown(msg.content, msg.ragSources)
-        scrollToBottom()
+        // A1：delta 高频到达，渲染走自适应节流（正文长时自动放宽间隔），done/final 时 flush 补尾
+        streamRenderer?.schedule(() => {
+          msg.html = renderMarkdown(msg.content, msg.ragSources)
+          scrollToBottomIfCurrent()
+        })
       } else if (event === 'reset') {
         // 进入工具调用轮：清空工具调用前的过渡文本（正文只保留最终回答，
         // 工具调用过程由工具卡片承载）；本段思维链结束，停止耗时并折叠面板
@@ -1568,8 +1696,9 @@ const sendInternal = async (content, { continuation }) => {
         // 后端完成回答后的最终文本（已剔除误输出的工具调用代码），整体替换流式拼接内容
         const msg = ensureAssistantMsg()
         msg.content = data
+        // final 是权威全文：立即渲染替换（不走节流，避免与 flush 时序竞争）
         msg.html = renderMarkdown(msg.content, msg.ragSources)
-        scrollToBottom()
+        scrollToBottomIfCurrent()
       } else if (event === 'tool') {
         const msg = ensureAssistantMsg()
         msg.pending = false
@@ -1639,14 +1768,16 @@ const sendInternal = async (content, { continuation }) => {
         } catch {
           // 忽略解析失败的 tool 事件
         }
-        scrollToBottom()
+        scrollToBottomIfCurrent()
       } else if (event === 'done') {
-        thinking.value = false
+        doneReceived = true
+        thinkingMap.set(convId, false)
         // 检索联动广播已收窄到悬浮球面板（仅馆藏图书页时写入 aiSearchStore）；
         // AI 助手页自身有完整检索展示，queryBooks 结果只留在对话内，不跨页投递
         pendingAiSearch = null
         turnHasWrite = false
-        turnWriteIntent = false
+        // A1：流正常结束，把节流中未渲染的尾部内容立即上屏
+        streamRenderer?.flush()
         if (assistantMsg) {
           assistantMsg.pending = false
           stopReasonTimer(assistantMsg)
@@ -1655,9 +1786,11 @@ const sendInternal = async (content, { continuation }) => {
           assistantMsg.reasoningOpen = false
         }
         // 流结束滚动定位：本轮有内联生成式卡片时滚到本轮第一张卡片，否则维持滚底
-        scrollToFirstGenCard(assistantMsg).then((hit) => {
-          if (!hit) scrollToBottom()
-        })
+        if (convId === currentConvId.value) {
+          scrollToFirstGenCard(assistantMsg).then((hit) => {
+            if (!hit) scrollToBottom()
+          })
+        }
         if (isFirstMsg && conv) {
           conv.title = content.length > 20 ? content.substring(0, 20) + '…' : content
         }
@@ -1693,7 +1826,7 @@ const sendInternal = async (content, { continuation }) => {
           msg.content = msg.content || '请确认上方授权请求后继续。'
           msg.html = renderMarkdown(msg.content, msg.ragSources)
           startConfirmCountdown(msg.confirmCards[msg.confirmCards.length - 1])
-          scrollToBottom()
+          scrollToBottomIfCurrent()
         } catch {
           // 解析失败时不影响对话
         }
@@ -1722,7 +1855,7 @@ const sendInternal = async (content, { continuation }) => {
           msg.content = msg.content || `本轮共 ${info.count || 0} 项写操作待授权，请在下方批量卡上一并确认。`
           msg.html = renderMarkdown(msg.content)
           startConfirmCountdown(msg.batchConfirmCard)
-          scrollToBottom()
+          scrollToBottomIfCurrent()
         } catch {
           // 解析失败时不影响对话
         }
@@ -1756,12 +1889,12 @@ const sendInternal = async (content, { continuation }) => {
           ? `${msg.content}\n\n${msg.degradeMessage}`
           : msg.degradeMessage
         msg.html = renderMarkdown(msg.content, msg.ragSources)
-        scrollToBottom()
+        scrollToBottomIfCurrent()
       } else if (event === 'notice') {
         // 渠道故障转移等系统级提示：轻提示告知用户（如「主渠道繁忙，已切换到备用渠道」），不打断回答流
         ElMessage({ type: 'info', message: data, duration: 4000 })
       } else if (event === 'error') {
-        thinking.value = false
+        thinkingMap.set(convId, false)
         const msg = ensureAssistantMsg()
         msg.pending = false
         stopReasonTimer(msg)
@@ -1772,7 +1905,7 @@ const sendInternal = async (content, { continuation }) => {
         const errTip = `⚠️ ${data || 'AI 请求出错'}`
         msg.content = msg.content ? `${msg.content}\n\n${errTip}` : errTip
         msg.html = renderMarkdown(msg.content, msg.ragSources)
-        scrollToBottom()
+        scrollToBottomIfCurrent()
       }
     }
 
@@ -1789,24 +1922,41 @@ const sendInternal = async (content, { continuation }) => {
       }
     }
     if (buffer.trim()) handleEvent(buffer)
+    // A6：流提前结束（read done 但没收到 done 事件）= 服务端中断/容器超时。
+    // 与正常结束同样 flush 收尾，并给用户中断提示——区别于红色报错，保留已生成正文
+    if (!doneReceived && assistantMsg) {
+      streamRenderer?.flush()
+      const tip = '⚠️ 回复传输中断，以上内容可能不完整'
+      assistantMsg.content = assistantMsg.content ? `${assistantMsg.content}\n\n${tip}` : tip
+      assistantMsg.html = renderMarkdown(assistantMsg.content, assistantMsg.ragSources)
+    }
   } catch (e) {
-    thinking.value = false
+    thinkingMap.set(convId, false)
+    // A1：中断/异常时立即渲染已累积内容（丢弃未执行的节流任务由 dispose 完成）
+    streamRenderer?.flush()
     if (e.name === 'AbortError') {
       // 用户主动停止：保留已生成内容
       return
     }
-    ElMessage.error(e.message || 'AI 请求失败')
+    // A5：错误分类 + 文案分离——气泡内追加类目化提示，网络类不弹全局 toast（气泡已可见）
+    const { kind, message } = classifyAiError(e)
+    const friendly = describeWithAction({ kind, message })
+    if (kind !== AiErrorKind.NETWORK) {
+      ElMessage.error(friendly)
+    }
     if (assistantMsg) {
       // 已有正文时保留原内容，错误说明追加其后
-      const errTip = `⚠️ ${e.message || 'AI 请求失败'}`
+      const errTip = `⚠️ ${friendly}`
       assistantMsg.content = assistantMsg.content ? `${assistantMsg.content}\n\n${errTip}` : errTip
       assistantMsg.html = renderMarkdown(assistantMsg.content, assistantMsg.ragSources)
     }
   } finally {
-    abortController = null
-    // 兜底复位：服务端超时/断网导致流关闭但 done 事件未到达时，
-    // 按钮仍停在「停止生成」态——任何退出路径最终都要回到可输入状态
-    thinking.value = false
+    streamRenderer?.dispose()
+    // 多会话并行收口：注销本会话的流登记——任何退出路径（done/error/abort/finally 兜底）
+    // 都要清 streamingMap 与 thinkingMap，该会话按钮回到「发送」态；其他会话的流不受影响
+    streamingMap.delete(convId)
+    streamCtxMap.delete(convId)
+    thinkingMap.set(convId, false)
     // 流结束（完成/停止/出错）后，仍在加载态的工具卡片停止旋转
     if (assistantMsg && assistantMsg.toolEvents) {
       assistantMsg.toolEvents.forEach((t) => {
@@ -1820,6 +1970,8 @@ const sendInternal = async (content, { continuation }) => {
       assistantMsg._reasonSegOpen = false
       assistantMsg.reasoningStreaming = false
     }
+    // 排队出口：本会话还有排队消息时自动发出下一条（排队模型的闭环）
+    flushQueue(convId)
   }
 }
 
@@ -1829,11 +1981,20 @@ const formatTime = (t) => {
 }
 
 onBeforeUnmount(() => {
-  if (abortController) abortController.abort()
-  messages.value.forEach((m) => {
-    for (const c of m.confirmCards || []) stopConfirmCountdown(c)
-    stopConfirmCountdown(m.batchConfirmCard)
-  })
+  // 组件卸载（keep-alive 场景不会触发）：中断所有会话的在跑流并清理定时器
+  for (const [, ctx] of streamCtxMap) {
+    ctx.abortController?.abort()
+    ctx.streamRenderer?.dispose()
+  }
+  streamCtxMap.clear()
+  streamingMap.clear()
+  thinkingMap.clear()
+  for (const [, st] of convStates) {
+    st.messages.forEach((m) => {
+      for (const c of m.confirmCards || []) stopConfirmCountdown(c)
+      stopConfirmCountdown(m.batchConfirmCard)
+    })
+  }
 })
 
 /* ---------- 与悬浮球面板的会话同步 ----------
@@ -1850,18 +2011,21 @@ window.addEventListener('ai-session-activity', onPanelActivity)
 onBeforeUnmount(() => window.removeEventListener('ai-session-activity', onPanelActivity))
 
 const syncFromPanel = async () => {
-  if (!panelActiveConvId || thinking.value) return
+  if (!panelActiveConvId) return
   if (panelActiveConvId === currentConvId.value) {
+    // 多会话并行：本会话正有流在跑时静默跳过——流增量已实时写入当前视图，重拉反而会闪断
+    if (streamingMap.has(panelActiveConvId)) return
     try {
       const data = await aiApi.messageList(panelActiveConvId)
       // 悬浮球没有产生新消息时保持现状，不打断当前滚动位置
       if ((data.total || 0) === totalMessages.value) return
       const page = (data.list || []).map(enrichMsg).reverse()
-      messages.value = page
-      loadedCount.value = page.length
-      totalMessages.value = data.total || page.length
-      oldestLoadedId.value = page.length ? page[0].id : null
-      hasMore.value = loadedCount.value < totalMessages.value
+      const st = stateOf(panelActiveConvId)
+      st.messages = page
+      st.loadedCount = page.length
+      st.totalMessages = data.total || page.length
+      st.oldestLoadedId = page.length ? page[0].id : null
+      st.hasMore = st.loadedCount < st.totalMessages
       await scrollToBottomForce()
     } catch {
       // 静默
@@ -2145,6 +2309,20 @@ onMounted(loadConversations)
   white-space: pre-wrap;
   word-break: break-word;
   box-shadow: var(--shadow-sm);
+}
+/* 排队气泡：半透明 + 虚线边框，与已发出的消息在视觉上区分（还没发出去） */
+.user-bubble.queued {
+  background: transparent;
+  color: var(--color-text-secondary);
+  border: 1.5px dashed var(--color-border-strong);
+  box-shadow: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.user-bubble.queued .queued-tag {
+  font-size: var(--fs-caption);
+  color: var(--color-text-tertiary);
 }
 
 /* 助手：左对齐头像 + 内容 */

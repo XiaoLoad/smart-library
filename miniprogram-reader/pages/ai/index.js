@@ -3,6 +3,7 @@ const sse = require('../../utils/core/sse')
 const markdown = require('../../utils/feature/markdown')
 const auth = require('../../utils/core/auth')
 const badge = require('../../utils/feature/badge')
+const aiErrors = require('../../utils/feature/aiErrors')
 
 const PAGE_SIZE = 20
 
@@ -603,7 +604,9 @@ Page({
     this._confirmTimer = null
   },
 
-  // 确认办理：POST /ai/confirm，按返回与错误信息归类卡片状态
+  // 确认办理：POST /ai/confirm，按返回与错误信息归类卡片状态。
+  // A5：确认请求带退避重试（网络抖动/上游繁忙自动再试最多 2 次），
+  // 业务拒绝（额度满/已借出等 INVALID 类）不重试、直接把原因转给用户
   async onConfirmWrite(e) {
     const msg = this._streamMsg
     if (!msg || !msg.confirmCard) return
@@ -612,27 +615,23 @@ Page({
     card.state = 'submitting'
     this.setData({ ['messages[' + this._streamIdx + '].confirmCard.state']: 'submitting' })
     try {
-      // conversationId 与令牌签发时的会话比对（服务端防跨会话重放）；
-      // batch 批量卡同口径
-      const res = await request.post('/ai/confirm', {
-        token: card.token,
-        tool: card.tool,
-        conversationId: this.data.currentConv ? this.data.currentConv.id : null,
-      })
+      // conversationId 与令牌签发时的会话比对（服务端防跨会话重放）
+      const res = await aiErrors.withRetry(() =>
+        request.post('/ai/confirm', {
+          token: card.token,
+          tool: card.tool,
+          conversationId: this.data.currentConv ? this.data.currentConv.id : null,
+        })
+      )
       this.stopConfirmCountdown()
       card.state = 'confirmed'
       card.result = res || null
       this.setData({ ['messages[' + this._streamIdx + '].confirmCard']: card })
       wx.showToast({ title: (res && res.message) || '已办理', icon: 'success' })
     } catch (err) {
-      const text = (err && err.message) || ''
-      if (/过期|失效|已被处理/.test(text)) {
-        // 令牌已被处理或超时：卡片置为失效态
-        this.stopConfirmCountdown()
-        card.state = 'expired'
-        card.error = text
-        this.setData({ ['messages[' + this._streamIdx + '].confirmCard']: card })
-      } else if (/登录|token/i.test(text) || !auth.getToken()) {
+      const { kind, message } = aiErrors.classify(err)
+      const text = aiErrors.describe(kind, message)
+      if (kind === aiErrors.Kind.UNAUTHORIZED) {
         // 401 已被 request 层清 token：对齐 handleNonSse 的重新登录出口
         this.stopConfirmCountdown()
         card.state = 'expired'
@@ -640,15 +639,23 @@ Page({
         this.setData({ ['messages[' + this._streamIdx + '].confirmCard']: card })
         wx.showToast({ title: '登录已过期，请重新登录', icon: 'none' })
         setTimeout(() => wx.reLaunch({ url: '/pages/auth/login' }), 800)
+        return
+      }
+      // 过期/失效类（含重试后仍过期）：令牌已被处理或超时，卡片置为失效态
+      const settled = kind === aiErrors.Kind.NOT_FOUND ||
+        /过期|失效|已被处理/.test(message || '')
+      if (settled) {
+        this.stopConfirmCountdown()
+        card.state = 'expired'
+        card.error = message || '授权已失效'
+        this.setData({ ['messages[' + this._streamIdx + '].confirmCard']: card })
       } else {
-        // 网络抖动等业务错误：回到 pending 允许重试
+        // 网络抖动等临时错误（重试已耗尽）：回到 pending 允许用户手动重试
         card.state = 'pending'
-        card.error = text || '办理失败，请稍后重试'
+        card.error = text
         this.setData({ ['messages[' + this._streamIdx + '].confirmCard']: card })
       }
-      if (!/登录|token/i.test(text)) {
-        wx.showToast({ title: text || '办理失败，请稍后重试', icon: 'none' })
-      }
+      wx.showToast({ title: text, icon: 'none' })
     }
   },
 

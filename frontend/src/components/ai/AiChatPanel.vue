@@ -277,6 +277,8 @@ import { aiApi } from '@/api'
 import { useAiSearchStore } from '@/stores/aiSearch'
 import AppIcon from '@/components/AppIcon.vue'
 import AiGenUi from '@/components/ai/AiGenUi.vue'
+import { createStreamRenderer } from '@/utils/streamRender'
+import { classifyAiError, describeWithAction, AiErrorKind } from '@/utils/aiErrors'
 
 const emit = defineEmits(['state-change'])
 
@@ -501,6 +503,10 @@ let currentConvId = null
 let abortController = null
 let assistantMsg = null
 let inited = false
+// A1：本条流的自适应节流渲染器（每条流一个实例）
+let streamRenderer = null
+// A6：当前流是否收到过服务端 done 事件（流提前断开判定）
+let doneReceived = false
 
 // 登录态失效统一处理（与 /ai/chat 页 handleUnauthorized 一致，SSE fetch 路径专用）：
 // 清 token → 提示 → 跳登录页（携带 redirect 便于登录后回跳），防重复跳转
@@ -874,8 +880,13 @@ const sendInternal = async (content, { continuation }) => {
       if (code === 401) {
         handleUnauthorized(msg)
       }
-      throw new Error(msg)
+      const err = new Error(msg)
+      err.code = code
+      throw err
     }
+    // A1：本条流的自适应节流渲染器；A6：done 事件判定复位
+    streamRenderer = createStreamRenderer()
+    doneReceived = false
     const reader = resp.body.getReader()
     const decoder = new TextDecoder('utf-8')
     let buffer = ''
@@ -925,8 +936,11 @@ const sendInternal = async (content, { continuation }) => {
         msg.reasoningStreaming = false
         msg.reasoningOpen = false
         msg.content += data
-        msg.html = renderMarkdown(msg.content, msg.ragSources)
-        scrollToBottom()
+        // A1：delta 高频到达，渲染走自适应节流，done/final 时 flush 补尾
+        streamRenderer?.schedule(() => {
+          msg.html = renderMarkdown(msg.content, msg.ragSources)
+          scrollToBottom()
+        })
       } else if (event === 'reset') {
         stopReasonTimer(msg)
         msg._reasonSegOpen = false
@@ -935,6 +949,7 @@ const sendInternal = async (content, { continuation }) => {
         msg.content = ''
         msg.html = ''
       } else if (event === 'final') {
+        // 权威全文：立即渲染替换（不走节流，避免与 flush 时序竞争）
         msg.content = data
         msg.html = renderMarkdown(msg.content, msg.ragSources)
         scrollToBottom()
@@ -1080,12 +1095,15 @@ const sendInternal = async (content, { continuation }) => {
         msg.html = renderMarkdown(msg.content, msg.ragSources)
         scrollToBottom()
       } else if (event === 'done' || event === 'error') {
+        if (event === 'done') doneReceived = true
         generating.value = false
         emitState(false, true)
         msg.pending = false
         stopReasonTimer(msg)
         msg._reasonSegOpen = false
         msg.reasoningStreaming = false
+        // A1：流结束，把节流中未渲染的尾部内容立即上屏
+        streamRenderer?.flush()
         // 流结束：检索联动广播（双重条件收窄，防止跨页污染馆藏图书页筛选）：
         // ① 页面条件——当前必须在馆藏图书页（/book），其他页面聊查书结果只留在对话内；
         // ② 内容条件——本轮既无写操作（confirm 事件）也无写意图（用户原话），借书前的
@@ -1123,20 +1141,36 @@ const sendInternal = async (content, { continuation }) => {
       }
     }
     if (buffer.trim()) handleEvent(buffer)
+    // A6：流提前结束（read done 但没收到 done 事件）= 服务端中断/容器超时
+    if (!doneReceived && assistantMsg) {
+      streamRenderer?.flush()
+      const tip = '⚠️ 回复传输中断，以上内容可能不完整'
+      assistantMsg.content = assistantMsg.content ? `${assistantMsg.content}\n\n${tip}` : tip
+      assistantMsg.html = renderMarkdown(assistantMsg.content, assistantMsg.ragSources)
+    }
   } catch (e) {
     generating.value = false
     emitState(false, true)
+    // A1：中断/异常时立即渲染已累积内容
+    streamRenderer?.flush()
     if (e.name !== 'AbortError') {
-      ElMessage.error(e.message || 'AI 请求失败')
+      // A5：错误分类 + 文案分离；网络类不弹全局 toast（气泡已可见）
+      const { kind, message } = classifyAiError(e)
+      const friendly = describeWithAction({ kind, message })
+      if (kind !== AiErrorKind.NETWORK) {
+        ElMessage.error(friendly)
+      }
       if (assistantMsg) {
         // 已有正文时保留原内容，错误说明追加其后
-        const errTip = `⚠️ ${e.message || 'AI 请求失败'}`
+        const errTip = `⚠️ ${friendly}`
         assistantMsg.content = assistantMsg.content ? `${assistantMsg.content}\n\n${errTip}` : errTip
         assistantMsg.html = renderMarkdown(assistantMsg.content, assistantMsg.ragSources)
       }
     }
   } finally {
     abortController = null
+    streamRenderer?.dispose()
+    streamRenderer = null
     // 兜底复位：服务端超时/断网导致流关闭但 done/error 未到达时，
     // generating 不复位会永久锁死输入框（send 守卫再也过不去）
     if (generating.value) {
@@ -1158,6 +1192,8 @@ const sendInternal = async (content, { continuation }) => {
 const destroy = () => {
   if (abortController) abortController.abort()
   abortController = null
+  streamRenderer?.dispose()
+  streamRenderer = null
 }
 
 onBeforeUnmount(() => {
