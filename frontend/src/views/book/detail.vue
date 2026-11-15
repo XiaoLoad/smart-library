@@ -75,6 +75,10 @@
             <span class="chip" :class="book.availableCount > 0 ? 'chip-ok' : 'chip-off'">
               {{ book.availableCount > 0 ? '可借' : '已借完' }}
             </span>
+            <!-- 返回来源页：文案随入口来源变化（书架/概览），行为=回真实入口 -->
+            <button class="chip chip-back" type="button" @click="goBackToSource">
+              ← 返回{{ entryStore.crumb.title }}
+            </button>
           </div>
         </header>
 
@@ -117,10 +121,10 @@
           </dl>
         </div>
 
-        <!-- 相似图书：借阅共现 + 内容语义 -->
+        <!-- 相似图书：借阅共现 + 内容语义（互跳来源标记，返回时回书架而非上一本详情） -->
         <div class="catalog-section fade-in d3" v-if="similarItems.length">
           <div class="section-label">读过此书的人还读 <i>YOU MAY ALSO LIKE</i></div>
-          <RecommendStrip :items="similarItems" />
+          <RecommendStrip :items="similarItems" source="detail" :source-book-id="book.id" />
         </div>
       </section>
     </article>
@@ -148,19 +152,22 @@
 
 <script setup>
 import { ref, computed, onMounted, watch, nextTick } from 'vue'
-import { useRoute, onBeforeRouteLeave } from 'vue-router'
+import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
 import { Loading } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { bookApi, borrowApi, recommendApi } from '@/api'
 import { useUserStore } from '@/stores/user'
 import { useBookTransitionStore } from '@/stores/bookTransition'
+import { useBookEntryStore, ENTRY_SOURCES } from '@/stores/bookEntry'
 import BorrowCodeDialog from '@/components/BorrowCodeDialog.vue'
 import BookFormDialog from '@/components/BookFormDialog.vue'
 import RecommendStrip from '@/components/RecommendStrip.vue'
 
 const route = useRoute()
+const router = useRouter()
 const userStore = useUserStore()
 const bookTransition = useBookTransitionStore()
+const entryStore = useBookEntryStore()
 const plateCoverRef = ref(null)
 
 const book = ref(null)
@@ -260,21 +267,51 @@ const openEdit = () => {
   editVisible.value = true
 }
 
-/* 返回馆藏列表：登记反向转场，覆盖层负责「合书 + 放回原卡片」 */
+/* ============ 返回来源页（来源感知）============ */
+/**
+ * 回到真实入口：
+ * 1. 有历史栈（本会话内点进来）→ router.back()，来源页天然恢复滚动位置与 keep-alive 状态
+ * 2. 无历史栈（刷新直进/新标签）→ push 到记录的来源路径（或默认书架）
+ * 3. 详情互跳（来自另一本详情页的相似推荐）→ back 会回到上一本详情，
+ *    直接改为去书架列表，避免用户在详情间来回嵌套
+ */
+function goBackToSource() {
+  if (entryStore.fromName === ENTRY_SOURCES.DETAIL_SIMILAR) {
+    entryStore.leave()
+    router.push('/book/list')
+    return
+  }
+  if (window.history.state?.back) {
+    // 书架来源走 GSAP 合书（onBeforeRouteLeave 登记）；其他来源走全局路由淡入淡出
+    router.back()
+    return
+  }
+  const fallback = entryStore.fromPath || '/book/list'
+  entryStore.leave()
+  router.push(fallback)
+}
+
+/* 返回转场登记（来源感知 + 目标感知）：
+ * - 只有「返回书架列表」才播 GSAP 合书（合书后要落回书架的原书卡片）
+ * - 面包屑点首页、返回按钮回概览等导航：目标页没有书架卡片可落，
+ *   不播合书（否则书合完找不到落点凭空消失），走全局路由淡入淡出
+ * 注：不在此处清理 entryStore——详情互跳时下一次点击会重新 enter 覆盖旧值，残留无副作用
+ */
 onBeforeRouteLeave((to) => {
   if (to.name !== 'BookList') return
   const b = book.value
   const el = plateCoverRef.value
-  if (!b || !el) return
-  const r = el.getBoundingClientRect()
-  bookTransition.beginReturn({
-    id: b.id,
-    rect: { left: r.left, top: r.top, width: r.width, height: r.height },
-    coverUrl: b.coverUrl || '',
-    title: b.title,
-    author: b.author || '',
-    char: b.title?.charAt(0) || '书',
-  })
+  if (b && el) {
+    const r = el.getBoundingClientRect()
+    bookTransition.beginReturn({
+      id: b.id,
+      rect: { left: r.left, top: r.top, width: r.width, height: r.height },
+      coverUrl: b.coverUrl || '',
+      title: b.title,
+      author: b.author || '',
+      char: b.title?.charAt(0) || '书',
+    })
+  }
 })
 
 /* 卡片→详情的共享元素转场：等页面滚到顶部、封面渲染完（图片解码或 400ms 兜底）后回传目标位置 */
@@ -522,6 +559,19 @@ onMounted(async () => {
 }
 
 .chip.mono-chip { font-family: var(--font-mono); }
+
+/* 返回来源按钮：胶囊外形但可点击，hover 时靛蓝描边引导 */
+.chip.chip-back {
+  cursor: pointer;
+  transition: color var(--duration-fast) var(--ease-soft),
+              border-color var(--duration-fast) var(--ease-soft),
+              background var(--duration-fast) var(--ease-soft);
+}
+.chip.chip-back:hover {
+  color: var(--color-primary);
+  border-color: var(--color-primary);
+  background: var(--color-primary-light);
+}
 
 .chip-ok {
   border-color: color-mix(in srgb, var(--color-primary) 35%, transparent);

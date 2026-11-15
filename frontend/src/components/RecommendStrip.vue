@@ -1,12 +1,13 @@
 <template>
   <!-- 极少数量（≤2）：静态铺排即可填满容器，无需轮播 -->
   <div v-if="items.length && items.length <= 2" class="rec-static">
-    <router-link
+    <a
       v-for="book in items"
       :key="book.bookId"
-      :to="`/book/detail/${book.bookId}`"
       class="rec-card"
-      @click="onClickCapture"
+      :data-book-id="book.bookId"
+      href="javascript:void(0)"
+      @click="onCardClick(book, $event)"
     >
       <div class="rec-cover" :class="{ 'no-img': !book.coverUrl || brokenCovers.has(book.bookId) }">
         <img
@@ -28,7 +29,7 @@
           <EllipsisText class="reason-text" :content="book.reason" />
         </span>
       </div>
-    </router-link>
+    </a>
   </div>
 
   <div
@@ -47,10 +48,12 @@
       @click.capture="onClickCapture"
     >
       <template v-for="(book, idx) in loopItems" :key="idx + '-' + book.bookId">
-        <router-link
-          :to="`/book/detail/${book.bookId}`"
+        <a
           class="rec-card"
+          :data-book-id="book.bookId"
+          href="javascript:void(0)"
           :draggable="false"
+          @click="onCardClick(book, $event)"
         >
           <div class="rec-cover" :class="{ 'no-img': !book.coverUrl || brokenCovers.has(book.bookId) }">
             <img
@@ -74,7 +77,7 @@
               <EllipsisText class="reason-text" :content="book.reason" />
             </span>
           </div>
-        </router-link>
+        </a>
       </template>
     </div>
 
@@ -87,14 +90,22 @@
 
 <script setup>
 import { reactive, ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { useRouter } from 'vue-router'
 import { MagicStick } from '@element-plus/icons-vue'
 import EllipsisText from '@/components/EllipsisText.vue'
+import { useBookEntryStore, ENTRY_SOURCES } from '@/stores/bookEntry'
 
 const props = defineProps({
   items: { type: Array, default: () => [] },
+  /** 入口来源：dashboard（默认，仪表盘推荐）/ detail（详情页相似图书互跳） */
+  source: { type: String, default: 'dashboard' },
+  /** source=detail 时的当前详情图书 ID（用于构造返回路径） */
+  sourceBookId: { type: [String, Number], default: null },
 })
 
 const brokenCovers = reactive(new Set())
+const entryStore = useBookEntryStore()
+const router = useRouter()
 
 /* ============ 轮播速度参数（集中可调）============ */
 /** 自动播放速度：px/秒。60px/s ≈ 每 2.8 秒推进一张卡，节奏从容不拖沓 */
@@ -158,6 +169,22 @@ function tick(now) {
 
 function onLeave() {
   paused.value = false
+}
+
+/**
+ * 卡片点击 → 进入详情：
+ * 1. 暂停轮播：点击时冻结位置（返回时组件 keep-alive 恢复，卡片还在原处附近）
+ * 2. 采样图书信息写入入口来源 store：面包屑/返回/侧栏高亮按来源分发
+ * 3. 导航走全局路由淡入淡出过渡
+ */
+function onCardClick(book, e) {
+  if (isDragging.value) return // 拖拽后 260ms 窗口已由 onClickCapture 拦截，这里兜底
+  paused.value = true
+  entryStore.enter({
+    fromName: props.source === 'detail' ? ENTRY_SOURCES.DETAIL_SIMILAR : ENTRY_SOURCES.DASHBOARD_RECOMMEND,
+    fromPath: props.source === 'detail' ? `/book/detail/${props.sourceBookId}` : '/dashboard',
+  })
+  router.push(`/book/detail/${book.bookId}`)
 }
 
 /* ============ 拖拽滑动 ============ */
@@ -296,6 +323,30 @@ onBeforeUnmount(() => {
               transform var(--duration-fast) var(--ease-soft),
               box-shadow var(--duration) var(--ease-soft);
   user-select: none;
+}
+/* 首次挂载渐现：骨架屏 → 真实卡片的交接不做生硬替换；
+   stagger 错峰（每张延迟 60ms），多卡片按序浮现而非整排跳出。
+   动画只播一次（fill backwards 起始透明，播完即静止）。 */
+@media (prefers-reduced-motion: no-preference) {
+  .rec-card {
+    animation: rec-card-in 0.36s var(--ease-out) backwards;
+  }
+  .rec-track .rec-card:nth-child(2) { animation-delay: 0.06s; }
+  .rec-track .rec-card:nth-child(3) { animation-delay: 0.12s; }
+  .rec-track .rec-card:nth-child(4) { animation-delay: 0.18s; }
+  .rec-track .rec-card:nth-child(5) { animation-delay: 0.24s; }
+  .rec-track .rec-card:nth-child(n + 6) { animation-delay: 0.3s; }
+  .rec-static .rec-card:nth-child(2) { animation-delay: 0.06s; }
+}
+@keyframes rec-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 .rec-card:hover {
   border-color: var(--color-primary);

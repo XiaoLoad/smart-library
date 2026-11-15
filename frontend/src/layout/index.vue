@@ -174,6 +174,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useAppStore } from '@/stores/app'
 import { useUserStore } from '@/stores/user'
+import { useBookEntryStore } from '@/stores/bookEntry'
 import { notificationApi } from '@/api'
 import { formatDateTime } from '@/utils/datetime.js'
 import AppIcon from '@/components/AppIcon.vue'
@@ -192,6 +193,7 @@ const route = useRoute()
 const router = useRouter()
 const appStore = useAppStore()
 const userStore = useUserStore()
+const entryStore = useBookEntryStore()
 
 /* 目次式菜单配置
  * 与路由结构解耦：容器路由已拍平（"用户管理>读者列表"这类单子项层级去除），
@@ -234,7 +236,11 @@ const menuSections = computed(() => {
 })
 
 // 激活态：支持详情页经由 meta.activeMenu 回亮所属菜单（如 /book/detail/:id → 馆藏图书）
+// 图书详情按入口来源动态高亮：从推荐进来回亮「概览」，从书架进（或无记录）回亮「馆藏图书」
 const isActive = (item) => {
+  if (route.name === 'BookDetail') {
+    return entryStore.activeMenu === item.path
+  }
   if (route.meta?.activeMenu) return route.meta.activeMenu === item.path
   return route.path === item.path || route.path.startsWith(item.path + '/')
 }

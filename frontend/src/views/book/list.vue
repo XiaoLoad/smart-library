@@ -273,6 +273,7 @@ import { bookApi, borrowApi } from "@/api";
 import { useUserStore } from "@/stores/user";
 import { useAiSearchStore } from "@/stores/aiSearch";
 import { useBookTransitionStore } from "@/stores/bookTransition";
+import { useBookEntryStore, ENTRY_SOURCES } from "@/stores/bookEntry";
 import BorrowCodeDialog from "@/components/BorrowCodeDialog.vue";
 import BookFormDialog from "@/components/BookFormDialog.vue";
 import { useScrollRestore } from "@/composables/useScrollRestore";
@@ -325,12 +326,18 @@ const openBookDialog = (mode, row = null) => {
 // 路由跳转（详情页）：先登记源封面位置，由全局覆盖层做抽书翻页转场
 const router = useRouter();
 const bookTransition = useBookTransitionStore();
+const bookEntry = useBookEntryStore();
 
 const prefersReducedMotion = () =>
   window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 const openDetail = (row, evt) => {
   const coverEl = evt?.currentTarget?.closest?.(".volume")?.querySelector(".volume-cover");
+  // 登记入口来源=书架：面包屑/侧栏高亮/返回行为据此分发（覆盖推荐来源的残留）
+  bookEntry.enter({
+    fromName: ENTRY_SOURCES.LIST,
+    fromPath: "/book/list",
+  });
   if (coverEl && window.innerWidth >= 768 && !prefersReducedMotion()) {
     const r = coverEl.getBoundingClientRect();
     bookTransition.begin({

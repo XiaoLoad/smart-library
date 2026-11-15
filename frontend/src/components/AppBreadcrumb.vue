@@ -23,18 +23,31 @@
 <script setup>
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
+import { useBookEntryStore } from '@/stores/bookEntry'
 
 const route = useRoute()
+const entryStore = useBookEntryStore()
 
 /* 书眉式面包屑：首页 → [meta.crumbs 或 meta.title]
- * 深层页（如图书详情）走 meta.crumbs 三级结构；概览页只显示当前页，不回指首页。 */
+ * 深层页（如图书详情）走 meta.crumbs 三级结构；概览页只显示当前页，不回指首页。
+ * 图书详情的二级 crumb 按入口来源动态化：从推荐进来显示「概览」，
+ * 从书架进来（或无来源记录）显示「馆藏图书」——从哪来回哪去。 */
 const items = computed(() => {
   const meta = route.meta || {}
   const crumbs = meta.crumbs
   if (Array.isArray(crumbs) && crumbs.length) {
+    // 详情页：二级 crumb 用来源记忆覆盖默认书架项
+    const isDetail = route.name === 'BookDetail'
+    const mapped = crumbs.map((c, i) => {
+      if (isDetail && i === 0) {
+        const from = entryStore.crumb
+        return { title: from.title, path: from.path }
+      }
+      return { title: c.title, path: c.path }
+    })
     return [
       { title: '首页', path: '/dashboard' },
-      ...crumbs.map((c) => ({ title: c.title, path: c.path })),
+      ...mapped,
     ]
   }
   if (route.path === '/dashboard') {
@@ -105,11 +118,21 @@ const items = computed(() => {
   border-radius: var(--radius-sm);
 }
 
-/* 当前页：字号提升 + 墨色加重，名字过长时省略 */
+/* 当前页：字号提升 + 墨色加重，名字过长时省略。
+   max-width 限制单级 crumb 宽度（含三级详情页的书名），超出省略号截断，
+   面包屑整体高度恒定，超长书名不会撑开顶栏布局。
+   320px 在移动端仍过宽，随视口收窄。 */
 .app-breadcrumb__item.is-current {
   position: relative;
   min-width: 0;
   flex-shrink: 1;
+  max-width: 40vw;
+}
+
+@media (max-width: 768px) {
+  .app-breadcrumb__item.is-current {
+    max-width: 46vw;
+  }
 }
 
 .app-breadcrumb__item.is-current .app-breadcrumb__text {
