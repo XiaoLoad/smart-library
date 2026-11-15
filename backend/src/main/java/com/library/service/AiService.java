@@ -363,7 +363,8 @@ public class AiService {
      * 事件流：
      * <ul>
      *   <li>{@code delta} —— 增量文本片段</li>
-     *   <li>{@code rag}   —— 本轮检索注入的知识库来源（JSON 数组：[{docTitle, snippet}]，早于 delta）</li>
+     *   <li>{@code rag}   —— 本轮检索注入的知识库来源（JSON 数组：[{sourceNo, docTitle, snippet}]，早于 delta；
+     *       sourceNo 与回答正文中的 [资料 N] 引用编号一一对应）</li>
      *   <li>{@code tool}  —— 工具调用过程（JSON：{name, phase, detail}）</li>
      *   <li>{@code done}  —— "[DONE]"，表示本轮结束</li>
      *   <li>{@code error} —— 错误消息</li>
@@ -436,6 +437,36 @@ public class AiService {
         AiAgentTraceService.Collector trace = traceService.newCollector(
                 conversationId, cu.getUserId(), cu.getUserType(), content);
 
+        // B2：授权审计回调绑定到当轮轨迹（asked/decided 事件对）。
+        // asked 在流内触发（写内存收集器，随轨迹统一落库）；
+        // decided 多发生在流结束、轨迹已落库之后（用户点授权卡）——按 turnId 直接补录到 DB 行，
+        // 双通道保证 asked/decided 成对，不出现悬空审计
+        AiConfirmService.ApprovalAuditListener confirmAudit = new AiConfirmService.ApprovalAuditListener() {
+            @Override
+            public void onAsked(String token, String toolName) {
+                trace.recordApprovalAsked(toolName);
+            }
+
+            @Override
+            public void onDecided(String token, String toolName, String outcome) {
+                trace.recordApprovalDecided(toolName, outcome);
+                traceService.appendAuditEvent(trace.getTurnId(), "decided:" + toolName + ":" + outcome);
+            }
+        };
+        aiConfirmService.setAuditListener(confirmAudit);
+        aiBatchConfirmService.setAuditListener(new AiBatchConfirmService.BatchApprovalAuditListener() {
+            @Override
+            public void onAsked(String token, int itemCount) {
+                trace.recordApprovalAsked("batch(" + itemCount + ")");
+            }
+
+            @Override
+            public void onDecided(String token, String outcome) {
+                trace.recordApprovalDecided("batch", outcome);
+                traceService.appendAuditEvent(trace.getTurnId(), "decided:batch:" + outcome);
+            }
+        });
+
         // 3. 构建每请求独立的工具实例（烘焙 userId/userType，规避异步线程丢失 CurrentUser）
         AiToolContext toolCtx = buildToolContext();
         boolean admin = cu.getUserType() != null && cu.getUserType() == 3;
@@ -461,10 +492,19 @@ public class AiService {
         SseEmitter emitter = new SseEmitter(SSE_TIMEOUT_MS);
         // M10：登记会话级通道，确认执行后可按会话推送 tool_result（授权卡原地更新）
         AiSseSessionRegistry.register(conversationId, emitter);
-        // 流结束/超时/出错时注销，避免推送到已关闭的通道
+        // 流结束/超时/出错时注销，避免推送到已关闭的通道。
+        // A6 补 onError：客户端中途断网/刷新时容器走 error 回调（不触发 completion），
+        // 缺它会让 registry 残留死通道，下一次 tool_result 推送靠 ping 探测才发现失败
         Runnable unregister = () -> AiSseSessionRegistry.unregister(conversationId, emitter);
         emitter.onCompletion(unregister);
         emitter.onTimeout(unregister);
+        emitter.onError(t -> {
+            unregister.run();
+            // 客户端已断开：模型流仍在跑，但所有 emitter.send 会静默失败，
+            // 最终回答照常落库（onCompleteResponse 不依赖连接存活）——用户重新打开页面
+            // 能从历史消息看到完整回答，符合「断连不丢答案」语义
+            log.info("[AI] SSE 客户端连接中断 conversationId={}，回答将继续生成并落库", conversationId);
+        });
 
         // <think> 标签兜底过滤器：部分本地模型/中转网关不返回 reasoning_content 字段，
         // 而是把思维链以 <think>...</think> 包裹在正文流中输出。此过滤器把标签内
@@ -1528,6 +1568,9 @@ public class AiService {
 
     /**
      * 把本轮检索到的知识库来源通过 SSE {@code rag} 事件回传（早于 delta）。
+     * <p>
+     * 引用编号（A4）：按检索命中顺序从 1 编号，与注入 prompt 的「[资料 N]」一一对应，
+     * 前端据此把回答正文中的 [资料 N] 渲染为可点击角标。
      * 检索结果为空时不推送——不注入内容就没有来源可展示。
      */
     private void emitRagSources(SseEmitter emitter, List<Content> contents) {
@@ -1535,16 +1578,19 @@ public class AiService {
             return;
         }
         try {
-            List<Map<String, String>> sources = new ArrayList<>();
+            List<Map<String, Object>> sources = new ArrayList<>();
+            int no = 0;
             for (Content c : contents) {
                 TextSegment segment = c.textSegment();
                 if (segment == null) {
                     continue;
                 }
                 String title = segment.metadata() == null ? null : segment.metadata().getString("docTitle");
-                sources.add(Map.of(
-                        "docTitle", title == null || title.isBlank() ? "未命名文档" : title,
-                        "snippet", truncate(segment.text(), RAG_SNIPPET_MAX_LEN)));
+                Map<String, Object> src = new java.util.LinkedHashMap<>();
+                src.put("sourceNo", ++no);
+                src.put("docTitle", title == null || title.isBlank() ? "未命名文档" : title);
+                src.put("snippet", truncate(segment.text(), RAG_SNIPPET_MAX_LEN));
+                sources.add(src);
             }
             if (sources.isEmpty()) {
                 return;

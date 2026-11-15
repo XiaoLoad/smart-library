@@ -18,7 +18,7 @@
           <div v-if="m.role === 'user'" class="msg-row user">
             <div class="user-bubble">{{ m.content }}</div>
           </div>
-          <div v-else class="msg-row assistant">
+          <div v-else class="msg-row assistant" @click="handleCitationClick(m, $event)">
             <div class="msg-body">
               <!-- 深度思考面板 -->
               <div v-if="m.reasoningSegments && m.reasoningSegments.length" class="reason-panel">
@@ -516,9 +516,33 @@ const handleUnauthorized = (message) => {
   }, 500)
 }
 
-const renderMarkdown = (content) => {
+/**
+ * A4：[资料 N] 引用角标渲染（与 /ai/chat 页同一约定）。
+ * 编号不存在（模型编造）时原样保留文本。
+ */
+const CITE_RE = /\[资料\s*(\d+)\]/g
+const renderCitations = (html, sources) => {
+  if (!html || !sources || !sources.length) return html
+  const valid = new Set(sources.map((s) => s.sourceNo))
+  return html.replace(CITE_RE, (match, num) => {
+    const n = Number(num)
+    if (!valid.has(n)) return match
+    return `<sup class="cite-badge" data-src="${n}" title="查看资料 ${n}">${n}</sup>`
+  })
+}
+
+const renderMarkdown = (content, sources) => {
   if (!content) return ''
-  try { return md.render(content) } catch { return md.utils.escapeHtml(content) }
+  try { return renderCitations(md.render(content), sources) } catch { return md.utils.escapeHtml(content) }
+}
+
+/** 角标点击（事件委托）：展开/收起对应编号的片段摘要 */
+const handleCitationClick = (m, e) => {
+  const badge = e.target.closest('.cite-badge')
+  if (!badge) return
+  const n = Number(badge.dataset.src)
+  if (!m.ragSources?.some((s) => s.sourceNo === n)) return
+  m.ragOpenIndex = m.ragOpenIndex === n - 1 ? -1 : n - 1
 }
 
 /** 工具快照 JSON → 对象（供 AiGenUi 渲染），解析失败返回 null */
@@ -901,7 +925,7 @@ const sendInternal = async (content, { continuation }) => {
         msg.reasoningStreaming = false
         msg.reasoningOpen = false
         msg.content += data
-        msg.html = renderMarkdown(msg.content)
+        msg.html = renderMarkdown(msg.content, msg.ragSources)
         scrollToBottom()
       } else if (event === 'reset') {
         stopReasonTimer(msg)
@@ -912,7 +936,7 @@ const sendInternal = async (content, { continuation }) => {
         msg.html = ''
       } else if (event === 'final') {
         msg.content = data
-        msg.html = renderMarkdown(msg.content)
+        msg.html = renderMarkdown(msg.content, msg.ragSources)
         scrollToBottom()
       } else if (event === 'tool') {
         msg.pending = false
@@ -959,18 +983,20 @@ const sendInternal = async (content, { continuation }) => {
         } catch { /* 忽略 */ }
         scrollToBottom()
       } else if (event === 'rag') {
-        // 知识库来源：在调用 LLM 之前推送（早于 delta），按「标题 + 摘要」去重后累计。
-        // 不关 pending：占位文案切换为「正在结合参考资料思考…」，覆盖到模型首个输出之间的空窗
+        // 知识库来源：在调用 LLM 之前推送（早于 delta），按「编号或标题+摘要」去重后累计。
+        // sourceNo（A4）与正文 [资料 N] 角标对应；不关 pending：占位文案切换为
+        // 「正在结合参考资料思考…」，覆盖到模型首个输出之间的空窗
         try {
           const list = JSON.parse(data)
           if (Array.isArray(list)) {
             for (const item of list) {
               const docTitle = item?.docTitle || '未命名文档'
               const snippet = item?.snippet || ''
-              const dup = msg.ragSources.some(
-                (s) => s.docTitle === docTitle && s.snippet === snippet
+              const sourceNo = Number(item?.sourceNo) || null
+              const dup = msg.ragSources.some((s) =>
+                sourceNo ? s.sourceNo === sourceNo : s.docTitle === docTitle && s.snippet === snippet
               )
-              if (!dup) msg.ragSources.push({ docTitle, snippet })
+              if (!dup) msg.ragSources.push({ sourceNo, docTitle, snippet })
             }
           }
         } catch { /* 解析失败不影响对话 */ }
@@ -1002,7 +1028,7 @@ const sendInternal = async (content, { continuation }) => {
           // M4：授权请求记入时间线
           msg.timeline.push({ kind: 'confirm', tool: info.tool || '' })
           msg.content = msg.content || '请确认上方授权请求后继续。'
-          msg.html = renderMarkdown(msg.content)
+          msg.html = renderMarkdown(msg.content, msg.ragSources)
           startConfirmCountdown(msg.confirmCards[msg.confirmCards.length - 1])
           scrollToBottom()
         } catch { /* 解析失败不影响对话 */ }
@@ -1028,7 +1054,7 @@ const sendInternal = async (content, { continuation }) => {
           }
           msg.timeline.push({ kind: 'confirm', tool: 'batch:' + (info.count || 0) })
           msg.content = msg.content || `本轮共 ${info.count || 0} 项写操作待授权，请在下方批量卡上一并确认。`
-          msg.html = renderMarkdown(msg.content)
+          msg.html = renderMarkdown(msg.content, msg.ragSources)
           startConfirmCountdown(msg.batchConfirmCard)
           scrollToBottom()
         } catch { /* 解析失败不影响对话 */ }
@@ -1051,7 +1077,7 @@ const sendInternal = async (content, { continuation }) => {
           if (info?.message) tip = info.message
         } catch { /* 解析失败用默认文案 */ }
         msg.content = msg.content ? `${msg.content}\n\n${tip}` : tip
-        msg.html = renderMarkdown(msg.content)
+        msg.html = renderMarkdown(msg.content, msg.ragSources)
         scrollToBottom()
       } else if (event === 'done' || event === 'error') {
         generating.value = false
@@ -1076,7 +1102,7 @@ const sendInternal = async (content, { continuation }) => {
           // 已有正文时保留原内容，错误说明追加其后（避免中途出错抹掉已流出的回答）
           const errTip = `⚠️ ${data || 'AI 请求出错'}`
           msg.content = msg.content ? `${msg.content}\n\n${errTip}` : errTip
-          msg.html = renderMarkdown(msg.content)
+          msg.html = renderMarkdown(msg.content, msg.ragSources)
         }
         // 流结束滚动定位：本轮有内联生成式卡片时滚到本轮第一张卡片，否则维持滚底
         if (event === 'done' && (msg.toolEvents || []).some((e) => e._inlineGen)) {
@@ -1106,7 +1132,7 @@ const sendInternal = async (content, { continuation }) => {
         // 已有正文时保留原内容，错误说明追加其后
         const errTip = `⚠️ ${e.message || 'AI 请求失败'}`
         assistantMsg.content = assistantMsg.content ? `${assistantMsg.content}\n\n${errTip}` : errTip
-        assistantMsg.html = renderMarkdown(assistantMsg.content)
+        assistantMsg.html = renderMarkdown(assistantMsg.content, assistantMsg.ragSources)
       }
     }
   } finally {
@@ -1525,6 +1551,33 @@ defineExpose({ init, destroy, send, prefill })
   line-height: 1.7;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* —— A4：正文引用角标（与 /ai/chat 页同一视觉语言） —— */
+.markdown .cite-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  margin: 0 3px;
+  padding: 0 5px;
+  border-radius: 999px;
+  border: 1px dashed var(--color-primary, #4a6b7c);
+  background: var(--color-primary-light, #e8eef0);
+  color: var(--color-primary, #4a6b7c);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  vertical-align: super;
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.15s ease;
+}
+.markdown .cite-badge:hover {
+  border-style: solid;
+  background: var(--color-primary, #4a6b7c);
+  color: #fff;
 }
 
 /* 等待指示 */

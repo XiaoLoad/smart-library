@@ -99,7 +99,7 @@ public class AiController {
      * <p>
      * 事件流（完整列表）：reset（工具开始前清空正文）/ tool（工具调用状态）/
      * confirm（写操作授权卡）/ batch_confirm（批量授权卡，batch 档位）/
-     * rag（知识库参考资料）/ thinking（深度思考思维链增量）/
+     * rag（知识库参考资料，含 sourceNo 引用编号）/ thinking（深度思考思维链增量）/
      * delta（增量正文）/ final（消毒后最终正文替换）/ thought（工具轮决策旁白）/
      * degrade（工具循环超限降级提示）/ done（"[DONE]"，本轮结束）/ error（错误消息）
      * <p>

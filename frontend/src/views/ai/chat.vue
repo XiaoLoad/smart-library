@@ -66,8 +66,9 @@
               <div class="user-bubble">{{ m.content }}</div>
             </div>
 
-            <!-- 助手消息：左侧头像 + 空气化排版 -->
-            <div v-else class="msg-row assistant">
+            <!-- 助手消息：左侧头像 + 空气化排版。
+                 @click 事件委托处理正文角标点击（v-html 内容无法直接绑事件） -->
+            <div v-else class="msg-row assistant" :data-msg-id="m.id" @click="handleCitationClick(m, $event)">
               <div class="msg-avatar"><span>智</span></div>
               <div class="msg-body">
                 <!-- 深度思考（思维链）面板：思考中流式展开，正文开始后自动折叠 -->
@@ -649,12 +650,53 @@ const scrollToFirstGenCard = async (msg) => {
   return false
 }
 
-const renderMarkdown = (content) => {
+/**
+ * A4：[资料 N] 引用角标渲染。
+ * 把回答正文中的「[资料 N]」替换为内联角标（圆角小方块、主色、可点击），
+ * 点击角标展开/收起正文上方参考资料条中对应的片段摘要（与药丸共用 ragOpenIndex）。
+ * <p>
+ * 实现约束：正文经 v-html 渲染，角标不能用 Vue 事件绑定——改为在角标上
+ * 标 data-src 属性，由气泡容器的事件委托（handleCitationClick）统一处理。
+ * 编号不存在（模型编造）时不渲染角标、原样保留文本，避免误导。
+ *
+ * @param {string} html  md.render 后的正文 HTML
+ * @param {Array} sources 本轮 ragSources（[{sourceNo, docTitle, snippet}]）
+ */
+const CITE_RE = /\[资料\s*(\d+)\]/g
+const renderCitations = (html, sources) => {
+  if (!html || !sources || !sources.length) return html
+  const valid = new Set(sources.map((s) => s.sourceNo))
+  return html.replace(CITE_RE, (match, num) => {
+    const n = Number(num)
+    if (!valid.has(n)) return match
+    return (
+      `<sup class="cite-badge" data-src="${n}" title="查看资料 ${n}：${sources.find((s) => s.sourceNo === n)?.docTitle || ''}">` +
+      `${n}</sup>`
+    )
+  })
+}
+
+const renderMarkdown = (content, sources) => {
   if (!content) return ''
   try {
-    return md.render(content)
+    return renderCitations(md.render(content), sources)
   } catch {
     return md.utils.escapeHtml(content)
+  }
+}
+
+/** 角标点击（事件委托）：展开/收起对应编号的片段摘要 */
+const handleCitationClick = (m, e) => {
+  const badge = e.target.closest('.cite-badge')
+  if (!badge) return
+  const n = Number(badge.dataset.src)
+  if (!m.ragSources?.some((s) => s.sourceNo === n)) return
+  m.ragOpenIndex = m.ragOpenIndex === n - 1 ? -1 : n - 1
+  if (m.ragOpenIndex >= 0) {
+    nextTick(() => {
+      document.querySelector(`.msg-bubble[data-msg-id="${m.id}"] .rag-snippet`)
+        ?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    })
   }
 }
 
@@ -1198,7 +1240,7 @@ const appendAssistantText = (text) => {
   const msg = assistantMsg
   if (!msg) return
   msg.content = msg.content ? `${msg.content}\n\n${text}` : text
-  msg.html = renderMarkdown(msg.content)
+  msg.html = renderMarkdown(msg.content, msg.ragSources)
   scrollToBottom()
 }
 
@@ -1480,6 +1522,7 @@ const sendInternal = async (content, { continuation }) => {
         }
       } else if (event === 'rag') {
         // 知识库来源：在调用 LLM 之前推送（早于 delta），气泡内先出「参考资料」条。
+        // sourceNo（A4）与正文 [资料 N] 角标一一对应，去重按编号优先。
         // 不关 pending：检索结果不是模型产出，占位文案由「正在思考…」切换为「正在结合参考资料思考…」，
         // 覆盖 rag 之后到模型首个输出之间的空窗
         const msg = ensureAssistantMsg()
@@ -1489,11 +1532,12 @@ const sendInternal = async (content, { continuation }) => {
             for (const item of list) {
               const docTitle = item?.docTitle || '未命名文档'
               const snippet = item?.snippet || ''
-              // 多轮工具调用可能重复检索到同一片段，按「标题 + 摘要」去重，避免药丸堆积
-              const dup = msg.ragSources.some(
-                (s) => s.docTitle === docTitle && s.snippet === snippet
+              const sourceNo = Number(item?.sourceNo) || null
+              // 多轮工具调用可能重复检索到同一片段：按编号去重（无编号退回「标题+摘要」），避免药丸堆积
+              const dup = msg.ragSources.some((s) =>
+                sourceNo ? s.sourceNo === sourceNo : s.docTitle === docTitle && s.snippet === snippet
               )
-              if (!dup) msg.ragSources.push({ docTitle, snippet })
+              if (!dup) msg.ragSources.push({ sourceNo, docTitle, snippet })
             }
           }
         } catch {
@@ -1508,7 +1552,7 @@ const sendInternal = async (content, { continuation }) => {
         msg.reasoningStreaming = false
         msg.reasoningOpen = false
         msg.content += data
-        msg.html = renderMarkdown(msg.content)
+        msg.html = renderMarkdown(msg.content, msg.ragSources)
         scrollToBottom()
       } else if (event === 'reset') {
         // 进入工具调用轮：清空工具调用前的过渡文本（正文只保留最终回答，
@@ -1524,7 +1568,7 @@ const sendInternal = async (content, { continuation }) => {
         // 后端完成回答后的最终文本（已剔除误输出的工具调用代码），整体替换流式拼接内容
         const msg = ensureAssistantMsg()
         msg.content = data
-        msg.html = renderMarkdown(msg.content)
+        msg.html = renderMarkdown(msg.content, msg.ragSources)
         scrollToBottom()
       } else if (event === 'tool') {
         const msg = ensureAssistantMsg()
@@ -1647,7 +1691,7 @@ const sendInternal = async (content, { continuation }) => {
           // M4：授权请求记入时间线，与旁白、工具卡片构成完整决策链
           msg.timeline.push({ kind: 'confirm', tool: info.tool || '' })
           msg.content = msg.content || '请确认上方授权请求后继续。'
-          msg.html = renderMarkdown(msg.content)
+          msg.html = renderMarkdown(msg.content, msg.ragSources)
           startConfirmCountdown(msg.confirmCards[msg.confirmCards.length - 1])
           scrollToBottom()
         } catch {
@@ -1711,7 +1755,7 @@ const sendInternal = async (content, { continuation }) => {
         msg.content = msg.content
           ? `${msg.content}\n\n${msg.degradeMessage}`
           : msg.degradeMessage
-        msg.html = renderMarkdown(msg.content)
+        msg.html = renderMarkdown(msg.content, msg.ragSources)
         scrollToBottom()
       } else if (event === 'notice') {
         // 渠道故障转移等系统级提示：轻提示告知用户（如「主渠道繁忙，已切换到备用渠道」），不打断回答流
@@ -1727,7 +1771,7 @@ const sendInternal = async (content, { continuation }) => {
         // 已有正文时保留原内容，错误说明追加其后（避免中途出错抹掉已流出的回答）
         const errTip = `⚠️ ${data || 'AI 请求出错'}`
         msg.content = msg.content ? `${msg.content}\n\n${errTip}` : errTip
-        msg.html = renderMarkdown(msg.content)
+        msg.html = renderMarkdown(msg.content, msg.ragSources)
         scrollToBottom()
       }
     }
@@ -1756,7 +1800,7 @@ const sendInternal = async (content, { continuation }) => {
       // 已有正文时保留原内容，错误说明追加其后
       const errTip = `⚠️ ${e.message || 'AI 请求失败'}`
       assistantMsg.content = assistantMsg.content ? `${assistantMsg.content}\n\n${errTip}` : errTip
-      assistantMsg.html = renderMarkdown(assistantMsg.content)
+      assistantMsg.html = renderMarkdown(assistantMsg.content, assistantMsg.ragSources)
     }
   } finally {
     abortController = null
@@ -2459,6 +2503,35 @@ onMounted(loadConversations)
   line-height: 1.7;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* —— A4：正文引用角标 ——
+   [资料 N] 渲染为内联小方块角标：主色描边、纸色底，点击展开对应片段摘要。
+   与参考资料药丸共用视觉语言（虚线描边 → 激活实线主色），不新增颜色 */
+.markdown .cite-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  margin: 0 3px;
+  padding: 0 5px;
+  border-radius: var(--radius-pill);
+  border: 1px dashed var(--color-primary);
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  vertical-align: super;
+  cursor: pointer;
+  user-select: none;
+  transition: all var(--duration-fast) var(--ease-soft);
+}
+.markdown .cite-badge:hover {
+  border-style: solid;
+  background: var(--color-primary);
+  color: #fff;
 }
 
 /* —— M4：Agent 决策时间线 ——
