@@ -612,7 +612,13 @@ Page({
     card.state = 'submitting'
     this.setData({ ['messages[' + this._streamIdx + '].confirmCard.state']: 'submitting' })
     try {
-      const res = await request.post('/ai/confirm', { token: card.token, tool: card.tool })
+      // conversationId 与令牌签发时的会话比对（服务端防跨会话重放）；
+      // batch 批量卡同口径
+      const res = await request.post('/ai/confirm', {
+        token: card.token,
+        tool: card.tool,
+        conversationId: this.data.currentConv ? this.data.currentConv.id : null,
+      })
       this.stopConfirmCountdown()
       card.state = 'confirmed'
       card.result = res || null

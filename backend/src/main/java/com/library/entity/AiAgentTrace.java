@@ -26,6 +26,13 @@ public class AiAgentTrace {
     private String toolSequence;
     /** 决策旁白摘要（JSON 数组，Agent 的规划轨迹） */
     private String thoughtSummary;
+    /**
+     * B2：写操作授权审计事件对（JSON 数组，按时间序）。
+     * 格式：["asked:applyBorrow", "decided:applyBorrow:allowed-once"]。
+     * outcome 取值：allowed-once=确认通过 / rejected=拒绝 / cancelled=取消 /
+     * expired=超时失效 / unavailable=裁决通道异常。管理端可完整回放授权链路。
+     */
+    private String approvalAudit;
     /** 工具循环轮次（模型往返次数） */
     private Integer toolRounds;
     /** 工具调用总次数 */

@@ -42,6 +42,44 @@ public class AiBatchConfirmService {
     }
 
     /**
+     * 批次审计回调（B2，对齐 harness 的 approval/asked + approval/decided 事件对）：
+     * 批量卡签发记 asked，批次裁决记 decided。由 AiService 注入。
+     */
+    public interface BatchApprovalAuditListener {
+        void onAsked(String token, int itemCount);
+
+        /** outcome：allowed-once / cancelled / expired */
+        void onDecided(String token, String outcome);
+    }
+
+    private volatile BatchApprovalAuditListener auditListener;
+
+    /** 注入批次审计回调 */
+    public void setAuditListener(BatchApprovalAuditListener listener) {
+        this.auditListener = listener;
+    }
+
+    private void fireAsked(String token, int itemCount) {
+        BatchApprovalAuditListener l = auditListener;
+        if (l != null) {
+            try {
+                l.onAsked(token, itemCount);
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+    private void fireDecided(String token, String outcome) {
+        BatchApprovalAuditListener l = auditListener;
+        if (l != null) {
+            try {
+                l.onDecided(token, outcome);
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+    /**
      * 登记批量授权请求。
      *
      * @param userId         发起用户
@@ -57,6 +95,8 @@ public class AiBatchConfirmService {
         String token = "bat_" + random.token();
         pending.put(token, new PendingBatch(token, userId, conversationId,
                 List.copyOf(items), System.currentTimeMillis()));
+        // B2：asked 审计
+        fireAsked(token, items.size());
         return token;
     }
 
@@ -76,6 +116,7 @@ public class AiBatchConfirmService {
         }
         if (System.currentTimeMillis() - pb.createdAt() > BATCH_TTL_SECONDS * 1000L) {
             pending.remove(token);
+            fireDecided(token, "expired");
             return null;
         }
         if (pb.userId() == null || !pb.userId().equals(userId)) {
@@ -85,19 +126,28 @@ public class AiBatchConfirmService {
             return null;
         }
         pending.remove(token);
+        fireDecided(token, "allowed-once");
         return pb;
     }
 
     /** 用户取消时作废批次 */
     public void revoke(String token) {
         if (token != null) {
-            pending.remove(token);
+            PendingBatch pb = pending.remove(token);
+            if (pb != null) {
+                fireDecided(token, "cancelled");
+            }
         }
     }
 
     private void purgeExpired() {
-        pending.entrySet().removeIf(e ->
-                System.currentTimeMillis() - e.getValue().createdAt() > BATCH_TTL_SECONDS * 1000L);
+        pending.entrySet().removeIf(e -> {
+            boolean expired = System.currentTimeMillis() - e.getValue().createdAt() > BATCH_TTL_SECONDS * 1000L;
+            if (expired) {
+                fireDecided(e.getKey(), "expired");
+            }
+            return expired;
+        });
     }
 
     /** 简易 SecureRandom 持有者（与 AiConfirmService 同样的 256 位熵令牌） */

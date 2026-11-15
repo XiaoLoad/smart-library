@@ -33,6 +33,12 @@ public class AiAgentTraceService {
         private final String turnId = UUID.randomUUID().toString();
         private final java.util.List<String> toolSequence = new java.util.concurrent.CopyOnWriteArrayList<>();
         private final java.util.List<String> thoughtSummary = new java.util.concurrent.CopyOnWriteArrayList<>();
+        /**
+         * B2：授权审计事件对（对齐 harness 的 approval/asked + approval/decided）。
+         * 每项格式 "asked:toolName" / "decided:toolName:outcome"，
+         * 按时间顺序落 JSON 数组，管理端可完整回放授权链路。
+         */
+        private final java.util.List<String> approvalAudit = new java.util.concurrent.CopyOnWriteArrayList<>();
         private final long startAt = System.currentTimeMillis();
         private volatile boolean gateTriggered = false;
         private volatile String gateTool = null;
@@ -62,6 +68,24 @@ public class AiAgentTraceService {
             }
         }
 
+        /** B2：授权请求已发起（asked 事件） */
+        public void recordApprovalAsked(String toolName) {
+            if (toolName != null && !toolName.isBlank()) {
+                approvalAudit.add("asked:" + toolName);
+            }
+        }
+
+        /** B2：授权已裁决（decided 事件，outcome = allowed-once/rejected/cancelled/expired/unavailable） */
+        public void recordApprovalDecided(String toolName, String outcome) {
+            if (toolName != null && !toolName.isBlank() && outcome != null && !outcome.isBlank()) {
+                approvalAudit.add("decided:" + toolName + ":" + outcome);
+            }
+        }
+
+        public List<String> getApprovalAudit() {
+            return approvalAudit;
+        }
+
         public void markGate(String toolName) {
             this.gateTriggered = true;
             this.gateTool = toolName;
@@ -87,6 +111,11 @@ public class AiAgentTraceService {
 
         public int getToolRounds() {
             return toolRounds;
+        }
+
+        /** 本轮唯一标识（decided 补录按它定位已落库的轨迹行） */
+        public String getTurnId() {
+            return turnId;
         }
 
         public List<String> getToolSequence() {
@@ -138,6 +167,7 @@ public class AiAgentTraceService {
             t.setUserQuery(c.userQuery);
             t.setToolSequence(toJsonArray(c.toolSequence));
             t.setThoughtSummary(toJsonArray(c.thoughtSummary));
+            t.setApprovalAudit(toJsonArray(c.getApprovalAudit()));
             // 轮次取实际框架计数（至少 1：用到工具即视为 1 轮），工具数仍按工具调用次数
             t.setToolRounds(Math.max(1, c.getToolRounds()));
             t.setToolCount(c.toolSequence.size());
@@ -153,6 +183,24 @@ public class AiAgentTraceService {
             traceMapper.insert(t);
         } catch (Exception e) {
             // 轨迹写入失败不影响对话
+        }
+    }
+
+    /**
+     * B2：向已落库的轨迹追加一条授权审计事件（decided 补录）。
+     * <p>
+     * 用户点授权卡发生在流结束、轨迹已落库之后，此时内存收集器已失效——
+     * 裁决结果按 turnId 直接 UPDATE 到 DB 行上。查询不到该轮轨迹时静默跳过。
+     * 调用方负责组装条目文本（如 "decided:applyBorrow:allowed-once"）。
+     */
+    public void appendAuditEvent(String turnId, String entry) {
+        if (turnId == null || turnId.isBlank() || entry == null || entry.isBlank()) {
+            return;
+        }
+        try {
+            traceMapper.appendApprovalAudit(turnId, entry);
+        } catch (Exception e) {
+            // 审计补录失败不影响确认主流程
         }
     }
 

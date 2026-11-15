@@ -70,6 +70,53 @@ public class AiConfirmService {
     }
 
     /**
+     * 授权审计回调（B2 fail-closed 补强，对齐 harness 的 approval/asked + approval/decided
+     * 审计事件对）：授权卡签发记 asked，用户/系统做出裁决记 decided。
+     * 由 AiService 注入到轨迹收集器，本服务不感知轨迹实现。
+     */
+    public interface ApprovalAuditListener {
+        /** 授权请求已发起（asked） */
+        void onAsked(String token, String toolName);
+
+        /**
+         * 授权已裁决（decided）。
+         *
+         * @param outcome allowed-once=确认通过并消费 / rejected=用户或系统拒绝 /
+         *                cancelled=主动作废 / expired=超时失效 / unavailable=裁决通道异常
+         */
+        void onDecided(String token, String toolName, String outcome);
+    }
+
+    private volatile ApprovalAuditListener auditListener;
+
+    /** 注入审计回调（AiService 每轮对话时绑定到当轮轨迹收集器） */
+    public void setAuditListener(ApprovalAuditListener listener) {
+        this.auditListener = listener;
+    }
+
+    private void fireAsked(String token, String toolName) {
+        ApprovalAuditListener l = auditListener;
+        if (l != null) {
+            try {
+                l.onAsked(token, toolName);
+            } catch (Exception e) {
+                log.debug("[confirm] asked 审计回调失败: {}", e.getMessage());
+            }
+        }
+    }
+
+    private void fireDecided(String token, String toolName, String outcome) {
+        ApprovalAuditListener l = auditListener;
+        if (l != null) {
+            try {
+                l.onDecided(token, toolName, outcome);
+            } catch (Exception e) {
+                log.debug("[confirm] decided 审计回调失败: {}", e.getMessage());
+            }
+        }
+    }
+
+    /**
      * 生成授权令牌并登记待确认请求。
      *
      * @param userId         发起用户
@@ -101,6 +148,8 @@ public class AiConfirmService {
         pending.put(token, new PendingConfirm(token, userId, conversationId, toolName,
                 frozen, digest, title, rows,
                 System.currentTimeMillis()));
+        // B2：asked 审计——授权请求已发起（asked/decided 事件对的前半）
+        fireAsked(token, toolName);
         return token;
     }
 
@@ -132,6 +181,7 @@ public class AiConfirmService {
         if (isExpired(pc.createdAt())) {
             log.warn("[confirm] 令牌已过期: {}", token);
             pending.remove(token);
+            fireDecided(token, pc.toolName(), "expired");
             return null;
         }
         // 用户身份不匹配：拒绝但不消费，让 rightful 用户仍能确认
@@ -156,6 +206,7 @@ public class AiConfirmService {
         }
         // 走到这里说明本次消费合法，移除令牌实现一次性语义
         pending.remove(token);
+        fireDecided(token, pc.toolName(), "allowed-once");
         return pc;
     }
 
@@ -166,7 +217,10 @@ public class AiConfirmService {
      */
     public void revoke(String token) {
         if (token != null) {
-            pending.remove(token);
+            PendingConfirm pc = pending.remove(token);
+            if (pc != null) {
+                fireDecided(token, pc.toolName(), "cancelled");
+            }
         }
     }
 
@@ -193,9 +247,20 @@ public class AiConfirmService {
         return System.currentTimeMillis() - createdAt > TOKEN_TTL_SECONDS * 1000L;
     }
 
-    /** 清理过期令牌，避免内存无限增长 */
+    /**
+     * 清理过期令牌，避免内存无限增长。
+     * <p>
+     * B2：清理时补 decided=expired 审计，保证 asked/decided 成对，
+     * 不出现「asked 之后再无下文」的悬空审计记录。
+     */
     private void purgeExpired() {
-        pending.entrySet().removeIf(e -> isExpired(e.getValue().createdAt()));
+        pending.entrySet().removeIf(e -> {
+            if (!isExpired(e.getValue().createdAt())) {
+                return false;
+            }
+            fireDecided(e.getKey(), e.getValue().toolName(), "expired");
+            return true;
+        });
     }
 
     /**
