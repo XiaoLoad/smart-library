@@ -87,15 +87,31 @@ public class AiConfirmService {
         void onDecided(String token, String toolName, String outcome);
     }
 
-    private volatile ApprovalAuditListener auditListener;
+    /**
+     * 审计监听器按会话隔离登记（多会话并行流支持）。
+     * <p>
+     * 曾经的实现是单例 volatile 字段 + setAuditListener 覆盖式注入——两路会话流并行时，
+     * 后发起的对话会覆盖先前的监听器，asked/decided 审计事件就会记到错误会话的轨迹里。
+     * 改为按 conversationId 登记，同会话新一轮覆盖旧轮（令牌归属单会话，同会话串行）。
+     */
+    private final Map<Long, ApprovalAuditListener> auditListeners = new ConcurrentHashMap<>();
 
-    /** 注入审计回调（AiService 每轮对话时绑定到当轮轨迹收集器） */
-    public void setAuditListener(ApprovalAuditListener listener) {
-        this.auditListener = listener;
+    /** 注入审计回调（AiService 每轮对话时按会话绑定到当轮轨迹收集器） */
+    public void setAuditListener(Long conversationId, ApprovalAuditListener listener) {
+        if (conversationId != null) {
+            auditListeners.put(conversationId, listener);
+        }
     }
 
-    private void fireAsked(String token, String toolName) {
-        ApprovalAuditListener l = auditListener;
+    /** 会话流结束时移除审计回调，避免监听器集合随长会话累积泄漏 */
+    public void clearAuditListener(Long conversationId) {
+        if (conversationId != null) {
+            auditListeners.remove(conversationId);
+        }
+    }
+
+    private void fireAsked(String token, Long conversationId, String toolName) {
+        ApprovalAuditListener l = conversationId == null ? null : auditListeners.get(conversationId);
         if (l != null) {
             try {
                 l.onAsked(token, toolName);
@@ -105,8 +121,8 @@ public class AiConfirmService {
         }
     }
 
-    private void fireDecided(String token, String toolName, String outcome) {
-        ApprovalAuditListener l = auditListener;
+    private void fireDecided(String token, Long conversationId, String toolName, String outcome) {
+        ApprovalAuditListener l = conversationId == null ? null : auditListeners.get(conversationId);
         if (l != null) {
             try {
                 l.onDecided(token, toolName, outcome);
@@ -149,7 +165,7 @@ public class AiConfirmService {
                 frozen, digest, title, rows,
                 System.currentTimeMillis()));
         // B2：asked 审计——授权请求已发起（asked/decided 事件对的前半）
-        fireAsked(token, toolName);
+        fireAsked(token, conversationId, toolName);
         return token;
     }
 
@@ -181,7 +197,7 @@ public class AiConfirmService {
         if (isExpired(pc.createdAt())) {
             log.warn("[confirm] 令牌已过期: {}", token);
             pending.remove(token);
-            fireDecided(token, pc.toolName(), "expired");
+            fireDecided(token, pc.conversationId(), pc.toolName(), "expired");
             return null;
         }
         // 用户身份不匹配：拒绝但不消费，让 rightful 用户仍能确认
@@ -206,7 +222,7 @@ public class AiConfirmService {
         }
         // 走到这里说明本次消费合法，移除令牌实现一次性语义
         pending.remove(token);
-        fireDecided(token, pc.toolName(), "allowed-once");
+        fireDecided(token, pc.conversationId(), pc.toolName(), "allowed-once");
         return pc;
     }
 
@@ -219,7 +235,7 @@ public class AiConfirmService {
         if (token != null) {
             PendingConfirm pc = pending.remove(token);
             if (pc != null) {
-                fireDecided(token, pc.toolName(), "cancelled");
+                fireDecided(token, pc.conversationId(), pc.toolName(), "cancelled");
             }
         }
     }
@@ -258,7 +274,7 @@ public class AiConfirmService {
             if (!isExpired(e.getValue().createdAt())) {
                 return false;
             }
-            fireDecided(e.getKey(), e.getValue().toolName(), "expired");
+            fireDecided(e.getKey(), e.getValue().conversationId(), e.getValue().toolName(), "expired");
             return true;
         });
     }

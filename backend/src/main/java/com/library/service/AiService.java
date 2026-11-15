@@ -453,8 +453,10 @@ public class AiService {
                 traceService.appendAuditEvent(trace.getTurnId(), "decided:" + toolName + ":" + outcome);
             }
         };
-        aiConfirmService.setAuditListener(confirmAudit);
-        aiBatchConfirmService.setAuditListener(new AiBatchConfirmService.BatchApprovalAuditListener() {
+        // 多会话并行支持：审计监听器按会话登记（内部 ConcurrentHashMap），同会话新一轮覆盖旧轮；
+        // 流结束时 clearAuditListener 清理，避免监听器集合随会话累积泄漏
+        aiConfirmService.setAuditListener(conversationId, confirmAudit);
+        aiBatchConfirmService.setAuditListener(conversationId, new AiBatchConfirmService.BatchApprovalAuditListener() {
             @Override
             public void onAsked(String token, int itemCount) {
                 trace.recordApprovalAsked("batch(" + itemCount + ")");
@@ -495,7 +497,12 @@ public class AiService {
         // 流结束/超时/出错时注销，避免推送到已关闭的通道。
         // A6 补 onError：客户端中途断网/刷新时容器走 error 回调（不触发 completion），
         // 缺它会让 registry 残留死通道，下一次 tool_result 推送靠 ping 探测才发现失败
-        Runnable unregister = () -> AiSseSessionRegistry.unregister(conversationId, emitter);
+        Runnable unregister = () -> {
+            AiSseSessionRegistry.unregister(conversationId, emitter);
+            // 多会话并行支持：同时清理本会话的审计监听器（随流生命周期，不随会话累积）
+            aiConfirmService.clearAuditListener(conversationId);
+            aiBatchConfirmService.clearAuditListener(conversationId);
+        };
         emitter.onCompletion(unregister);
         emitter.onTimeout(unregister);
         emitter.onError(t -> {

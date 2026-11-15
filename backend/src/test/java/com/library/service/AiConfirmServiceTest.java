@@ -29,7 +29,7 @@ class AiConfirmServiceTest {
     void setUp() {
         service = new AiConfirmService(new ObjectMapper());
         audit = new CopyOnWriteArrayList<>();
-        service.setAuditListener(new AiConfirmService.ApprovalAuditListener() {
+        service.setAuditListener(10L, new AiConfirmService.ApprovalAuditListener() {
             @Override
             public void onAsked(String token, String toolName) {
                 audit.add("asked:" + toolName);
@@ -162,7 +162,7 @@ class AiConfirmServiceTest {
     @DisplayName("审计回调抛异常不影响主流程（回调吞异常）")
     void auditListenerFailureDoesNotBreakIssue() {
         AiConfirmService s = new AiConfirmService(new ObjectMapper());
-        s.setAuditListener(new AiConfirmService.ApprovalAuditListener() {
+        s.setAuditListener(10L, new AiConfirmService.ApprovalAuditListener() {
             @Override
             public void onAsked(String token, String toolName) {
                 throw new RuntimeException("audit down");

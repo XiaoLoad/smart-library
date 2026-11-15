@@ -52,15 +52,28 @@ public class AiBatchConfirmService {
         void onDecided(String token, String outcome);
     }
 
-    private volatile BatchApprovalAuditListener auditListener;
+    /**
+     * 批次审计监听器按会话隔离登记（多会话并行流支持，与 AiConfirmService 同因）：
+     * 单例覆盖式注入在两路会话流并行时会把审计记到错误会话的轨迹里。
+     */
+    private final Map<Long, BatchApprovalAuditListener> auditListeners = new ConcurrentHashMap<>();
 
-    /** 注入批次审计回调 */
-    public void setAuditListener(BatchApprovalAuditListener listener) {
-        this.auditListener = listener;
+    /** 注入批次审计回调（按会话绑定） */
+    public void setAuditListener(Long conversationId, BatchApprovalAuditListener listener) {
+        if (conversationId != null) {
+            auditListeners.put(conversationId, listener);
+        }
     }
 
-    private void fireAsked(String token, int itemCount) {
-        BatchApprovalAuditListener l = auditListener;
+    /** 会话流结束时移除审计回调 */
+    public void clearAuditListener(Long conversationId) {
+        if (conversationId != null) {
+            auditListeners.remove(conversationId);
+        }
+    }
+
+    private void fireAsked(String token, Long conversationId, int itemCount) {
+        BatchApprovalAuditListener l = conversationId == null ? null : auditListeners.get(conversationId);
         if (l != null) {
             try {
                 l.onAsked(token, itemCount);
@@ -69,8 +82,8 @@ public class AiBatchConfirmService {
         }
     }
 
-    private void fireDecided(String token, String outcome) {
-        BatchApprovalAuditListener l = auditListener;
+    private void fireDecided(String token, Long conversationId, String outcome) {
+        BatchApprovalAuditListener l = conversationId == null ? null : auditListeners.get(conversationId);
         if (l != null) {
             try {
                 l.onDecided(token, outcome);
@@ -96,7 +109,7 @@ public class AiBatchConfirmService {
         pending.put(token, new PendingBatch(token, userId, conversationId,
                 List.copyOf(items), System.currentTimeMillis()));
         // B2：asked 审计
-        fireAsked(token, items.size());
+        fireAsked(token, conversationId, items.size());
         return token;
     }
 
@@ -116,7 +129,7 @@ public class AiBatchConfirmService {
         }
         if (System.currentTimeMillis() - pb.createdAt() > BATCH_TTL_SECONDS * 1000L) {
             pending.remove(token);
-            fireDecided(token, "expired");
+            fireDecided(token, pb.conversationId(), "expired");
             return null;
         }
         if (pb.userId() == null || !pb.userId().equals(userId)) {
@@ -126,7 +139,7 @@ public class AiBatchConfirmService {
             return null;
         }
         pending.remove(token);
-        fireDecided(token, "allowed-once");
+        fireDecided(token, pb.conversationId(), "allowed-once");
         return pb;
     }
 
@@ -135,7 +148,7 @@ public class AiBatchConfirmService {
         if (token != null) {
             PendingBatch pb = pending.remove(token);
             if (pb != null) {
-                fireDecided(token, "cancelled");
+                fireDecided(token, pb.conversationId(), "cancelled");
             }
         }
     }
@@ -144,7 +157,7 @@ public class AiBatchConfirmService {
         pending.entrySet().removeIf(e -> {
             boolean expired = System.currentTimeMillis() - e.getValue().createdAt() > BATCH_TTL_SECONDS * 1000L;
             if (expired) {
-                fireDecided(e.getKey(), "expired");
+                fireDecided(e.getKey(), e.getValue().conversationId(), "expired");
             }
             return expired;
         });
