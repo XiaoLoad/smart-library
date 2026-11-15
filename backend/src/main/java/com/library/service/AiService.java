@@ -381,17 +381,17 @@ public class AiService {
      * 自动维护完整的工具调用上下文。
      */
     public SseEmitter chat(Long conversationId, String content) {
-        return chat(conversationId, content, false);
+        return chat(conversationId, content, false, null);
     }
 
     /**
-     * 流式对话（支持确认续跑）。
+     * A2：带分支上下文的流式对话。
      *
-     * @param continuation M8：true 表示由前端在授权确认成功后自动发起的续跑轮。
-     *                     续跑轮限制连续次数（默认 3），防止「确认→续跑→再弹卡→确认」
-     *                     无限循环消耗 token；超限走普通对话路径让用户手动继续。
+     * @param branchGroupKey 分支分组标识：普通轮为 null（首轮）；编辑重发/重新生成产生的
+     *                       分支轮传入原轮的 group_key，user/assistant 消息都落库到该组，
+     *                       与兄弟分支共用分支导航
      */
-    public SseEmitter chat(Long conversationId, String content, boolean continuation) {
+    public SseEmitter chat(Long conversationId, String content, boolean continuation, String branchGroupKey) {
         CurrentUser cu = CurrentUser.get();
         AiConversation conv = conversationMapper.selectById(conversationId);
         if (conv == null) {
@@ -421,6 +421,7 @@ public class AiService {
         // 2. 落库用户消息并使缓存失效（下次请求重新加载完整历史）
         // M8：续跑轮的引导语加前缀落库——模型历史可见其上下文意图；
         // countTrailingContinuations 靠该前缀统计连续续跑次数
+        // A2：分支轮的 user 消息带原轮 group_key（与兄弟分支同组，激活态默认 1）
         com.library.entity.AiMessage userMsg = new com.library.entity.AiMessage();
         userMsg.setConversationId(conversationId);
         userMsg.setRole("user");
@@ -428,6 +429,9 @@ public class AiService {
         // M10：续跑引导语是内部机制消息，对 UI 隐藏（模型历史仍可见）
         if (continuation) {
             userMsg.setVisibility("hidden");
+        }
+        if (branchGroupKey != null && !branchGroupKey.isBlank()) {
+            userMsg.setGroupKey(branchGroupKey);
         }
         userMsg.setCreateTime(LocalDateTime.now());
         messageMapper.insert(userMsg);
@@ -678,6 +682,8 @@ public class AiService {
             void start(int idx) {
                 AiConfig cfg = candidates.get(idx);
                 candidateIdx.set(idx);
+                // B4：渠道尝试留痕（try 事件，随轨迹落库）
+                trace.recordAttempt("try:" + idx + ":" + channelLabel(cfg));
                 OpenAiStreamingChatModel model = getOrBuildModel(cfg);
                 // 请求级记忆：持有完整工具调用上下文（含 tool_calls/tool 结果），不落库；
                 // 渠道切换重跑时重建，失败的尝试可能已把 user 消息写入旧 memory
@@ -774,6 +780,8 @@ public class AiService {
                             aiMsg.setConversationId(conversationId);
                             aiMsg.setRole("assistant");
                             aiMsg.setContent(sanitized);
+                            // A2：回复与同轮 user 消息共用分支组（分支导航聚合到同一轮）
+                            aiMsg.setGroupKey(userMsg.getGroupKey());
                             aiMsg.setCreateTime(LocalDateTime.now());
                             // 工具调用摘要（JSON 数组、按调用顺序记录工具名），供前端徽章行持久展示
                             if (!toolCalls.isEmpty()) {
@@ -842,6 +850,11 @@ public class AiService {
                     AiConfig next = candidates.get(candidateIdx.get() + 1);
                     markCooldown(failed.channelId());
                     log.warn("[AI] 渠道「{}」请求被上游拒绝，自动切换到「{}」重试", channelLabel(failed), channelLabel(next));
+                    // B4：失败与切换决策留痕（fail/switched 事件，随轨迹落库）
+                    trace.recordAttempt("fail:" + candidateIdx.get() + ":" + channelLabel(failed)
+                            + ":" + truncateAttempt(err));
+                    trace.recordAttempt("switched:" + candidateIdx.get() + "->" + (candidateIdx.get() + 1)
+                            + ":" + channelLabel(next));
                     try {
                         emitter.send(SseEmitter.event().name("notice")
                                 .data("「" + channelLabel(failed) + "」渠道繁忙，已自动切换到「" + channelLabel(next) + "」"));
@@ -867,6 +880,8 @@ public class AiService {
                     log.warn("[AI] 对话流异常 conversationId={}，渠道={}：{}", conversationId,
                             candidates.get(candidateIdx.get()) == null ? "-" : channelLabel(candidates.get(candidateIdx.get())),
                             msg, err);
+                    // B4：最终失败留痕（final-error 事件——走到这里说明候选耗尽或不可切换）
+                    trace.recordAttempt("final-error:" + truncateAttempt(err));
                     emitter.send(SseEmitter.event().name("error").data(friendlyModelError(msg)));
                     // M6a：异常轨迹（记原文，管理员在轨迹页可见完整错误）
                     trace.markError(msg);
@@ -1333,6 +1348,118 @@ public class AiService {
             }
         }
         return count;
+    }
+
+    /**
+     * A2：查询一轮对话的全部兄弟分支（编辑重发/重新生成的历史版本）。
+     * <p>
+     * 消息无 group_key（历史首轮或旧数据）时现场补建分组：把该消息 id 作为 key
+     * 回填到它自身与其后的 assistant 回复上——此后该轮即可产生分支，且无需迁移脚本。
+     *
+     * @return 兄弟 user 消息列表（按 id 升序）+ 当前激活的 user 消息 id
+     */
+    public Map<String, Object> branchSiblings(Long conversationId, Long userId, Long messageId) {
+        AiConversation conv = conversationMapper.selectById(conversationId);
+        if (conv == null) {
+            throw new BusinessException(404, "会话不存在");
+        }
+        if (!conv.getUserId().equals(userId)) {
+            throw new BusinessException(403, "无权操作该会话");
+        }
+        com.library.entity.AiMessage msg = messageMapper.selectById(messageId);
+        if (msg == null || !msg.getConversationId().equals(conversationId)
+                || !"user".equalsIgnoreCase(msg.getRole())) {
+            throw new BusinessException(404, "消息不存在或不是用户消息");
+        }
+        String groupKey = ensureBranchGroup(conversationId, msg);
+        List<com.library.entity.AiMessage> siblings = messageMapper.selectSiblings(conversationId, groupKey);
+        List<Map<String, Object>> items = new ArrayList<>();
+        for (com.library.entity.AiMessage s : siblings) {
+            Map<String, Object> item = new java.util.LinkedHashMap<>();
+            item.put("id", s.getId());
+            item.put("content", s.getContent());
+            item.put("active", s.getActive() != null && s.getActive() == 1);
+            item.put("createTime", s.getCreateTime());
+            items.add(item);
+        }
+        return Map.of("groupKey", groupKey, "list", items);
+    }
+
+    /**
+     * A2：切换一轮对话的激活分支。
+     * <p>
+     * 切换按「激活链」操作：旧分支组内消息全部置 0，目标分支的 user 消息与其后的
+     * assistant 回复（直至下一个分支组 user 消息）置 1。模型上下文与前端历史接口
+     * 都按 active=1 过滤，切换即同时生效于两侧。
+     */
+    public void switchBranch(Long conversationId, Long userId, String groupKey, Long targetUserMsgId) {
+        AiConversation conv = conversationMapper.selectById(conversationId);
+        if (conv == null) {
+            throw new BusinessException(404, "会话不存在");
+        }
+        if (!conv.getUserId().equals(userId)) {
+            throw new BusinessException(403, "无权操作该会话");
+        }
+        com.library.entity.AiMessage target = messageMapper.selectById(targetUserMsgId);
+        if (target == null || !target.getConversationId().equals(conversationId)
+                || !"user".equalsIgnoreCase(target.getRole())
+                || target.getGroupKey() == null || !target.getGroupKey().equals(groupKey)) {
+            throw new BusinessException(404, "目标分支不存在");
+        }
+        // 激活链：目标 user 消息 id 起到组内下一个兄弟 user 消息（或会话末尾）之前的全部消息。
+        // 一轮 = user 消息 + 其 assistant 回复（含 hidden 回执），全部属于同组同链
+        List<com.library.entity.AiMessage> group = messageMapper.selectGroupMessages(conversationId, groupKey);
+        List<Long> chainIds = new ArrayList<>();
+        boolean inChain = false;
+        for (com.library.entity.AiMessage m : group) {
+            if (m.getId().equals(targetUserMsgId)) {
+                inChain = true;
+            } else if (inChain && "user".equalsIgnoreCase(m.getRole())
+                    && "visible".equalsIgnoreCase(m.getVisibility())) {
+                // 下一条可见 user 消息 = 兄弟分支起点，链结束
+                break;
+            }
+            if (inChain) {
+                chainIds.add(m.getId());
+            }
+        }
+        if (chainIds.isEmpty()) {
+            throw new BusinessException(404, "目标分支链为空");
+        }
+        messageMapper.deactivateGroup(conversationId, groupKey);
+        messageMapper.activateMessages(conversationId, chainIds);
+        evictMemory(conversationId);
+    }
+
+    /**
+     * A2：为无分组的历史消息补建分支组（懒初始化）。
+     * 以消息 id 字符串为 key 回填：该 user 消息与其后的 assistant 回复同链同组。
+     * 已有 group_key 的消息原样返回——幂等，重复调用无副作用。
+     */
+    private String ensureBranchGroup(Long conversationId, com.library.entity.AiMessage userMsg) {
+        if (userMsg.getGroupKey() != null && !userMsg.getGroupKey().isBlank()) {
+            return userMsg.getGroupKey();
+        }
+        String key = "g" + userMsg.getId();
+        // 激活链 = 该 user 消息到下一条 user 消息之前的全部行（含 hidden 回执与 assistant 回复）
+        List<com.library.entity.AiMessage> all = messageMapper.selectByConversationId(conversationId);
+        List<Long> chainIds = new ArrayList<>();
+        boolean inChain = false;
+        for (com.library.entity.AiMessage m : all) {
+            if (m.getId().equals(userMsg.getId())) {
+                inChain = true;
+            } else if (inChain && "user".equalsIgnoreCase(m.getRole())) {
+                break;
+            }
+            if (inChain) {
+                chainIds.add(m.getId());
+            }
+        }
+        if (!chainIds.isEmpty()) {
+            messageMapper.assignGroupKey(conversationId, chainIds, key);
+            evictMemory(conversationId);
+        }
+        return key;
     }
 
     /**
@@ -1860,6 +1987,20 @@ public class AiService {
         if (channelId != null) {
             channelCooldownUntil.put(channelId, System.currentTimeMillis() + CHANNEL_COOLDOWN_MS);
         }
+    }
+
+    /**
+     * B4：截取异常链的错误摘要用于尝试审计条目（取首个非空 message，限 120 字符）。
+     * 审计列是 TEXT 且条目在 JSON 数组内，截断保证单条不撑爆展示；完整原文仍在 error_msg 与日志。
+     */
+    private String truncateAttempt(Throwable err) {
+        for (Throwable t = err; t != null; t = t.getCause()) {
+            if (t.getMessage() != null && !t.getMessage().isBlank()) {
+                String s = t.getMessage().replaceAll("\\s+", " ").trim();
+                return s.length() > 120 ? s.substring(0, 120) + "…" : s;
+            }
+        }
+        return err == null ? "" : err.getClass().getSimpleName();
     }
 
     /**

@@ -21,5 +21,12 @@ public class AiMessage {
      * 仅落库供模型续跑上下文，前端不渲染（对齐 ZCode 的 internal 消息不进 UI）
      */
     private String visibility;
+    /**
+     * A2：同轮分支分组标识（编辑重发/重新生成产生的兄弟轮共享同一 key）。
+     * 首轮为 NULL；同 key 的 user 消息互为兄弟分支，前端按 key 聚合出分支导航。
+     */
+    private String groupKey;
+    /** A2：分支激活态。1=当前激活（历史接口返回）；0=被切走的分支（数据保留） */
+    private Integer active;
     private LocalDateTime createTime;
 }

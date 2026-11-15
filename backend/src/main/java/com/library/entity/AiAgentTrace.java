@@ -33,6 +33,12 @@ public class AiAgentTrace {
      * expired=超时失效 / unavailable=裁决通道异常。管理端可完整回放授权链路。
      */
     private String approvalAudit;
+    /**
+     * B4：渠道尝试审计（JSON 数组，按时间序）。
+     * 格式：["try:0:渠道名", "fail:0:渠道名:错误摘要", "switched:0->1:下一渠道名", "final-error:错误摘要"]。
+     * 管理端可回放本轮的渠道故障转移链路：哪个渠道失败、为何切换、最终用哪个渠道完成。
+     */
+    private String attemptAudit;
     /** 工具循环轮次（模型往返次数） */
     private Integer toolRounds;
     /** 工具调用总次数 */

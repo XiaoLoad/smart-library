@@ -12,6 +12,7 @@
         <result property="toolSequence" column="tool_sequence"/>
         <result property="thoughtSummary" column="thought_summary"/>
         <result property="approvalAudit" column="approval_audit"/>
+        <result property="attemptAudit" column="attempt_audit"/>
         <result property="toolRounds" column="tool_rounds"/>
         <result property="toolCount" column="tool_count"/>
         <result property="gateTriggered" column="gate_triggered"/>
@@ -29,12 +30,12 @@
     <insert id="insert" parameterType="com.library.entity.AiAgentTrace" useGeneratedKeys="true" keyProperty="id">
         INSERT INTO ai_agent_traces (
             conversation_id, turn_id, user_id, user_type, user_query,
-            tool_sequence, thought_summary, approval_audit, tool_rounds, tool_count,
+            tool_sequence, thought_summary, approval_audit, attempt_audit, tool_rounds, tool_count,
             gate_triggered, gate_tool, degraded,
             prompt_tokens, completion_tokens, duration_ms, status, error_msg, create_time
         ) VALUES (
             #{conversationId}, #{turnId}, #{userId}, #{userType}, #{userQuery},
-            #{toolSequence}, #{thoughtSummary}, #{approvalAudit}, #{toolRounds}, #{toolCount},
+            #{toolSequence}, #{thoughtSummary}, #{approvalAudit}, #{attemptAudit}, #{toolRounds}, #{toolCount},
             #{gateTriggered}, #{gateTool}, #{degraded},
             #{promptTokens}, #{completionTokens}, #{durationMs}, #{status}, #{errorMsg}, #{createTime}
         )
