@@ -135,7 +135,7 @@
       <version>${langchain4j.version}</version>
     </dependency>
 
-    <!-- 本地 ONNX 中文 Embedding 模型（384 维量化版，约 30MB，首次运行自动下载并缓存，零 API 成本） -->
+    <!-- 本地 ONNX 中文 Embedding 模型（512 维量化版，约 30MB，首次运行自动下载并缓存，零 API 成本） -->
     <dependency>
       <groupId>dev.langchain4j</groupId>
       <artifactId>langchain4j-embeddings-bge-small-zh-v15-q</artifactId>
