@@ -83,13 +83,6 @@ public class AiService {
      * 取值 8 的依据：覆盖省赛演示主线的最大轮数（查额度→检索图书→确认→办理→推荐→汇总）。
      */
     private static final int MAX_TOOL_ROUNDS = 8;
-    /**
-     * M4：单条过渡语（thought）最大字符数。
-     * <p>
-     * M7 起 reset 已移除、正文保留全部叙述，thought 只是时间线上的摘要节点——
-     * 保持短句即可，长文本会与正文重复刷屏。
-     */
-    private static final int THOUGHT_MAX_LEN = 60;
     /** SSE 超时时间（毫秒） */
     private static final long SSE_TIMEOUT_MS = 300_000L;
     /** 首条消息生成标题的最大字符数 */
@@ -820,7 +813,11 @@ public class AiService {
                             emitBatchConfirm(emitter, conversationId, cu.getUserId(), batchItems);
                         }
                         try {
-                            emitter.send(SseEmitter.event().name("done").data("[DONE]"));
+                            // A2：done 事件回传本轮 user 消息的落库 id——前端本地消息是
+                            // Date.now() 临时 id，凭它查分支必 404；拿到真实 id 后前端
+                            // 才能正确拉分支导航/编辑重发/重新生成
+                            emitter.send(SseEmitter.event().name("done")
+                                    .data(objectMapper.writeValueAsString(Map.of("userMessageId", userMsg.getId()))));
                         } catch (IOException e) {
                             // 忽略
                         }
@@ -967,14 +964,9 @@ public class AiService {
         if (text.isEmpty()) {
             return;
         }
-        // M4 视觉修正（2）：部分模型会把「最终答案正文」一起流式输出后才调用工具，
-        // 导致旁白里混入完整书目介绍，时间线被长文本淹没。
-        // 旁白本应是「一句话意图」，这里截取到首个分句边界，得到短句意图描述。
-        text = firstClause(text);
-        // 单条旁白上限：避免模型长篇大论淹没时间线
-        if (text.length() > THOUGHT_MAX_LEN) {
-            text = text.substring(0, THOUGHT_MAX_LEN) + "…";
-        }
+        // 旁白原文完整保留（对齐 deepseek-ai/harness：数据全量、展示靠前端折叠控制）——
+        // 曾在此处做 firstClause 首句截断与 60 字上限，用户看到的思考链只剩一句话的零头；
+        // 现只保留防御性清洗：剔除工具调用产物与未闭合书名号，长度控制交给前端折叠态。
         // M4 视觉修正：截断处的未闭合书名号会让旁白显示成「我来帮您查一下《三」，
         // 观感像渲染错误。此处剔除未闭合的《… 片段，只保留完整语义。
         if (text.indexOf('》') < 0) {
@@ -1011,31 +1003,6 @@ public class AiService {
                 || c == ')' || c == '）'
                 || c == '"' || c == '"'
                 || c == '\'' || c == '\'';
-    }
-
-    /**
-     * M4：截取首个分句，作为「一句话意图」旁白。
-     * <p>
-     * 模型在工具轮前可能连同最终答案一起流式输出（先说答案再调工具），
-     * 若原样作为旁白展示，时间线会被整段书目介绍淹没。此处按中文分句边界
-     * （。！？，；：与换行）取首句，保留「我要做什么」的语义，去掉后面的数据罗列。
-     *
-     * @param text 原始旁白文本
-     * @return 首个分句（过短时回退为原文本）
-     */
-    private String firstClause(String text) {
-        if (text == null) {
-            return null;
-        }
-        for (int i = 0; i < text.length(); i++) {
-            char c = text.charAt(i);
-            if (c == '。' || c == '！' || c == '？' || c == '，' || c == '；' || c == '：' || c == '\n') {
-                String head = text.substring(0, i).trim();
-                // 太短说明切在了标点噪声上，保留原文
-                return head.length() >= 4 ? head : text.trim();
-            }
-        }
-        return text.trim();
     }
 
     /**
