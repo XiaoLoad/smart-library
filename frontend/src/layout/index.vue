@@ -78,7 +78,7 @@
 
         <div class="header-right">
           <el-tooltip content="切换主题" placement="bottom">
-            <el-button text @click="appStore.toggleTheme()" class="icon-btn">
+            <el-button text @click="onToggleTheme($event)" class="icon-btn">
               <AppIcon :name="appStore.theme === 'light' ? 'moon' : 'sun'" :size="18" />
             </el-button>
           </el-tooltip>
@@ -177,6 +177,7 @@ import { useUserStore } from '@/stores/user'
 import { useBookEntryStore, ENTRY_SOURCES } from '@/stores/bookEntry'
 import { notificationApi } from '@/api'
 import { formatDateTime } from '@/utils/datetime.js'
+import { liquidReveal, isLiquidRevealActive } from '@/utils/liquid-theme'
 import AppIcon from '@/components/AppIcon.vue'
 import AppBreadcrumb from '@/components/AppBreadcrumb.vue'
 import AiFloatingBall from '@/components/ai/AiFloatingBall.vue'
@@ -217,6 +218,21 @@ watch(() => route.name, (name) => {
     entryStore.leave()
   }
 })
+
+/* 液体主题切换
+ * 动画完成后经 onCommit 真实提交主题；重复点击 / 中断由 liquid-theme 内部处理。 */
+const onToggleTheme = (e) => {
+  if (isLiquidRevealActive()) return
+  const targetTheme = appStore.theme === 'light' ? 'dark' : 'light'
+  const originEl = e?.currentTarget || e?.target
+  liquidReveal({
+    originEl,
+    duration: 2400,
+    onCommit: () => {
+      if (appStore.theme !== targetTheme) appStore.toggleTheme()
+    },
+  })
+}
 
 /* 目次式菜单配置
  * 与路由结构解耦：容器路由已拍平（"用户管理>读者列表"这类单子项层级去除），

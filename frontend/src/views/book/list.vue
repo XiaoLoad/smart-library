@@ -1809,26 +1809,52 @@ onBeforeUnmount(() => {
 }
 
 /* ========== 暗色适配 ========== */
-:global([data-theme='dark']) .cover-avail {
+/* 注意：`:global(A) B` 在本项目 Vue 版本下会被编译成裸的 `A`，后代选择器被丢弃，
+ * 导致整块暗色覆盖规则实际落在 <html> 上、按钮样式完全没变（白底 + 浅色字看不清）。
+ * 必须把完整选择器一起包进 :global(...)。 */
+:global([data-theme='dark'] .cover-avail) {
   background: rgba(36, 32, 25, 0.84);
   color: var(--color-text);
 }
 
-:global([data-theme='dark']) .cover-btn {
+/* 保留状态色（否则会被上面的暗色规则同优先级覆盖掉） */
+:global([data-theme='dark'] .cover-avail.warning) {
+  color: var(--color-warning);
+}
+
+:global([data-theme='dark'] .cover-avail.danger) {
+  color: var(--color-danger);
+}
+
+:global([data-theme='dark'] .cover-btn) {
   background: rgba(36, 32, 25, 0.86);
   border-color: rgba(255, 255, 255, 0.14);
   color: var(--color-text);
 }
 
-:global([data-theme='dark']) .cover-btn:hover {
+:global([data-theme='dark'] .cover-btn:hover) {
   background: var(--color-bg-subtle);
+  color: var(--color-text);
 }
 
-:global([data-theme='dark']) .volume-cover {
+/* 主按钮（借阅/预约）：保持强调底色 + 反色文字，避免与普通按钮混淆 */
+:global([data-theme='dark'] .cover-btn.is-primary) {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: var(--color-text-inverse);
+}
+
+:global([data-theme='dark'] .cover-btn.is-primary:hover) {
+  background: var(--color-primary-hover);
+  border-color: var(--color-primary-hover);
+  color: var(--color-text-inverse);
+}
+
+:global([data-theme='dark'] .volume-cover) {
   box-shadow: 0 16px 30px -22px rgba(0, 0, 0, 0.9);
 }
 
-:global([data-theme='dark']) .volume:hover .volume-cover {
+:global([data-theme='dark'] .volume:hover .volume-cover) {
   box-shadow: 0 24px 42px -24px rgba(0, 0, 0, 0.95);
 }
 
