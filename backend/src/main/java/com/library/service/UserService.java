@@ -59,17 +59,25 @@ public class UserService {
 
     /**
      * 编辑用户
+     * <p>
+     * 管理员身份保护：不允许把管理员改为其他身份（无论是否最后一个管理员）。
+     * 平台的写操作入口全部依赖管理员角色，把管理员降级后系统将无管理员可登录、
+     * 无恢复入口（读者管理页本身需要管理员权限），属不可逆的锁定事故。
+     * 需要降级时请直接改库或另建新管理员后由新管理员操作。
      */
     public User update(UserUpdateRequest req) {
         User user = userMapper.selectById(req.getId());
         if (user == null) {
             throw new BusinessException("用户不存在");
         }
-        if (req.getRealName() != null) user.setRealName(req.getRealName());
-        if (req.getUserType() != null) {
+        if (req.getUserType() != null && req.getUserType() != user.getUserType()) {
+            if (user.getUserType() != null && user.getUserType() == 3) {
+                throw new BusinessException(400, "管理员身份不可修改，无法将管理员降级为教师/学生");
+            }
             user.setUserType(req.getUserType());
             user.setRoleName(ROLE_NAMES.getOrDefault(req.getUserType(), "未知"));
         }
+        if (req.getRealName() != null) user.setRealName(req.getRealName());
         if (req.getEmail() != null) user.setEmail(req.getEmail());
         if (req.getPhone() != null) user.setPhone(req.getPhone());
         if (req.getStatus() != null) user.setStatus(req.getStatus());
