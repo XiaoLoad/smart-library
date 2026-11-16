@@ -3,6 +3,7 @@ package com.library.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.library.common.exception.BusinessException;
 import com.library.dto.AiChannelRequest;
+import com.library.dto.AsrChannelRequest;
 import com.library.entity.SystemSetting;
 import com.library.mapper.SystemSettingMapper;
 import lombok.Data;
@@ -29,6 +30,8 @@ import java.util.Map;
  * <ul>
  *   <li><b>AI 渠道</b>（key={@value #KEY_AI_CHANNELS}）：支持多渠道配置、启停、排序；
  *       系统按 sort 顺序使用第一个启用中的渠道；旧版单条 ai_config 首次访问时自动迁移</li>
+ *   <li><b>ASR 语音识别渠道</b>（key={@value #KEY_ASR_CHANNELS}）：与 AI 渠道同构的多渠道管理，
+ *       供 AI 助手语音输入使用；协议为 HTTP multipart + Bearer 通用形态</li>
  *   <li><b>馆内规则</b>（key={@value #KEY_LIBRARY_RULES}）：逾期罚款费率等</li>
  *   <li><b>AI 可调整 Prompt 段</b>：外部文件 prompts/library-system-prompt.txt（热加载），
  *       classpath 内置兜底；核心业务规则仍硬编码在 AiService，不受此文件影响</li>
@@ -347,6 +350,228 @@ public class LibraryConfigService {
             cachedChannels = store.getChannels();
         } catch (Exception e) {
             throw new BusinessException(500, "保存渠道配置失败：" + e.getMessage());
+        }
+    }
+
+    // ASR 语音识别渠道
+
+    public static final String KEY_ASR_CHANNELS = "asr_channels";
+
+    /**
+     * ASR（语音转文字）渠道（可变 POJO）。
+     * <p>
+     * 与 AI 对话渠道同构：多渠道 + 启停 + 排序，系统按 sort 顺序使用第一个启用中的渠道。
+     * 接口协议统一为「HTTP multipart file + Bearer 鉴权 + 响应取 text 字段」的通用形态，
+     * DeepSeek（/v1/tools/asr）、OpenAI / 硅基流动（/v1/audio/transcriptions）均属此类；
+     * 讯飞（WebSocket + 签名）等私有协议将来以新增实现的方式扩展，不在本结构中存协议细节。
+     */
+    @Data
+    public static class AsrChannel {
+        private Long id;
+        private String name;
+        /** 转写接口完整地址（如 https://api.deepseek.com/v1/tools/asr） */
+        private String endpoint;
+        private String apiKey;
+        /** 模型名；DeepSeek 等自动识别的服务商可留空，OpenAI 兼容端点按需填写 */
+        private String model;
+        private Boolean enabled;
+        /** 排序值，越小优先级越高 */
+        private Integer sort;
+    }
+
+    /** ASR 渠道列表存储结构 */
+    @Data
+    private static class AsrChannelStore {
+        private List<AsrChannel> channels = new ArrayList<>();
+    }
+
+    private volatile List<AsrChannel> cachedAsrChannels;
+
+    /**
+     * 全部 ASR 渠道（按 sort 升序）。
+     */
+    public List<AsrChannel> listAsrChannels() {
+        List<AsrChannel> cached = cachedAsrChannels;
+        if (cached != null) {
+            return cached;
+        }
+        synchronized (this) {
+            if (cachedAsrChannels != null) {
+                return cachedAsrChannels;
+            }
+            AsrChannelStore store = loadAsrStore();
+            cachedAsrChannels = store.getChannels();
+            return cachedAsrChannels;
+        }
+    }
+
+    /**
+     * 当前生效 ASR 渠道：sort 最前且启用中的渠道；无则 null（语音功能视为未开启）。
+     */
+    public AsrChannel getActiveAsrChannel() {
+        return listAsrChannels().stream()
+                .filter(c -> Boolean.TRUE.equals(c.getEnabled()))
+                .findFirst()
+                .orElse(null);
+    }
+
+    /**
+     * 新增 ASR 渠道。apiKey 必填；默认追加到末尾（sort 最大）。
+     */
+    public synchronized AsrChannel addAsrChannel(AsrChannelRequest req) {
+        if (req.getApiKey() == null || req.getApiKey().isBlank()) {
+            throw new BusinessException(400, "请填写 API Key");
+        }
+        AsrChannelStore store = loadAsrStore();
+        List<AsrChannel> channels = store.getChannels();
+        AsrChannel c = new AsrChannel();
+        c.setId(channels.stream().mapToLong(AsrChannel::getId).max().orElse(0L) + 1);
+        c.setName(req.getName().trim());
+        c.setEndpoint(req.getEndpoint().trim());
+        c.setApiKey(req.getApiKey().trim());
+        c.setModel(blankToEmpty(req.getModel()));
+        c.setEnabled(req.getEnabled() == null || req.getEnabled());
+        c.setSort(channels.size());
+        channels.add(c);
+        persistAsrStore(store);
+        log.info("[配置] 新增 ASR 渠道：id={} name={}", c.getId(), c.getName());
+        return c;
+    }
+
+    /**
+     * 编辑 ASR 渠道。apiKey 留空表示保留原 Key 不变。
+     */
+    public synchronized AsrChannel updateAsrChannel(AsrChannelRequest req) {
+        if (req.getId() == null) {
+            throw new BusinessException(400, "渠道 ID 不能为空");
+        }
+        AsrChannelStore store = loadAsrStore();
+        AsrChannel target = store.getChannels().stream()
+                .filter(c -> c.getId().equals(req.getId()))
+                .findFirst()
+                .orElseThrow(() -> new BusinessException(404, "渠道不存在"));
+        target.setName(req.getName().trim());
+        target.setEndpoint(req.getEndpoint().trim());
+        target.setModel(blankToEmpty(req.getModel()));
+        if (req.getApiKey() != null && !req.getApiKey().isBlank()) {
+            target.setApiKey(req.getApiKey().trim());
+        }
+        if (req.getEnabled() != null) {
+            target.setEnabled(req.getEnabled());
+        }
+        persistAsrStore(store);
+        log.info("[配置] 更新 ASR 渠道：id={} name={}", target.getId(), target.getName());
+        return target;
+    }
+
+    /**
+     * 启用/停用 ASR 渠道。
+     */
+    public synchronized void toggleAsrChannel(Long id, boolean enabled) {
+        AsrChannelStore store = loadAsrStore();
+        AsrChannel target = requireAsrChannel(store, id);
+        target.setEnabled(enabled);
+        persistAsrStore(store);
+        log.info("[配置] ASR 渠道 {} 已{}", id, enabled ? "启用" : "停用");
+    }
+
+    /**
+     * 上移/下移 ASR 渠道（交换相邻 sort）。direction=-1 上移，1 下移。
+     */
+    public synchronized void moveAsrChannel(Long id, int direction) {
+        AsrChannelStore store = loadAsrStore();
+        List<AsrChannel> channels = store.getChannels();
+        int idx = -1;
+        for (int i = 0; i < channels.size(); i++) {
+            if (channels.get(i).getId().equals(id)) {
+                idx = i;
+                break;
+            }
+        }
+        if (idx < 0) {
+            throw new BusinessException(404, "渠道不存在");
+        }
+        int swapIdx = idx + direction;
+        if (swapIdx < 0 || swapIdx >= channels.size()) {
+            return; // 已在端点，无操作
+        }
+        AsrChannel a = channels.get(idx);
+        AsrChannel b = channels.get(swapIdx);
+        Integer tmp = a.getSort();
+        a.setSort(b.getSort());
+        b.setSort(tmp);
+        channels.sort((x, y) -> Integer.compare(x.getSort(), y.getSort()));
+        persistAsrStore(store);
+    }
+
+    /**
+     * 删除 ASR 渠道。
+     */
+    public synchronized void deleteAsrChannel(Long id) {
+        AsrChannelStore store = loadAsrStore();
+        AsrChannel target = requireAsrChannel(store, id);
+        store.getChannels().remove(target);
+        // 重排 sort，保证连续
+        List<AsrChannel> channels = store.getChannels();
+        for (int i = 0; i < channels.size(); i++) {
+            channels.get(i).setSort(i);
+        }
+        persistAsrStore(store);
+        log.info("[配置] 删除 ASR 渠道：id={}", id);
+    }
+
+    /**
+     * 按 ID 获取 ASR 渠道（含 apiKey，仅供服务端测试连接使用，禁止直接回传前端）。
+     */
+    public AsrChannel getAsrChannelById(Long id) {
+        return listAsrChannels().stream()
+                .filter(c -> c.getId().equals(id))
+                .findFirst()
+                .orElseThrow(() -> new BusinessException(404, "渠道不存在"));
+    }
+
+    private AsrChannel requireAsrChannel(AsrChannelStore store, Long id) {
+        return store.getChannels().stream()
+                .filter(c -> c.getId().equals(id))
+                .findFirst()
+                .orElseThrow(() -> new BusinessException(404, "渠道不存在"));
+    }
+
+    private AsrChannelStore loadAsrStore() {
+        AsrChannelStore store = null;
+        SystemSetting s = systemSettingMapper.selectByKey(KEY_ASR_CHANNELS);
+        if (s != null && s.getSettingValue() != null && !s.getSettingValue().isBlank()) {
+            try {
+                store = objectMapper.readValue(s.getSettingValue(), AsrChannelStore.class);
+                if (store.getChannels() == null) {
+                    store.setChannels(new ArrayList<>());
+                }
+                store.getChannels().sort((a, b) -> Integer.compare(
+                        a.getSort() == null ? 0 : a.getSort(),
+                        b.getSort() == null ? 0 : b.getSort()));
+            } catch (Exception e) {
+                log.warn("[配置] asr_channels 解析失败，按空配置处理: {}", e.getMessage());
+                store = null;
+            }
+        }
+        if (store == null) {
+            // 首次访问落库空存储，避免后续重复查询；空渠道列表 = 语音功能未开启
+            store = new AsrChannelStore();
+            persistAsrStore(store);
+        }
+        return store;
+    }
+
+    private void persistAsrStore(AsrChannelStore store) {
+        try {
+            store.getChannels().sort((a, b) -> Integer.compare(
+                    a.getSort() == null ? 0 : a.getSort(),
+                    b.getSort() == null ? 0 : b.getSort()));
+            String json = objectMapper.writeValueAsString(store);
+            systemSettingMapper.upsert(KEY_ASR_CHANNELS, json);
+            cachedAsrChannels = store.getChannels();
+        } catch (Exception e) {
+            throw new BusinessException(500, "保存 ASR 渠道配置失败：" + e.getMessage());
         }
     }
 

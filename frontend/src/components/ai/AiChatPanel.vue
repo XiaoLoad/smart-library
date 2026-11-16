@@ -251,7 +251,26 @@
         <el-icon><Lock /></el-icon>
         <span>授权请求等待处理中：全部确认或取消后才能继续对话</span>
       </div>
+      <div v-else-if="asrRecording" class="panel-blocked-tip asr-tip">
+        <el-icon><Microphone /></el-icon>
+        <span>正在录音 {{ asrRecordingSec }}s，再次点击麦克风结束并转写，最长 120 秒</span>
+      </div>
       <div class="input-actions">
+        <!-- 语音输入：与 /ai/chat 页同款（WebAudio 录 WAV → 后端中转云端 ASR），未配置渠道时隐藏 -->
+        <el-button
+          v-if="asrAvailable"
+          size="small"
+          text
+          class="mic-btn"
+          :class="{ recording: asrRecording }"
+          :disabled="asrTranscribing"
+          :title="asrTranscribing ? '正在转写…' : asrRecording ? `停止并转写（${asrRecordingSec}s）` : '语音输入'"
+          @click="toggleVoiceInput"
+        >
+          <el-icon><Loading v-if="asrTranscribing" class="is-loading" /><Microphone v-else /></el-icon>
+          <span v-if="asrRecording" class="mic-sec">{{ asrRecordingSec }}s</span>
+        </el-button>
+        <span class="input-spacer" />
         <el-button v-if="generating" size="small" @click="stopGenerate">停止</el-button>
         <el-button v-else type="primary" size="small" @click="send">发送</el-button>
       </div>
@@ -268,17 +287,18 @@
  */
 import { ref, reactive, computed, nextTick, onBeforeUnmount } from 'vue'
 import { useRoute } from 'vue-router'
-import { Loading, Check, Close, Lock, Warning, DataBoard } from '@element-plus/icons-vue'
+import { Loading, Check, Close, Lock, Warning, DataBoard, Microphone } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import MarkdownIt from 'markdown-it'
 import hljs from 'highlight.js'
 import 'highlight.js/styles/github.css'
-import { aiApi } from '@/api'
+import { aiApi, asrApi } from '@/api'
 import { useAiSearchStore } from '@/stores/aiSearch'
 import AppIcon from '@/components/AppIcon.vue'
 import AiGenUi from '@/components/ai/AiGenUi.vue'
 import { createStreamRenderer } from '@/utils/streamRender'
 import { classifyAiError, describeWithAction, AiErrorKind } from '@/utils/aiErrors'
+import { MicRecorder } from '@/utils/recorder'
 
 const emit = defineEmits(['state-change'])
 
@@ -677,9 +697,95 @@ const onScroll = () => {
 const showJump = () => {}
 
 /** 挂载后首次展开时调用：加载最近会话 */
+/* ==================== 语音输入（ASR）====================
+ * 与 /ai/chat 页同款：WebAudio 录 16kHz 单声道 WAV → 后端中转云端转写。
+ * 文本回填输入框可编辑后再发送；状态检查挂在懒初始化 init() 里，
+ * 悬浮球未展开时不产生多余请求。
+ */
+const ASR_MAX_MS = 120000
+const asrAvailable = ref(false)
+const asrRecording = ref(false)
+const asrTranscribing = ref(false)
+const asrRecordingSec = ref(0)
+let micRecorder = null
+let asrTickTimer = null
+
+const checkAsrStatus = async () => {
+  try {
+    const data = await asrApi.status()
+    asrAvailable.value = !!data.available
+  } catch {
+    asrAvailable.value = false
+  }
+}
+
+const stopAsrTick = () => {
+  clearInterval(asrTickTimer)
+  asrTickTimer = null
+}
+
+/** 录音收尾：上传转写并把文本回填输入框（已有草稿时追加，不覆盖） */
+const finishAsr = async (result) => {
+  stopAsrTick()
+  asrRecording.value = false
+  micRecorder = null
+  if (!result) return
+  const { blob, durationMs } = result
+  if (durationMs < 600) {
+    ElMessage.warning('录音时间太短，请点击后正常说话')
+    return
+  }
+  asrTranscribing.value = true
+  try {
+    // 不传 language：DeepSeek 自动识别语种，多余表单字段有被上游 400 拒绝的风险
+    const data = await asrApi.transcribe(new File([blob], 'speech.wav', { type: 'audio/wav' }))
+    const text = (data.text || '').trim()
+    if (!text) {
+      ElMessage.info('未识别到语音内容，请再试一次')
+      return
+    }
+    input.value = input.value ? `${input.value} ${text}` : text
+  } catch {
+    // 错误已由拦截器提示（渠道未配置/超时/超限等）
+  } finally {
+    asrTranscribing.value = false
+  }
+}
+
+const toggleVoiceInput = async () => {
+  if (asrTranscribing.value) return
+  if (asrRecording.value) {
+    const result = await micRecorder?.stop()
+    await finishAsr(result)
+    return
+  }
+  micRecorder = new MicRecorder({
+    maxDurationMs: ASR_MAX_MS,
+    onMaxDuration: (result) => {
+      ElMessage.info('已达 120 秒录音上限，自动开始转写')
+      finishAsr(result)
+    },
+  })
+  try {
+    await micRecorder.start()
+    asrRecording.value = true
+    asrRecordingSec.value = 0
+    asrTickTimer = setInterval(() => { asrRecordingSec.value++ }, 1000)
+  } catch (e) {
+    micRecorder = null
+    ElMessage.error(e?.message || '麦克风启动失败')
+  }
+}
+
+onBeforeUnmount(() => {
+  stopAsrTick()
+  micRecorder?.cancel()
+})
+
 const init = async () => {
   if (inited) return
   inited = true
+  checkAsrStatus()
   try {
     const data = await aiApi.conversationList()
     const list = data.list || []
@@ -1658,8 +1764,20 @@ defineExpose({ init, destroy, send, prefill })
 .input-actions {
   display: flex;
   justify-content: flex-end;
+  align-items: center;
   margin-top: 8px;
 }
+/* 语音输入麦克风：靠左占位，与右侧发送/停止分离；录音中红色呼吸提示 */
+.input-spacer { flex: 1; }
+.mic-btn { color: var(--color-text-secondary, #8a8580); }
+.mic-btn:hover { color: var(--color-primary, #4a7c59); }
+.mic-btn.recording {
+  color: var(--color-danger, #a85a4a);
+  animation: asr-pulse 1.2s ease-in-out infinite;
+}
+.mic-btn .mic-sec { margin-left: 3px; font-variant-numeric: tabular-nums; }
+.asr-tip { color: var(--color-danger, #a85a4a); }
+@keyframes asr-pulse { 50% { opacity: 0.6; } }
 
 /* M10：授权卡结果内联（与 /ai/chat 页样式一致） */
 .confirm-batch-result {

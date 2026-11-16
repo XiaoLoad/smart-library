@@ -179,6 +179,111 @@
               </div>
             </div>
           </div>
+
+          <!-- ASR 语音识别渠道：AI 助手语音输入的转写服务来源，与 AI 渠道同构管理 -->
+          <div class="card panel-card fade-in">
+            <div class="card-head card-head--between">
+              <div class="card-head-main">
+                <div class="card-head__icon"><AppIcon name="mic" :size="22" /></div>
+                <div>
+                  <h2 class="card-title">语音识别渠道</h2>
+                  <p class="card-sub">AI 助手语音输入的转写服务（DeepSeek / 硅基流动等），按列表顺序使用第一个启用中的渠道。</p>
+                </div>
+              </div>
+              <el-button type="primary" class="head-action" @click="openAsrAdd">
+                <AppIcon name="plus" :size="15" />新增渠道
+              </el-button>
+            </div>
+
+            <div class="channel-hint">
+              <AppIcon name="bolt" :size="15" />
+              <span>
+                API Key 仅存于服务端，前端不可见；测试会向服务商发送 1 秒静音音频实测转写链路。
+                服务商录音上限：≤8MB、≤120 秒（DeepSeek 标准）。
+              </span>
+            </div>
+
+            <div v-if="!asrLoading && asrError" class="channel-empty is-error">
+              <AppIcon name="bolt" :size="30" />
+              <p class="empty-title">渠道列表加载失败</p>
+              <span class="empty-desc">后端服务可能未启动、正在重启，或当前账号无管理员权限。请确认后端正常后重试。</span>
+              <el-button type="primary" :loading="asrLoading" @click="loadAsrChannels">
+                <AppIcon name="check" :size="15" />重新加载
+              </el-button>
+            </div>
+
+            <div v-else-if="!asrLoading && asrChannels.length === 0" class="channel-empty">
+              <AppIcon name="mic" :size="30" />
+              <p class="empty-title">尚未配置语音识别渠道</p>
+              <span class="empty-desc">添加 DeepSeek、硅基流动等转写渠道后，AI 助手即可使用语音输入</span>
+              <el-button type="primary" @click="openAsrAdd">
+                <AppIcon name="plus" :size="15" />添加第一个渠道
+              </el-button>
+            </div>
+
+            <div v-loading="asrLoading" class="channel-list">
+              <div
+                v-for="(ch, idx) in asrChannels"
+                :key="ch.id"
+                class="channel-card"
+                :class="{ 'is-disabled': !ch.enabled }"
+              >
+                <span
+                  class="status-dot"
+                  :class="ch.active ? 'dot-active' : ch.enabled ? 'dot-standby' : 'dot-off'"
+                ></span>
+
+                <div class="channel-icon"><AppIcon name="mic" :size="18" /></div>
+
+                <div class="channel-info">
+                  <div class="channel-name-row">
+                    <span class="channel-name">{{ ch.name }}</span>
+                    <span
+                      class="badge"
+                      :class="ch.active ? 'badge-active' : ch.enabled ? 'badge-standby' : 'badge-off'"
+                    >{{ ch.active ? '使用中' : ch.enabled ? '备用' : '已停用' }}</span>
+                  </div>
+                  <div class="channel-meta">
+                    <span v-if="ch.model" class="model-tag"><EllipsisText :content="ch.model" class="model-tag-text" /></span>
+                    <span class="key-tag" :class="ch.apiKeySet ? 'is-ok' : 'is-warn'">
+                      {{ ch.apiKeySet ? 'API Key 已配置' : 'API Key 未配置' }}
+                    </span>
+                  </div>
+                  <EllipsisText :content="ch.endpoint" class="channel-endpoint" />
+                </div>
+
+                <div class="channel-actions">
+                  <div class="order-btns">
+                    <el-button text :disabled="idx === 0" title="上移（提高优先级）" @click="moveAsrChannel(ch, -1)">
+                      <AppIcon name="arrow-up" :size="15" />
+                    </el-button>
+                    <el-button
+                      text
+                      :disabled="idx === asrChannels.length - 1"
+                      title="下移（降低优先级）"
+                      @click="moveAsrChannel(ch, 1)"
+                    >
+                      <AppIcon name="arrow-down" :size="15" />
+                    </el-button>
+                  </div>
+                  <el-switch
+                    :model-value="ch.enabled"
+                    title="启用 / 停用"
+                    @change="(v) => onAsrToggle(ch, v)"
+                  />
+                  <el-button text title="测试转写链路" :loading="asrTestingId === ch.id" @click="onAsrTest(ch)">
+                    <AppIcon name="bolt" :size="15" />
+                  </el-button>
+                  <el-button text title="编辑" @click="openAsrEdit(ch)">
+                    <AppIcon name="pencil" :size="15" />
+                  </el-button>
+                  <el-button text title="删除" class="danger-btn" @click="onAsrRemove(ch)">
+                    <AppIcon name="trash" :size="15" />
+                  </el-button>
+                </div>
+              </div>
+            </div>
+          </div>
         </section>
 
         <!-- 借阅规则 -->
@@ -621,6 +726,7 @@
     </div>
 
     <AiChannelDrawer v-model="drawerVisible" :channel="editingChannel" @saved="loadChannels" />
+    <AsrChannelDrawer v-model="asrDrawerVisible" :channel="editingAsrChannel" @saved="loadAsrChannels" />
   </div>
 </template>
 
@@ -630,6 +736,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import AppIcon from '@/components/AppIcon.vue'
 import EllipsisText from '@/components/EllipsisText.vue'
 import AiChannelDrawer from '@/components/AiChannelDrawer.vue'
+import AsrChannelDrawer from '@/components/AsrChannelDrawer.vue'
 import ChangePasswordForm from '@/components/ChangePasswordForm.vue'
 import { systemApi } from '@/api'
 import { formatDateTime } from '@/utils/datetime.js'
@@ -684,6 +791,9 @@ const onNav = (key) => {
   active.value = key
   if (key === 'ai' && channelsError.value) {
     loadChannels()
+  }
+  if (key === 'ai' && asrError.value) {
+    loadAsrChannels()
   }
   if (key === 'notify-manage') {
     loadLogs()
@@ -779,6 +889,88 @@ const onRemove = (ch) => {
       await systemApi.deleteChannel({ id: ch.id })
       ElMessage.success('渠道已删除')
       await loadChannels()
+    })
+    .catch(() => {})
+}
+
+/* ASR 语音识别渠道：与 AI 渠道同构的多渠道管理（接口形态 multipart + Bearer） */
+const asrChannels = ref([])
+const asrLoading = ref(false)
+const asrError = ref(false)
+const asrTestingId = ref(null)
+const asrDrawerVisible = ref(false)
+const editingAsrChannel = ref(null)
+
+const loadAsrChannels = async () => {
+  asrLoading.value = true
+  try {
+    const data = await systemApi.getAsrChannels()
+    asrChannels.value = data.list || []
+    asrError.value = false
+  } catch {
+    // 与 AI 渠道一致：失败标记错误态供面板重试，不能静默成空列表
+    asrError.value = true
+    asrChannels.value = []
+  } finally {
+    asrLoading.value = false
+  }
+}
+
+const openAsrAdd = () => {
+  editingAsrChannel.value = null
+  asrDrawerVisible.value = true
+}
+
+const openAsrEdit = (ch) => {
+  editingAsrChannel.value = ch
+  asrDrawerVisible.value = true
+}
+
+const onAsrToggle = async (ch, enabled) => {
+  try {
+    await systemApi.toggleAsrChannel({ id: ch.id, enabled })
+    ElMessage.success(enabled ? `渠道「${ch.name}」已启用` : `渠道「${ch.name}」已停用`)
+    await loadAsrChannels()
+  } catch {
+    await loadAsrChannels()
+  }
+}
+
+const moveAsrChannel = async (ch, direction) => {
+  try {
+    await systemApi.moveAsrChannel({ id: ch.id, direction })
+    await loadAsrChannels()
+  } catch {
+    // 错误已由拦截器提示
+  }
+}
+
+const onAsrTest = async (ch) => {
+  asrTestingId.value = ch.id
+  try {
+    const data = await systemApi.testAsrChannel({ id: ch.id })
+    if (data.ok) {
+      ElMessage.success(`转写链路连通（${data.latencyMs}ms）`)
+    } else {
+      ElMessage.error(data.message || '转写链路不通，请检查渠道配置')
+    }
+  } catch {
+    // 错误已由拦截器提示
+  } finally {
+    asrTestingId.value = null
+  }
+}
+
+const onAsrRemove = (ch) => {
+  ElMessageBox.confirm(
+    `确认删除语音识别渠道「${ch.name}」？删除后不可恢复，若它是当前生效渠道，系统将自动改用下一优先级渠道。`,
+    '删除渠道',
+    { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' },
+  )
+    .then(async () => {
+      await systemApi.deleteAsrChannel({ id: ch.id })
+      ElMessage.success('渠道已删除')
+      await loadAsrChannels()
     })
     .catch(() => {})
 }
@@ -1076,6 +1268,7 @@ const onTrigger = async () => {
 
 onMounted(() => {
   loadChannels()
+  loadAsrChannels()
   loadLibraryRules()
   loadLimits()
   loadPrompt()

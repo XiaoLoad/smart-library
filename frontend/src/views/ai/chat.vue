@@ -505,7 +505,7 @@
             自动执行中：写操作无需确认直接生效
           </span>
         </div>
-        <div class="composer-box" :class="{ active: input, blocked: hasPendingConfirm }">
+        <div class="composer-box" :class="{ active: input, blocked: hasPendingConfirm, 'has-mic': asrAvailable }">
           <el-input
             v-model="input"
             type="textarea"
@@ -515,6 +515,17 @@
             class="composer-input"
             @keydown.enter.exact.prevent="send"
           />
+          <!-- 语音输入：WebAudio 录 WAV → 后端中转云端 ASR（渠道见系统设置），未配置时隐藏 -->
+          <button
+            v-if="asrAvailable"
+            class="composer-btn mic"
+            :class="{ recording: asrRecording }"
+            :disabled="asrTranscribing"
+            :title="asrTranscribing ? '正在转写…' : asrRecording ? `停止并转写（${asrRecordingSec}s）` : '语音输入'"
+            @click="toggleVoiceInput"
+          >
+            <el-icon><Loading v-if="asrTranscribing" class="is-loading" /><Microphone v-else /></el-icon>
+          </button>
           <button
             class="composer-btn"
             :class="currentStreaming ? 'stop' : 'send'"
@@ -528,6 +539,10 @@
           <el-icon><Lock /></el-icon>
           授权请求等待处理中：全部确认或取消后才能继续对话
         </p>
+        <p v-else-if="asrRecording" class="composer-tip asr-tip">
+          <el-icon><Microphone /></el-icon>
+          正在录音 {{ asrRecordingSec }}s，再次点击麦克风结束并转写，最长 120 秒
+        </p>
         <p v-else class="composer-tip">AI 助手基于馆藏数据回答，内容仅供参考。</p>
       </div>
     </main>
@@ -539,19 +554,20 @@ import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount, onActiva
 import {
   Plus, ChatDotRound, MagicStick, Promotion, Delete,
   VideoPause, Loading, Check, Close, ArrowDownBold, ArrowUpBold, Connection,
-  Lock, Warning, DataBoard,
+  Lock, Warning, DataBoard, Microphone,
 } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import MarkdownIt from 'markdown-it'
 import hljs from 'highlight.js'
 import 'highlight.js/styles/github.css'
-import { aiApi } from '@/api'
+import { aiApi, asrApi } from '@/api'
 import { useUserStore } from '@/stores/user'
 import ConversationNav from '@/components/ConversationNav.vue'
 import AppIcon from '@/components/AppIcon.vue'
 import AiGenUi from '@/components/ai/AiGenUi.vue'
 import { createStreamRenderer } from '@/utils/streamRender'
 import { classifyAiError, describeWithAction, withRetry, AiErrorKind } from '@/utils/aiErrors'
+import { MicRecorder } from '@/utils/recorder'
 
 // keep-alive 缓存名单按路由 name 匹配，故显式声明组件名
 defineOptions({ name: 'AIChat' })
@@ -2258,7 +2274,97 @@ const syncFromPanel = async () => {
 
 onActivated(syncFromPanel)
 
-onMounted(loadConversations)
+/* ==================== 语音输入（ASR）====================
+ * WebAudio 录 16kHz 单声道 WAV → 上传后端中转云端转写（渠道配置在系统设置）。
+ * 录音中再次点击结束并转写；达 120s 上限自动停止转写（服务端同限校验，取
+ * DeepSeek ASR 最严标准）。文本回填输入框可编辑后再发送，不直接触发发送。
+ */
+const ASR_MAX_MS = 120000
+const asrAvailable = ref(false)
+const asrRecording = ref(false)
+const asrTranscribing = ref(false)
+const asrRecordingSec = ref(0)
+let micRecorder = null
+let asrTickTimer = null
+
+/** 麦克风按钮显隐由后端渠道配置决定；获取失败仅隐藏按钮，不阻塞聊天 */
+const checkAsrStatus = async () => {
+  try {
+    const data = await asrApi.status()
+    asrAvailable.value = !!data.available
+  } catch {
+    asrAvailable.value = false
+  }
+}
+
+const stopAsrTick = () => {
+  clearInterval(asrTickTimer)
+  asrTickTimer = null
+}
+
+/** 录音收尾：上传转写并把文本回填输入框（已有草稿时追加，不覆盖） */
+const finishAsr = async (result) => {
+  stopAsrTick()
+  asrRecording.value = false
+  micRecorder = null
+  if (!result) return
+  const { blob, durationMs } = result
+  if (durationMs < 600) {
+    ElMessage.warning('录音时间太短，请点击后正常说话')
+    return
+  }
+  asrTranscribing.value = true
+  try {
+    // 不传 language：DeepSeek 自动识别语种，其 API 未定义 language 字段，
+    // 多余表单字段有被上游 400 拒绝的风险；OpenAI 兼容端点同样支持自动识别
+    const data = await asrApi.transcribe(new File([blob], 'speech.wav', { type: 'audio/wav' }))
+    const text = (data.text || '').trim()
+    if (!text) {
+      ElMessage.info('未识别到语音内容，请再试一次')
+      return
+    }
+    input.value = input.value ? `${input.value} ${text}` : text
+  } catch {
+    // 错误已由拦截器提示（渠道未配置/超时/超限等）
+  } finally {
+    asrTranscribing.value = false
+  }
+}
+
+const toggleVoiceInput = async () => {
+  if (asrTranscribing.value) return
+  if (asrRecording.value) {
+    const result = await micRecorder?.stop()
+    await finishAsr(result)
+    return
+  }
+  micRecorder = new MicRecorder({
+    maxDurationMs: ASR_MAX_MS,
+    onMaxDuration: (result) => {
+      ElMessage.info('已达 120 秒录音上限，自动开始转写')
+      finishAsr(result)
+    },
+  })
+  try {
+    await micRecorder.start()
+    asrRecording.value = true
+    asrRecordingSec.value = 0
+    asrTickTimer = setInterval(() => { asrRecordingSec.value++ }, 1000)
+  } catch (e) {
+    micRecorder = null
+    ElMessage.error(e?.message || '麦克风启动失败')
+  }
+}
+
+onBeforeUnmount(() => {
+  stopAsrTick()
+  micRecorder?.cancel()
+})
+
+onMounted(() => {
+  loadConversations()
+  checkAsrStatus()
+})
 </script>
 
 <style scoped>
@@ -3548,6 +3654,24 @@ onMounted(loadConversations)
   color: #fff;
 }
 .composer-btn.stop:hover { transform: scale(1.05); }
+/* 语音输入麦克风：位于发送按钮左侧；录音中红色呼吸提示；转写中转圈禁点 */
+.composer-btn.mic {
+  right: 56px;
+  background: var(--color-bg-subtle, #f5f5f5);
+  color: var(--color-text-secondary);
+}
+.composer-btn.mic:hover { color: var(--color-primary); }
+.composer-btn.mic.recording {
+  background: var(--color-danger);
+  color: #fff;
+  animation: asr-pulse 1.2s ease-in-out infinite;
+}
+@keyframes asr-pulse { 50% { opacity: 0.7; } }
+/* 有麦克风按钮时输入文本多让出一格，避免文字压在按钮下 */
+.composer-box.has-mic .composer-input :deep(.el-textarea__inner) {
+  padding-right: 100px;
+}
+.asr-tip { color: var(--color-danger); }
 .composer-tip {
   text-align: center;
   font-size: var(--fs-caption);

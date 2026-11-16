@@ -74,6 +74,8 @@ const ICONS = {
   'arrow-down': '<path d="M12 5v14M6 13l6 6 6-6"/>',
   // 成功 · 对勾
   check: '<path d="M4.5 12.5 10 18 19.5 6.5"/>',
+
+  mic: '<rect x="9" y="3.25" width="6" height="11.5" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18.25v2.5"/>',
   // 邮件 · 信封
   mail: '<rect x="3.5" y="6" width="17" height="12" rx="2"/><path d="M4 7.8 12 13l8-5.2"/>',
   // 刷新 · 环形箭头
