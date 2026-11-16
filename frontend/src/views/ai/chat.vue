@@ -425,6 +425,20 @@
 
                 <div class="msg-content markdown" v-html="m.html"></div>
 
+                <!-- 建议追问：最新回答下方的 ghost 灰字（仅本轮 done 后拉取的最新回答持有），
+                     点击直接作为新消息发送。流式期间/发送新消息后不显示 -->
+                <div v-if="m.followUps?.length && !m.pending" class="followup-chips">
+                  <button
+                    v-for="(s, i) in m.followUps"
+                    :key="i"
+                    class="followup-chip"
+                    type="button"
+                    @click="sendFollowUp(s)"
+                  >
+                    {{ s }}
+                  </button>
+                </div>
+
                 <!-- 降级提示：工具循环超限时的优雅收尾（非报错样式）。
                      说明已完成部分仍然有效，引导用户就未完成部分继续追问 -->
                 <div v-if="m.degraded" class="degrade-tip">
@@ -1548,6 +1562,24 @@ const send = async () => {
   await sendInternal(content, { continuation: false })
 }
 
+/** 建议追问 chips 点击：把追问文本直接作为新消息发送（沿用排队机制，流未结束时入队） */
+const sendFollowUp = async (text) => {
+  const content = (text || '').trim()
+  if (!content) return
+  if (hasPendingConfirm.value) {
+    ElMessage.warning('请先处理上方待确认的授权请求（确认或取消）后再继续对话')
+    return
+  }
+  const convId = currentConvId.value
+  if (convId !== null && streamingMap.has(convId)) {
+    pendingQueue.push({ convId, content })
+    await nextTick()
+    scrollToBottom()
+    return
+  }
+  await sendInternal(content, { continuation: false })
+}
+
 /** 排队出口：当前会话流结束后按 FIFO 发出其排队消息（一次一条，发出后若流又占线则继续排队） */
 const flushQueue = async (convId) => {
   const idx = pendingQueue.findIndex((q) => q.convId === convId)
@@ -1610,6 +1642,10 @@ const sendInternal = async (content, { continuation, convId: explicitConvId, bra
     }
   }
   const st = stateOf(convId)
+  // 建议追问「仅最新回答」：发新消息即清除全部旧 chips
+  for (const m of st.messages) {
+    if (m.followUps) m.followUps = null
+  }
   const conv = conversations.value.find((c) => c.id === convId)
   const isFirstMsg = !conv || conv.title === '新对话' || !conv.title
 
@@ -1976,6 +2012,16 @@ const sendInternal = async (content, { continuation, convId: explicitConvId, bra
             }
           }
         } catch { /* 兼容旧格式 [DONE]：无分支导航，不影响对话 */ }
+      } else if (event === 'followups') {
+        // 建议追问（方案 A）：后端 done 后后台生成，经同一 SSE 推送（JSON 字符串数组）。
+        // 挂到本轮助手消息上渲染 chips；仅最新回答显示——若用户已发出新消息
+        // （该消息不再是末条），丢弃本事件，避免旧 chips 复活
+        if (assistantMsg && st.messages[st.messages.length - 1] === assistantMsg) {
+          try {
+            const list = JSON.parse(data)
+            if (Array.isArray(list) && list.length) assistantMsg.followUps = list
+          } catch { /* 解析失败忽略 */ }
+        }
       } else if (event === 'confirm') {
         // 写操作授权请求：模型发起写操作被门禁拦截，改为向用户请求授权。
         // 卡片渲染在工具卡片之后，正文不受影响（后端拦截时不会发 reset 事件）。

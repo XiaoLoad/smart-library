@@ -164,3 +164,33 @@
   background: var(--color-primary);
   color: #fff;
 }
+
+/* —— 建议追问 chips（Ghost 灰字，方案对齐 Open WebUI ghost 文本）——
+   最新 AI 回答下方，点击直接作为新消息发送；Vue 渲染元素（非 v-html），
+   放在本公共文件仅为 chat 页与悬浮球面板共用同一套样式 */
+.followup-chips {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+}
+.followup-chip {
+  border: none;
+  background: transparent;
+  padding: 2px 0;
+  color: var(--color-text-tertiary);
+  font-size: var(--fs-small);
+  line-height: 1.5;
+  text-align: left;
+  cursor: pointer;
+  transition: color var(--duration-fast) var(--ease-soft);
+}
+.followup-chip::before {
+  content: '→ ';
+  opacity: 0.7;
+}
+.followup-chip:hover {
+  color: var(--color-primary);
+}
+

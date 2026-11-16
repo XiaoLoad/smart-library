@@ -230,6 +230,19 @@
               </div>
 
               <div class="msg-content markdown" v-html="m.html"></div>
+
+              <!-- 建议追问：最新回答下方的 ghost 灰字，点击直接作为新消息发送 -->
+              <div v-if="m.followUps?.length && !m.pending" class="followup-chips">
+                <button
+                  v-for="(s, i) in m.followUps"
+                  :key="i"
+                  class="followup-chip"
+                  type="button"
+                  @click="sendFollowUp(s)"
+                >
+                  {{ s }}
+                </button>
+              </div>
             </div>
           </div>
         </template>
@@ -837,6 +850,17 @@ const send = async () => {
   await sendInternal(content, { continuation: false })
 }
 
+/** 建议追问 chips 点击：把追问文本直接作为新消息发送（面板流式串行，generating 时忽略） */
+const sendFollowUp = async (text) => {
+  const content = (text || '').trim()
+  if (!content || generating.value) return
+  if (hasPendingConfirm.value) {
+    ElMessage.warning('请先处理上方待确认的授权请求（确认或取消）后再继续对话')
+    return
+  }
+  await sendInternal(content, { continuation: false })
+}
+
 /**
  * M8 确认续跑：授权确认成功后自动发起的下一轮对话（面板内与助手页行为一致）。
  * M11 聚合续跑：本轮全部授权卡处理完毕才调用。
@@ -871,6 +895,10 @@ const maybeContinueAfterAllResolved = (msg, toolSummary) => {
 const sendInternal = async (content, { continuation }) => {
   if (generating.value) return
   lastUserText.value = continuation ? lastUserText.value : content
+  // 建议追问「仅最新回答」：发新消息即清除全部旧 chips
+  for (const m of messages.value) {
+    if (m.followUps) m.followUps = null
+  }
   // 新一轮：重置检索联动候补与写操作标记
   pendingAiSearch = null
   turnHasWrite = false
@@ -1210,6 +1238,15 @@ const sendInternal = async (content, { continuation }) => {
         // 流结束滚动定位：本轮有内联生成式卡片时滚到本轮第一张卡片，否则维持滚底
         if (event === 'done' && (msg.toolEvents || []).some((e) => e._inlineGen)) {
           scrollToFirstGenCard(msg)
+        }
+      } else if (event === 'followups') {
+        // 建议追问（方案 A）：后端 done 后后台生成，经同一 SSE 推送（JSON 字符串数组）。
+        // 挂到本轮助手消息上渲染 chips；仅最新回答显示——若用户已发出新消息则丢弃
+        if (msg && messages.value[messages.value.length - 1] === msg) {
+          try {
+            const list = JSON.parse(data)
+            if (Array.isArray(list) && list.length) msg.followUps = list
+          } catch { /* 解析失败忽略 */ }
         }
       }
     }
