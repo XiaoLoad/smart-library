@@ -289,14 +289,12 @@ import { ref, reactive, computed, nextTick, onBeforeUnmount } from 'vue'
 import { useRoute } from 'vue-router'
 import { Loading, Check, Close, Lock, Warning, DataBoard, Microphone } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
-import MarkdownIt from 'markdown-it'
-import hljs from 'highlight.js'
-import 'highlight.js/styles/github.css'
 import { aiApi, asrApi } from '@/api'
 import { useAiSearchStore } from '@/stores/aiSearch'
 import AppIcon from '@/components/AppIcon.vue'
 import AiGenUi from '@/components/ai/AiGenUi.vue'
 import { createStreamRenderer } from '@/utils/streamRender'
+import { renderMarkdown, renderMarkdownStream, handleCodeCopyClick } from '@/utils/markdown'
 import { classifyAiError, describeWithAction, AiErrorKind } from '@/utils/aiErrors'
 import { MicRecorder } from '@/utils/recorder'
 
@@ -314,8 +312,6 @@ const route = useRoute()
 // AI 检索联动：queryBooks 等工具返回的图书列表写入该 store，图书检索页 watch 联动。
 // 广播有页面条件收窄（见 done 回调）：仅当前在馆藏图书页时写入
 const aiSearchStore = useAiSearchStore()
-
-const md = new MarkdownIt({ html: false, breaks: true, linkify: true })
 
 const TOOL_LABELS = {
   queryCategories: '查询图书分类',
@@ -542,28 +538,10 @@ const handleUnauthorized = (message) => {
   }, 500)
 }
 
-/**
- * A4：[资料 N] 引用角标渲染（与 /ai/chat 页同一约定）。
- * 编号不存在（模型编造）时原样保留文本。
- */
-const CITE_RE = /\[资料\s*(\d+)\]/g
-const renderCitations = (html, sources) => {
-  if (!html || !sources || !sources.length) return html
-  const valid = new Set(sources.map((s) => s.sourceNo))
-  return html.replace(CITE_RE, (match, num) => {
-    const n = Number(num)
-    if (!valid.has(n)) return match
-    return `<sup class="cite-badge" data-src="${n}" title="查看资料 ${n}">${n}</sup>`
-  })
-}
-
-const renderMarkdown = (content, sources) => {
-  if (!content) return ''
-  try { return renderCitations(md.render(content), sources) } catch { return md.utils.escapeHtml(content) }
-}
-
-/** 角标点击（事件委托）：展开/收起对应编号的片段摘要 */
+/** 角标 / 代码块复制按钮点击（事件委托，v-html 内容无法直接绑事件）：
+ *  先处理复制按钮（命中则结束），再处理引用角标——展开/收起对应编号的片段摘要 */
 const handleCitationClick = (m, e) => {
+  if (handleCodeCopyClick(e)) return
   const badge = e.target.closest('.cite-badge')
   if (!badge) return
   const n = Number(badge.dataset.src)
@@ -1042,9 +1020,10 @@ const sendInternal = async (content, { continuation }) => {
         msg.reasoningStreaming = false
         msg.reasoningOpen = false
         msg.content += data
-        // A1：delta 高频到达，渲染走自适应节流，done/final 时 flush 补尾
+        // A1：delta 高频到达，渲染走自适应节流，done/final 时 flush 补尾。
+        // 流式渲染前先补齐未闭合语法（裸 ** / 裸 ` / 未闭合围栏），终态用原始全文重渲染
         streamRenderer?.schedule(() => {
-          msg.html = renderMarkdown(msg.content, msg.ragSources)
+          msg.html = renderMarkdownStream(msg.content, msg.ragSources)
           scrollToBottom()
         })
       } else if (event === 'reset') {
@@ -1389,23 +1368,7 @@ defineExpose({ init, destroy, send, prefill })
   word-break: break-word;
 }
 .msg-body { min-width: 0; }
-.markdown {
-  font-size: 14px;
-  line-height: 1.6;
-  color: var(--color-text, #333);
-  word-break: break-word;
-}
-.markdown :deep(pre) {
-  background: var(--color-bg-subtle, #f4f4f5);
-  border-radius: 8px;
-  padding: 10px 12px;
-  overflow-x: auto;
-  font-size: 12px;
-}
-.markdown :deep(code) { font-family: var(--font-mono, monospace); }
-.markdown :deep(p) { margin: 0 0 8px; }
-.markdown :deep(p:last-child) { margin-bottom: 0; }
-.markdown :deep(ul), .markdown :deep(ol) { margin: 0 0 8px; padding-left: 20px; }
+/* Markdown 排版已抽至 styles/ai-markdown.css（utils/markdown.js 导入生效，与 /ai/chat 页共用） */
 
 /* 深度思考面板（精简版） */
 .reason-panel { margin-bottom: 8px; }
@@ -1693,33 +1656,6 @@ defineExpose({ init, destroy, send, prefill })
   line-height: 1.7;
   white-space: pre-wrap;
   word-break: break-word;
-}
-
-/* —— A4：正文引用角标（与 /ai/chat 页同一视觉语言） —— */
-.markdown .cite-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 18px;
-  height: 18px;
-  margin: 0 3px;
-  padding: 0 5px;
-  border-radius: 999px;
-  border: 1px dashed var(--color-primary, #4a6b7c);
-  background: var(--color-primary-light, #e8eef0);
-  color: var(--color-primary, #4a6b7c);
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 1;
-  vertical-align: super;
-  cursor: pointer;
-  user-select: none;
-  transition: all 0.15s ease;
-}
-.markdown .cite-badge:hover {
-  border-style: solid;
-  background: var(--color-primary, #4a6b7c);
-  color: #fff;
 }
 
 /* 等待指示 */

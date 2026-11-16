@@ -557,37 +557,18 @@ import {
   Lock, Warning, DataBoard, Microphone,
 } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import MarkdownIt from 'markdown-it'
-import hljs from 'highlight.js'
-import 'highlight.js/styles/github.css'
 import { aiApi, asrApi } from '@/api'
 import { useUserStore } from '@/stores/user'
 import ConversationNav from '@/components/ConversationNav.vue'
 import AppIcon from '@/components/AppIcon.vue'
 import AiGenUi from '@/components/ai/AiGenUi.vue'
 import { createStreamRenderer } from '@/utils/streamRender'
+import { renderMarkdown, renderMarkdownStream, handleCodeCopyClick } from '@/utils/markdown'
 import { classifyAiError, describeWithAction, withRetry, AiErrorKind } from '@/utils/aiErrors'
 import { MicRecorder } from '@/utils/recorder'
 
 // keep-alive 缓存名单按路由 name 匹配，故显式声明组件名
 defineOptions({ name: 'AIChat' })
-
-// 初始化 Markdown 渲染器：启用代码高亮、链接安全属性
-const md = new MarkdownIt({
-  html: false,        // 不允许内嵌 HTML（防止 XSS）
-  breaks: true,       // 单换行转 <br>
-  linkify: true,      // 自动识别链接
-  highlight(code, lang) {
-    if (lang && hljs.getLanguage(lang)) {
-      try {
-        return `<pre class="hljs"><code>${hljs.highlight(code, { language: lang, ignoreIllegals: true }).value}</code></pre>`
-      } catch {
-        // fallthrough
-      }
-    }
-    return `<pre class="hljs"><code>${md.utils.escapeHtml(code)}</code></pre>`
-  },
-})
 
 // 工具名称中文映射
 const TOOL_LABELS = {
@@ -773,42 +754,11 @@ const scrollToFirstGenCard = async (msg) => {
 }
 
 /**
- * A4：[资料 N] 引用角标渲染。
- * 把回答正文中的「[资料 N]」替换为内联角标（圆角小方块、主色、可点击），
- * 点击角标展开/收起正文上方参考资料条中对应的片段摘要（与药丸共用 ragOpenIndex）。
- * <p>
- * 实现约束：正文经 v-html 渲染，角标不能用 Vue 事件绑定——改为在角标上
- * 标 data-src 属性，由气泡容器的事件委托（handleCitationClick）统一处理。
- * 编号不存在（模型编造）时不渲染角标、原样保留文本，避免误导。
- *
- * @param {string} html  md.render 后的正文 HTML
- * @param {Array} sources 本轮 ragSources（[{sourceNo, docTitle, snippet}]）
+ * 角标 / 代码块复制按钮点击（事件委托，v-html 内容无法直接绑事件）：
+ * 先处理复制按钮（命中则结束），再处理引用角标——展开/收起对应编号的片段摘要
  */
-const CITE_RE = /\[资料\s*(\d+)\]/g
-const renderCitations = (html, sources) => {
-  if (!html || !sources || !sources.length) return html
-  const valid = new Set(sources.map((s) => s.sourceNo))
-  return html.replace(CITE_RE, (match, num) => {
-    const n = Number(num)
-    if (!valid.has(n)) return match
-    return (
-      `<sup class="cite-badge" data-src="${n}" title="查看资料 ${n}：${sources.find((s) => s.sourceNo === n)?.docTitle || ''}">` +
-      `${n}</sup>`
-    )
-  })
-}
-
-const renderMarkdown = (content, sources) => {
-  if (!content) return ''
-  try {
-    return renderCitations(md.render(content), sources)
-  } catch {
-    return md.utils.escapeHtml(content)
-  }
-}
-
-/** 角标点击（事件委托）：展开/收起对应编号的片段摘要 */
 const handleCitationClick = (m, e) => {
+  if (handleCodeCopyClick(e)) return
   const badge = e.target.closest('.cite-badge')
   if (!badge) return
   const n = Number(badge.dataset.src)
@@ -1891,9 +1841,10 @@ const sendInternal = async (content, { continuation, convId: explicitConvId, bra
         msg._reasonSegOpen = false
         msg.reasoningStreaming = false
         msg.content += data
-        // A1：delta 高频到达，渲染走自适应节流（正文长时自动放宽间隔），done/final 时 flush 补尾
+        // A1：delta 高频到达，渲染走自适应节流（正文长时自动放宽间隔），done/final 时 flush 补尾。
+        // 流式渲染前先补齐未闭合语法（裸 ** / 裸 ` / 未闭合围栏），终态用原始全文重渲染
         streamRenderer?.schedule(() => {
-          msg.html = renderMarkdown(msg.content, msg.ragSources)
+          msg.html = renderMarkdownStream(msg.content, msg.ragSources)
           scrollToBottomIfCurrent()
         })
       } else if (event === 'reset') {
@@ -3070,35 +3021,6 @@ onMounted(() => {
   word-break: break-word;
 }
 
-/* —— A4：正文引用角标 ——
-   [资料 N] 渲染为内联小方块角标：主色描边、纸色底，点击展开对应片段摘要。
-   与参考资料药丸共用视觉语言（虚线描边 → 激活实线主色），不新增颜色 */
-.markdown .cite-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 18px;
-  height: 18px;
-  margin: 0 3px;
-  padding: 0 5px;
-  border-radius: var(--radius-pill);
-  border: 1px dashed var(--color-primary);
-  background: var(--color-primary-light);
-  color: var(--color-primary);
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 1;
-  vertical-align: super;
-  cursor: pointer;
-  user-select: none;
-  transition: all var(--duration-fast) var(--ease-soft);
-}
-.markdown .cite-badge:hover {
-  border-style: solid;
-  background: var(--color-primary);
-  color: #fff;
-}
-
 /* —— M4：Agent 决策时间线 ——
    左侧一条竖轴串起「思考旁白 → 工具调用 → 授权请求」，
    轴线用项目的主色淡化版，节点圆点实心，形成清晰的步骤感 */
@@ -3395,62 +3317,7 @@ onMounted(() => {
   transform: translateY(-4px) scaleY(0.96);
 }
 
-/* Markdown 排版 */
-.msg-content.markdown :deep(p) { margin: 0 0 var(--space-2); }
-.msg-content.markdown :deep(p:last-child) { margin-bottom: 0; }
-.msg-content.markdown :deep(h1),
-.msg-content.markdown :deep(h2),
-.msg-content.markdown :deep(h3),
-.msg-content.markdown :deep(h4) {
-  margin: var(--space-3) 0 var(--space-2);
-  font-weight: 600;
-  line-height: 1.4;
-  font-family: var(--font-serif);
-}
-.msg-content.markdown :deep(h1) { font-size: 1.35em; }
-.msg-content.markdown :deep(h2) { font-size: 1.2em; }
-.msg-content.markdown :deep(h3) { font-size: 1.08em; }
-.msg-content.markdown :deep(ul),
-.msg-content.markdown :deep(ol) { margin: var(--space-2) 0; padding-left: 1.5em; }
-.msg-content.markdown :deep(li) { margin: 4px 0; }
-.msg-content.markdown :deep(code) {
-  background: var(--color-bg-muted);
-  padding: 2px 6px;
-  border-radius: var(--radius-sm);
-  font-family: var(--font-mono);
-  font-size: 0.88em;
-}
-.msg-content.markdown :deep(pre) {
-  background: var(--color-bg-subtle);
-  border: 1px solid var(--color-border);
-  padding: var(--space-3);
-  border-radius: var(--radius-md);
-  overflow-x: auto;
-  margin: var(--space-2) 0;
-}
-.msg-content.markdown :deep(pre code) { background: transparent; padding: 0; font-size: 0.85em; line-height: 1.5; }
-.msg-content.markdown :deep(table) {
-  border-collapse: collapse;
-  margin: var(--space-2) 0;
-  width: 100%;
-  font-size: var(--fs-small);
-}
-.msg-content.markdown :deep(th),
-.msg-content.markdown :deep(td) {
-  border: 1px solid var(--color-border);
-  padding: 6px 12px;
-  text-align: left;
-}
-.msg-content.markdown :deep(th) { background: var(--color-bg-subtle); font-weight: 600; }
-.msg-content.markdown :deep(blockquote) {
-  border-left: 3px solid var(--color-primary);
-  padding-left: var(--space-3);
-  margin: var(--space-2) 0;
-  color: var(--color-text-secondary);
-}
-.msg-content.markdown :deep(a) { color: var(--color-primary); text-decoration: none; }
-.msg-content.markdown :deep(a:hover) { text-decoration: underline; }
-.msg-content.markdown :deep(strong) { font-weight: 600; color: var(--color-text); }
+/* Markdown 排版已抽至 styles/ai-markdown.css（utils/markdown.js 导入生效，chat 页与悬浮球共用） */
 
 /* 「回到最新」浮动按钮 */
 .jump-latest {
