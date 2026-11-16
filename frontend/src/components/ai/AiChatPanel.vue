@@ -64,11 +64,15 @@
                 <div class="gen-ui-inline-label">
                   <el-icon><DataBoard /></el-icon>
                   <span>{{ genCardTitle(card) }}</span>
+                  <span v-if="genCardArgLabel(card)" class="gen-ui-args" :title="'检索参数：' + genCardArgLabel(card)">
+                    {{ genCardArgLabel(card) }}
+                  </span>
+                  <span v-if="card._mergeCount > 1" class="gen-ui-merged">已合并 {{ card._mergeCount }} 次检索</span>
                   <span v-if="card._fromHistory" class="gen-ui-time">
                     {{ formatSnapTime(card._snapshotTime) }} 查询
                   </span>
                 </div>
-                <AiGenUi :snapshot="parseSnapshot(card.data)" />
+                <AiGenUi :snapshot="parseSnapshot(card._mergedData || card.data)" @detail="openBookDetail" @borrow="borrowFromCard" />
               </div>
 
               <!-- 写操作授权卡：含参数明细与有效期倒计时（与 /ai/chat 页一致，样式紧凑版）。
@@ -302,6 +306,7 @@ import { ref, reactive, computed, nextTick, onBeforeUnmount } from 'vue'
 import { useRoute } from 'vue-router'
 import { Loading, Check, Close, Lock, Warning, DataBoard, Microphone } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
+import { useRouter } from 'vue-router'
 import { aiApi, asrApi } from '@/api'
 import { useAiSearchStore } from '@/stores/aiSearch'
 import AppIcon from '@/components/AppIcon.vue'
@@ -848,6 +853,18 @@ const send = async () => {
   const content = input.value.trim()
   input.value = ''
   await sendInternal(content, { continuation: false })
+}
+
+const router = useRouter()
+
+/** GenUI 图书卡点击 → 进入图书详情页（悬浮球跳转主窗口路由） */
+const openBookDetail = (b) => {
+  if (b?.id != null) router.push(`/book/detail/${b.id}`)
+}
+
+/** GenUI 图书卡「借阅」→ 发送借阅消息给 AI，走 applyBorrow 授权卡确认流程 */
+const borrowFromCard = (b) => {
+  if (b?.title) sendFollowUp(`我想借阅《${b.title}》`)
 }
 
 /** 建议追问 chips 点击：把追问文本直接作为新消息发送（面板流式串行，generating 时忽略） */

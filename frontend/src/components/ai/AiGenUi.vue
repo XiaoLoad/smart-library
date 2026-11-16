@@ -10,31 +10,70 @@
 -->
 <template>
   <div class="gen-ui">
-    <!-- 图书卡片网格 -->
-    <div v-if="type === 'book_grid'" class="gi-book-grid">
-      <div v-for="(b, i) in items" :key="i" class="gi-book" :title="b.publisher ? `出版社：${b.publisher}` : ''">
-        <div class="gi-book-cover">
-          <img v-if="b.coverUrl" :src="b.coverUrl" :alt="b.title" loading="lazy" />
-          <div v-else class="gi-book-cover-fallback">
-            <el-icon><Collection /></el-icon>
+    <!-- 图书卡：≤6 本网格平铺；>6 本横向轮播轨道（拖拽/滚轮横滚，高度恒定不挤压对话流） -->
+    <div v-if="type === 'book_grid'" class="gi-book-area">
+      <!-- 网格平铺 -->
+      <div v-if="items.length <= 6" class="gi-book-grid">
+        <div v-for="(b, i) in items" :key="i" class="gi-bcard" @click="openDetail(b)">
+          <div class="gi-bcover">
+            <img v-if="b.coverUrl && !brokenCovers.has(i)" :src="b.coverUrl" :alt="b.title" loading="lazy" draggable="false" @error="brokenCovers.add(i)" />
+            <span v-else class="gi-bcover-fb">{{ b.title?.charAt(0) || '书' }}</span>
+            <span class="gi-btag" :class="{ off: !(b.availableCount > 0) }">{{ b.availableCount > 0 ? '可借' : '借完' }}</span>
+          </div>
+          <div class="gi-binfo">
+            <div class="gi-btitle" :title="b.title">{{ b.title }}</div>
+            <div class="gi-bauthor">{{ b.author || '佚名' }}</div>
+            <div class="gi-bmeta">
+              <span v-if="b.availableCount != null" class="gi-bstock" :class="{ empty: b.availableCount <= 0 }">
+                {{ b.availableCount > 0 ? `可借 ${b.availableCount}/${b.totalCount ?? '?'}` : '暂无可借' }}
+              </span>
+              <span v-if="b.category" class="gi-bcat">{{ b.category }}</span>
+            </div>
+          </div>
+          <div class="gi-bbar" @click.stop>
+            <button v-if="canBorrow" class="gi-bbtn pri" type="button" :disabled="!(b.availableCount > 0)" @click="emitBorrow(b)">
+              {{ b.availableCount > 0 ? '借阅' : '暂无可借' }}
+            </button>
+            <button class="gi-bbtn" type="button" @click.stop="openDetail(b)">详情</button>
           </div>
         </div>
-        <div class="gi-book-info">
-          <div class="gi-book-title" :title="b.title">{{ b.title }}</div>
-          <div class="gi-book-author">{{ b.author || '佚名' }}</div>
-          <div class="gi-book-meta">
-            <span v-if="b.availableCount !== undefined && b.availableCount !== null"
-                  class="gi-stock" :class="{ empty: b.availableCount <= 0 }">
-              {{ b.availableCount > 0 ? `可借 ${b.availableCount}/${b.totalCount ?? '?'}` : '暂无可借' }}
-            </span>
-            <span v-if="b.category" class="gi-cat">{{ b.category }}</span>
+      </div>
+      <!-- 横向轮播：鼠标拖拽 / 滚轮横滚，两端渐隐 + 进度线 -->
+      <div v-else class="gi-rail" @wheel.prevent="onRailWheel">
+        <div
+          ref="railRef"
+          class="gi-rail-track"
+          :class="{ dragging: railDragging }"
+          @pointerdown="onRailDown"
+          @click.capture="onRailClickCapture"
+          @scroll="onRailScroll"
+        >
+          <div v-for="(b, i) in items" :key="i" class="gi-bcard" @click="openDetail(b)">
+            <div class="gi-bcover">
+              <img v-if="b.coverUrl && !brokenCovers.has(i)" :src="b.coverUrl" :alt="b.title" loading="lazy" draggable="false" @error="brokenCovers.add(i)" />
+              <span v-else class="gi-bcover-fb">{{ b.title?.charAt(0) || '书' }}</span>
+              <span class="gi-btag" :class="{ off: !(b.availableCount > 0) }">{{ b.availableCount > 0 ? '可借' : '借完' }}</span>
+            </div>
+            <div class="gi-binfo">
+              <div class="gi-btitle" :title="b.title">{{ b.title }}</div>
+              <div class="gi-bauthor">{{ b.author || '佚名' }}</div>
+              <div class="gi-bmeta">
+                <span v-if="b.availableCount != null" class="gi-bstock" :class="{ empty: b.availableCount <= 0 }">
+                  {{ b.availableCount > 0 ? `可借 ${b.availableCount}/${b.totalCount ?? '?'}` : '暂无可借' }}
+                </span>
+                <span v-if="b.category" class="gi-bcat">{{ b.category }}</span>
+              </div>
+            </div>
+            <div class="gi-bbar" @click.stop>
+              <button v-if="canBorrow" class="gi-bbtn pri" type="button" :disabled="!(b.availableCount > 0)" @click="emitBorrow(b)">
+                {{ b.availableCount > 0 ? '借阅' : '暂无可借' }}
+              </button>
+              <button class="gi-bbtn" type="button" @click.stop="openDetail(b)">详情</button>
+            </div>
           </div>
-          <div v-if="b.location || b.publisher" class="gi-book-extra">
-            <span v-if="b.location" class="gi-book-loc" :title="'馆藏位置：' + b.location">
-              <el-icon><Location /></el-icon>{{ b.location }}
-            </span>
-            <span v-if="b.publisher" class="gi-book-pub">{{ b.publisher }}</span>
-          </div>
+        </div>
+        <div class="gi-rail-progress" aria-hidden="true">
+          <span class="fill" :style="{ width: railPercent + '%' }"></span>
         </div>
       </div>
       <div v-if="!items.length" class="gi-empty">未查到相关图书</div>
@@ -174,12 +213,98 @@
 </template>
 
 <script setup>
-import { computed, ref, watch, onBeforeUnmount, nextTick } from 'vue'
-import { Collection, Location } from '@element-plus/icons-vue'
+import { computed, ref, reactive, watch, onBeforeUnmount, nextTick } from 'vue'
+import { useUserStore } from '@/stores/user'
 
 const props = defineProps({
   // 快照对象（后端 tool 事件 data 解析后的结果）
   snapshot: { type: Object, default: null },
+})
+
+const emit = defineEmits(['detail', 'borrow'])
+
+/** 借阅入口仅读者可见：管理员（userType=3）不展示借阅按钮 */
+const userStore = useUserStore()
+const canBorrow = computed(() => userStore.userType !== 3)
+
+/** 封面加载失败集合（key 为条目下标），失败后降级为书名首字封面 */
+const brokenCovers = reactive(new Set())
+
+/** 卡片点击 → 进入图书详情（旧快照可能缺 id，缺省时不跳转） */
+const openDetail = (b) => {
+  if (b?.id != null) emit('detail', b)
+}
+/** 借阅按钮 → 交由父组件发送借阅消息给 AI（走 applyBorrow 授权卡流程） */
+const emitBorrow = (b) => {
+  if (b?.availableCount > 0) emit('borrow', b)
+}
+
+/* —— 横向轮播轨道：鼠标拖拽 + 滚轮横滚（复用概览页推荐卡轨道的交互隐喻）—— */
+const railRef = ref(null)
+const railDragging = ref(false)
+const railScrollX = ref(0)
+const RAIL_DRAG_THRESHOLD_PX = 6
+let railStartX = 0
+let railStartLeft = 0
+let railMoved = false
+let railSuppressUntil = 0
+
+/** 拖拽进度：scrollLeft 占可滚动区比例 */
+const railPercent = computed(() => {
+  const rail = railRef.value
+  if (!rail) return 0
+  const range = rail.scrollWidth - rail.clientWidth
+  if (range <= 0) return 100
+  return Math.min(100, Math.round((railScrollX.value / range) * 100))
+})
+
+function onRailScroll() {
+  if (railRef.value) railScrollX.value = railRef.value.scrollLeft
+}
+
+function onRailDown(e) {
+  // 仅鼠标左键拖拽；触屏走原生横滑
+  if (e.pointerType !== 'mouse' || e.button !== 0) return
+  railMoved = false
+  railStartX = e.clientX
+  railStartLeft = railRef.value?.scrollLeft ?? 0
+  window.addEventListener('pointermove', onRailMove)
+  window.addEventListener('pointerup', onRailUp, { once: true })
+  window.addEventListener('pointercancel', onRailUp, { once: true })
+}
+
+function onRailMove(e) {
+  const dx = e.clientX - railStartX
+  if (!railMoved) {
+    if (Math.abs(dx) < RAIL_DRAG_THRESHOLD_PX) return
+    railMoved = true
+    railDragging.value = true // 过阈值才进拖拽态：普通点击不受影响
+  }
+  if (railRef.value) railRef.value.scrollLeft = railStartLeft - dx
+}
+
+function onRailUp() {
+  window.removeEventListener('pointermove', onRailMove)
+  railDragging.value = false
+  if (railMoved) railSuppressUntil = Date.now() + 260 // 拖拽后的点击窗口期吞掉，防误触导航
+}
+
+function onRailClickCapture(e) {
+  if (Date.now() < railSuppressUntil) {
+    e.preventDefault()
+    e.stopPropagation()
+  }
+}
+
+/** 纵向滚轮转横向滚动（触控板原生 deltaX 已天然支持） */
+function onRailWheel(e) {
+  const rail = railRef.value
+  if (!rail) return
+  rail.scrollLeft += Math.abs(e.deltaY) > Math.abs(e.deltaX) ? e.deltaY : e.deltaX
+}
+
+onBeforeUnmount(() => {
+  window.removeEventListener('pointermove', onRailMove)
 })
 
 /** 快照类型（后端在 data 里声明 type） */
@@ -414,70 +539,183 @@ onBeforeUnmount(() => {
   font-size: 12px;
 }
 
-/* —— 图书卡网格 —— */
+/* —— 图书卡（封面主视觉 · 竖版）—— */
+.gi-book-area { min-width: 0; }
 .gi-book-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
   gap: 8px;
 }
-.gi-book {
+.gi-bcard {
+  position: relative;
   display: flex;
-  gap: 8px;
-  padding: 8px;
+  flex-direction: column;
   border: 1px solid var(--color-border, #e8e3dc);
   border-radius: var(--radius, 4px);
   background: var(--color-bg-elevated, #fff);
-  transition: border-color 150ms cubic-bezier(0.25, 0.1, 0.25, 1);
-}
-.gi-book:hover { border-color: var(--color-primary, #3a5a6b); }
-.gi-book-cover {
-  flex-shrink: 0;
-  width: 34px;
-  height: 46px;
-  border-radius: 3px;
   overflow: hidden;
+  cursor: pointer;
+  user-select: none;
+  transition: border-color 150ms cubic-bezier(0.25, 0.1, 0.25, 1),
+              transform 150ms cubic-bezier(0.25, 0.1, 0.25, 1),
+              box-shadow 200ms cubic-bezier(0.25, 0.1, 0.25, 1);
+}
+.gi-bcard:hover {
+  border-color: var(--color-primary, #3a5a6b);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(44, 40, 37, 0.1);
+}
+.gi-bcover {
+  position: relative;
+  aspect-ratio: 3 / 4;
   background: var(--color-bg-muted, #ece6dd);
+  overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: center;
 }
-.gi-book-cover img { width: 100%; height: 100%; object-fit: cover; }
-.gi-book-cover-fallback { color: var(--color-text-tertiary, #9c958d); font-size: 16px; }
-.gi-book-info { min-width: 0; flex: 1; }
-.gi-book-title {
+.gi-bcover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 300ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.gi-bcard:hover .gi-bcover img { transform: scale(1.04); }
+.gi-bcover-fb {
+  font-family: var(--font-serif, serif);
+  font-size: 26px;
+  color: var(--color-text-tertiary, #9c958d);
+}
+/* 可借角标：封面底部通栏 */
+.gi-btag {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  font-size: 10px;
+  line-height: 1;
+  padding: 3px 0;
+  text-align: center;
+  letter-spacing: 0.08em;
+  color: var(--color-text-inverse, #fff);
+  background: color-mix(in srgb, var(--color-success, #5d8a6b) 86%, transparent);
+}
+.gi-btag.off { background: color-mix(in srgb, var(--color-text-tertiary, #9c958d) 82%, transparent); }
+.gi-binfo {
+  padding: 7px 8px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.gi-btitle {
   font-size: 12px;
-  font-weight: 500;
+  font-weight: 600;
+  line-height: 1.4;
   color: var(--color-text, #2c2825);
-  line-height: 1.5;
+  overflow: hidden;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   line-clamp: 2;
   -webkit-box-orient: vertical;
-  overflow: hidden;
 }
-.gi-book-author {
+.gi-bauthor {
   font-size: 11px;
   color: var(--color-text-tertiary, #9c958d);
-  margin-top: 2px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.gi-book-meta { margin-top: 4px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-.gi-stock {
-  font-size: 11px;
+.gi-bmeta { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
+.gi-bstock {
+  font-size: 10.5px;
   color: var(--color-success, #5d8a6b);
   background: rgba(93, 138, 107, 0.12);
-  padding: 1px 6px;
+  padding: 0 6px;
   border-radius: 999px;
+  white-space: nowrap;
 }
-.gi-stock.empty { color: var(--color-danger, #a85a4a); background: rgba(168, 90, 74, 0.12); }
-.gi-cat {
-  font-size: 11px;
+.gi-bstock.empty { color: var(--color-danger, #a85a4a); background: rgba(168, 90, 74, 0.12); }
+.gi-bcat {
+  font-size: 10.5px;
   color: var(--color-text-tertiary, #9c958d);
   border: 1px solid var(--color-border, #e8e3dc);
   padding: 0 6px;
   border-radius: 999px;
+  white-space: nowrap;
+}
+/* 动作栏：hover 自底部渐变浮出；触屏/无 hover 设备常显 */
+.gi-bbar {
+  position: absolute;
+  inset: auto 0 0 0;
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  padding: 14px 8px 7px;
+  background: linear-gradient(transparent, rgba(20, 18, 16, 0.72));
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+@media (hover: none) {
+  .gi-bbar { opacity: 1; }
+}
+.gi-bcard:hover .gi-bbar { opacity: 1; }
+.gi-bbtn {
+  font-size: 11px;
+  line-height: 1;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: none;
+  background: rgba(255, 255, 255, 0.92);
+  color: #2c2825;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 120ms ease, color 120ms ease;
+}
+.gi-bbtn:hover { background: #fff; color: var(--color-primary, #3a5a6b); }
+.gi-bbtn.pri { background: var(--color-primary, #3a5a6b); color: #fff; }
+.gi-bbtn.pri:hover { filter: brightness(1.1); color: #fff; }
+.gi-bbtn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  filter: none;
+}
+
+/* —— 横向轮播轨道（>6 本）—— */
+.gi-rail {
+  cursor: grab;
+  --gi-fade: 16px;
+  mask-image: linear-gradient(90deg, transparent 0, #000 var(--gi-fade), #000 calc(100% - var(--gi-fade)), transparent 100%);
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 var(--gi-fade), #000 calc(100% - var(--gi-fade)), transparent 100%);
+}
+.gi-rail:active { cursor: grabbing; }
+.gi-rail-track {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  will-change: scroll-position;
+  padding-bottom: 2px;
+}
+.gi-rail-track::-webkit-scrollbar { display: none; }
+.gi-rail-track.dragging { cursor: grabbing; }
+.gi-rail-track.dragging .gi-bcard { pointer-events: none; }
+.gi-rail-track .gi-bcard {
+  flex: 0 0 118px;
+  width: 118px;
+}
+.gi-rail-progress {
+  margin-top: 6px;
+  height: 1px;
+  border-radius: 999px;
+  background: var(--color-divider, #ece6dd);
+  overflow: hidden;
+}
+.gi-rail-progress .fill {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--color-primary, #3a5a6b), var(--color-secondary, #7a9270));
+  transition: width 200ms linear;
 }
 
 /* —— 排行榜 —— */
@@ -637,31 +875,6 @@ onBeforeUnmount(() => {
 /* 借阅表：时间分色 */
 .gi-table td.due-overdue { color: #a85a4a; font-weight: 600; }
 .gi-table td.due-soon { color: #a8843c; }
-
-/* 图书卡扩展行：馆藏位置 / 出版社 */
-.gi-book-extra {
-  margin-top: 3px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 10.5px;
-  color: var(--color-text-tertiary, #9c958d);
-  min-width: 0;
-}
-.gi-book-loc {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.gi-book-pub {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  flex-shrink: 1;
-}
 
 /* 写操作结果：逐项列表 */
 .gi-op-result { display: flex; flex-direction: column; gap: 3px; }

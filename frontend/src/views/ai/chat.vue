@@ -196,7 +196,7 @@
                            无 type 或未映射时自动回落为 JSON 展开视图 -->
                       <transition name="tool-expand">
                         <div v-if="node.card.expanded && node.card.data" class="tool-data gen-ui-wrap">
-                          <AiGenUi :snapshot="parseSnapshot(node.card.data)" />
+                          <AiGenUi :snapshot="parseSnapshot(node.card.data)" @detail="openBookDetail" @borrow="borrowFromCard" />
                         </div>
                       </transition>
                     </div>
@@ -224,11 +224,15 @@
                   <div class="gen-ui-inline-label">
                     <el-icon><DataBoard /></el-icon>
                     <span>{{ genCardTitle(card) }}</span>
+                    <span v-if="genCardArgLabel(card)" class="gen-ui-args" :title="'检索参数：' + genCardArgLabel(card)">
+                      {{ genCardArgLabel(card) }}
+                    </span>
+                    <span v-if="card._mergeCount > 1" class="gen-ui-merged">已合并 {{ card._mergeCount }} 次检索</span>
                     <span v-if="card._fromHistory" class="gen-ui-time" :title="'查询时点：' + formatSnapTime(card._snapshotTime)">
                       {{ formatSnapTime(card._snapshotTime) }} 查询
                     </span>
                   </div>
-                  <AiGenUi :snapshot="parseSnapshot(card.data)" />
+                  <AiGenUi :snapshot="parseSnapshot(card._mergedData || card.data)" @detail="openBookDetail" @borrow="borrowFromCard" />
                 </div>
 
                 <!-- 写操作授权卡：AI 发起的写操作被代码级门禁拦截，等待用户授权。
@@ -565,6 +569,7 @@
 
 <script setup>
 import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount, onActivated } from 'vue'
+import { useRouter } from 'vue-router'
 import {
   Plus, ChatDotRound, MagicStick, Promotion, Delete,
   VideoPause, Loading, Check, Close, ArrowDownBold, ArrowUpBold, Connection,
@@ -1563,6 +1568,18 @@ const send = async () => {
 }
 
 /** 建议追问 chips 点击：把追问文本直接作为新消息发送（沿用排队机制，流未结束时入队） */
+const router = useRouter()
+
+/** GenUI 图书卡点击 → 进入图书详情页 */
+const openBookDetail = (b) => {
+  if (b?.id != null) router.push(`/book/detail/${b.id}`)
+}
+
+/** GenUI 图书卡「借阅」→ 以读者口吻把借阅请求发给 AI，走 applyBorrow 授权卡确认流程 */
+const borrowFromCard = (b) => {
+  if (b?.title) sendFollowUp(`我想借阅《${b.title}》`)
+}
+
 const sendFollowUp = async (text) => {
   const content = (text || '').trim()
   if (!content) return
