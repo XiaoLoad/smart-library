@@ -2002,6 +2002,8 @@ const sendInternal = async (content, { continuation, convId: explicitConvId, bra
           stopReasonTimer(assistantMsg)
           assistantMsg._reasonSegOpen = false
           assistantMsg.reasoningStreaming = false
+          // 本轮流结束：思维链自动收起（正文已完整展示），用户需要时点头部自行展开
+          assistantMsg.reasoningOpen = false
           // M4 折叠汇总：流正常结束，时间线切换为折叠态（汇总行 + 可手动展开）
           assistantMsg._timelineRunning = false
         }
@@ -2120,6 +2122,8 @@ const sendInternal = async (content, { continuation, convId: explicitConvId, bra
         stopReasonTimer(msg)
         msg._reasonSegOpen = false
         msg.reasoningStreaming = false
+        // 降级收尾同样自动收起思维链（正文已展示简化回执）
+        msg.reasoningOpen = false
         try {
           const info = JSON.parse(data)
           msg.degraded = true
@@ -2144,6 +2148,8 @@ const sendInternal = async (content, { continuation, convId: explicitConvId, bra
         stopReasonTimer(msg)
         msg._reasonSegOpen = false
         msg.reasoningStreaming = false
+        // 错误路径同样自动收起思维链（错误说明已展示，需要复盘时手动展开）
+        msg.reasoningOpen = false
         // 已有正文时保留原内容，错误说明追加其后（避免中途出错抹掉已流出的回答）
         const errTip = `⚠️ ${data || 'AI 请求出错'}`
         msg.content = msg.content ? `${msg.content}\n\n${errTip}` : errTip
@@ -2212,6 +2218,8 @@ const sendInternal = async (content, { continuation, convId: explicitConvId, bra
       stopReasonTimer(assistantMsg)
       assistantMsg._reasonSegOpen = false
       assistantMsg.reasoningStreaming = false
+      // 中断/停止兜底：思维链同样自动收起
+      assistantMsg.reasoningOpen = false
       // M4 折叠汇总兜底：error/中断/停止路径也要结束运行态（done 之外的退出都走这里）
       assistantMsg._timelineRunning = false
     }

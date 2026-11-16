@@ -1063,7 +1063,7 @@ const sendInternal = async (content, { continuation }) => {
         stopReasonTimer(msg)
         msg._reasonSegOpen = false
         msg.reasoningStreaming = false
-        msg.reasoningOpen = false
+        // 正文开始不折叠思维链：模型边想边说/多轮工具场景保持展开，done 后统一收起（与助手页一致）
         msg.content += data
         // A1：delta 高频到达，渲染走自适应节流，done/final 时 flush 补尾。
         // 流式渲染前先补齐未闭合语法（裸 ** / 裸 ` / 未闭合围栏），终态用原始全文重渲染
@@ -1075,7 +1075,7 @@ const sendInternal = async (content, { continuation }) => {
         stopReasonTimer(msg)
         msg._reasonSegOpen = false
         msg.reasoningStreaming = false
-        msg.reasoningOpen = false
+        // 工具调用轮保持当前开合状态：新一轮 thinking 会续写展开，避免面板反复开合跳变
         msg.content = ''
         msg.html = ''
       } else if (event === 'final') {
@@ -1232,6 +1232,8 @@ const sendInternal = async (content, { continuation }) => {
         stopReasonTimer(msg)
         msg._reasonSegOpen = false
         msg.reasoningStreaming = false
+        // 本轮流结束：思维链自动收起（正文已完整展示），用户需要时点头部自行展开
+        msg.reasoningOpen = false
         // A1：流结束，把节流中未渲染的尾部内容立即上屏
         streamRenderer?.flush()
         // 流结束：检索联动广播（双重条件收窄，防止跨页污染馆藏图书页筛选）：
@@ -1321,6 +1323,8 @@ const sendInternal = async (content, { continuation }) => {
       stopReasonTimer(assistantMsg)
       assistantMsg._reasonSegOpen = false
       assistantMsg.reasoningStreaming = false
+      // 中断/停止兜底：思维链同样自动收起
+      assistantMsg.reasoningOpen = false
       assistantMsg.toolEvents?.forEach((t) => {
         if (t.phase === 'start') t.phase = 'end'
       })
