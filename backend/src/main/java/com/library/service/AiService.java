@@ -933,7 +933,10 @@ public class AiService {
             }
             emitter.complete();
         });
-        emitter.onError(t -> emitter.complete());
+        // 客户端断开时响应已废，绝不能在 onError 里调 complete()——会抛 AsyncRequestNotUsableException
+        // 并被全局异常处理器按 JSON Result 收尾，因 Content-Type 已是 text/event-stream 而级联报错。
+        // Spring 会自行终结已出错的异步请求；回答照常落库（onCompleteResponse 不依赖连接存活）。
+        emitter.onError(t -> log.info("[AI] SSE 客户端连接中断 conversationId={}，回答将继续生成并落库", conversationId));
 
         return emitter;
     }

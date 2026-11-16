@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
 
 import java.util.stream.Collectors;
 
@@ -26,6 +27,17 @@ public class GlobalExceptionHandler {
                 .map(f -> f.getDefaultMessage())
                 .collect(Collectors.joining("; "));
         return Result.error(400, msg);
+    }
+
+    /**
+     * SSE 响应已废（客户端断开/流已终止）时的专用收口：此时响应 Content-Type 已锁定
+     * text/event-stream，常规 JSON Result 序列化必然失败（HttpMessageNotWritableException 级联 WARN）。
+     * 返回 null 表示响应已处理完毕，只留低级别日志便于排查断连频率。
+     */
+    @ExceptionHandler(AsyncRequestNotUsableException.class)
+    public Result<Void> handleSseUnusable(AsyncRequestNotUsableException e) {
+        log.info("SSE 响应已失效（客户端断开或流已终止），跳过 JSON 错误响应：{}", e.getMessage());
+        return null;
     }
 
     @ExceptionHandler(Exception.class)
