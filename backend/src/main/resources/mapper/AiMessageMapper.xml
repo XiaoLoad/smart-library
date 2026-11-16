@@ -10,21 +10,27 @@
         <result property="toolSummary" column="tool_summary"/>
         <result property="toolSnapshots" column="tool_snapshots"/>
         <result property="visibility" column="visibility"/>
+        <result property="groupKey" column="group_key"/>
+        <result property="active" column="active"/>
         <result property="createTime" column="create_time"/>
     </resultMap>
 
-    <!-- 给模型加载历史用：全部消息（含 hidden 机制消息，续跑上下文需要） -->
+    <!-- 给模型加载历史用：全部消息（含 hidden 机制消息，续跑上下文需要）。
+         A2：只取激活分支——模型上下文跟随用户当前查看的分支，切分支后提问按该分支续写 -->
     <select id="selectByConversationId" resultMap="msgMap">
         SELECT * FROM ai_messages
         WHERE conversation_id = #{conversationId}
+        AND active = 1
         ORDER BY create_time ASC
     </select>
 
-    <!-- 给前端历史分页用：过滤 hidden 机制消息（对齐 ZCode：internal 不进 UI） -->
+    <!-- 给前端历史分页用：过滤 hidden 机制消息（对齐 ZCode：internal 不进 UI）；
+         A2：只取激活分支（被切走的兄弟分支不返回，前端切分支时刷新列表） -->
     <select id="selectVisibleHistoryPage" resultMap="msgMap">
         SELECT * FROM ai_messages
         WHERE conversation_id = #{conversationId}
         AND visibility = 'visible'
+        AND active = 1
         <if test="beforeId != null">
             AND id &lt; #{beforeId}
         </if>
@@ -34,7 +40,7 @@
 
     <select id="countVisibleByConversationId" resultType="java.lang.Integer">
         SELECT COUNT(*) FROM ai_messages
-        WHERE conversation_id = #{conversationId} AND visibility = 'visible'
+        WHERE conversation_id = #{conversationId} AND visibility = 'visible' AND active = 1
     </select>
 
     <!-- 窗口分页：beforeId 为空取最新一页（id 倒序），否则取更早一页 -->
@@ -53,14 +59,58 @@
     </select>
 
     <insert id="insert" parameterType="com.library.entity.AiMessage" useGeneratedKeys="true" keyProperty="id">
-        INSERT INTO ai_messages (conversation_id, role, content, tool_summary, tool_snapshots, visibility, create_time)
+        INSERT INTO ai_messages (conversation_id, role, content, tool_summary, tool_snapshots, visibility, group_key, active, create_time)
         VALUES (#{conversationId}, #{role}, #{content}, #{toolSummary}, #{toolSnapshots},
-                COALESCE(#{visibility, javaType=string, jdbcType=VARCHAR}, 'visible'), #{createTime})
+                COALESCE(#{visibility, javaType=string, jdbcType=VARCHAR}, 'visible'),
+                #{groupKey, javaType=string, jdbcType=VARCHAR},
+                COALESCE(#{active, javaType=integer, jdbcType=TINYINT}, 1), #{createTime})
     </insert>
 
     <update id="updateToolSnapshots">
         UPDATE ai_messages SET tool_snapshots = #{toolSnapshots} WHERE id = #{id}
     </update>
+
+    <!-- A2：同一轮分支组的激活切换——旧激活分支全部置 0，目标分支置 1（前端切分支时调用） -->
+    <update id="deactivateGroup">
+        UPDATE ai_messages SET active = 0
+        WHERE conversation_id = #{conversationId} AND group_key = #{groupKey} AND active = 1
+    </update>
+
+    <update id="activateMessages">
+        UPDATE ai_messages SET active = 1
+        WHERE conversation_id = #{conversationId} AND id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+    </update>
+
+    <select id="selectById" resultMap="msgMap">
+        SELECT * FROM ai_messages WHERE id = #{id}
+    </select>
+
+    <!-- A2：分支组全部消息（含 hidden 回执与被切走的兄弟分支，切换时据此组激活链） -->
+    <select id="selectGroupMessages" resultMap="msgMap">
+        SELECT * FROM ai_messages
+        WHERE conversation_id = #{conversationId}
+        AND group_key = #{groupKey}
+        ORDER BY id ASC
+    </select>
+
+    <!-- A2：历史消息懒初始化分支组——激活链批量回填同一 key -->
+    <update id="assignGroupKey">
+        UPDATE ai_messages SET group_key = #{groupKey}
+        WHERE conversation_id = #{conversationId} AND id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+    </update>
+
+    <!-- A2：取一轮分支组内全部兄弟 user 消息（激活态不限，供分支导航与切换定位）。
+         groupKey 为空（首轮无分支）时不返回任何行 -->
+    <select id="selectSiblings" resultMap="msgMap">
+        SELECT * FROM ai_messages
+        WHERE conversation_id = #{conversationId}
+        AND group_key = #{groupKey}
+        AND role = 'user'
+        AND visibility = 'visible'
+        ORDER BY id ASC
+    </select>
 
     <delete id="deleteByConversationId">
         DELETE FROM ai_messages WHERE conversation_id = #{conversationId}

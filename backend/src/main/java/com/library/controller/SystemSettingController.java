@@ -16,6 +16,7 @@ import com.library.mapper.NotificationLogMapper;
 import com.library.mapper.UserMapper;
 import com.library.security.CurrentUser;
 import com.library.service.AiService;
+import com.library.service.AsrService;
 import com.library.service.LibraryConfigService;
 import com.library.service.NotificationRuleService;
 import com.library.service.NotificationScheduler;
@@ -55,6 +56,9 @@ public class SystemSettingController {
 
     @Autowired
     private AiService aiService;
+
+    @Autowired
+    private AsrService asrService;
 
     @Autowired
     private LibraryConfigService configService;
@@ -224,6 +228,117 @@ public class SystemSettingController {
         data.put("list", models);
         data.put("total", models.size());
         return Result.success("连接正常，共拉取 " + models.size() + " 个可用模型", data);
+    }
+
+    // ASR 语音识别渠道
+
+    /**
+     * ASR 渠道列表（apiKey 脱敏，仅返回是否已配置）。
+     * activeId 为当前生效渠道（排序最前的启用渠道），语音输入走该渠道。
+     */
+    @GetMapping("/asr-channels")
+    public Result<Map<String, Object>> listAsrChannels() {
+        requireAdmin();
+        List<LibraryConfigService.AsrChannel> channels = configService.listAsrChannels();
+        LibraryConfigService.AsrChannel active = configService.getActiveAsrChannel();
+
+        List<Map<String, Object>> list = new ArrayList<>();
+        for (LibraryConfigService.AsrChannel c : channels) {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("id", c.getId());
+            m.put("name", c.getName());
+            m.put("endpoint", c.getEndpoint());
+            m.put("model", c.getModel());
+            m.put("enabled", Boolean.TRUE.equals(c.getEnabled()));
+            m.put("sort", c.getSort());
+            m.put("apiKeySet", c.getApiKey() != null && !c.getApiKey().isBlank());
+            m.put("active", active != null && active.getId().equals(c.getId()));
+            list.add(m);
+        }
+        Map<String, Object> data = new HashMap<>();
+        data.put("list", list);
+        data.put("activeId", active == null ? null : active.getId());
+        return Result.success(data);
+    }
+
+    /**
+     * 新增 ASR 渠道
+     */
+    @PostMapping("/asr-channels")
+    public Result<Void> addAsrChannel(@Valid @RequestBody AsrChannelRequest req) {
+        requireAdmin();
+        configService.addAsrChannel(req);
+        return Result.success("渠道添加成功", null);
+    }
+
+    /**
+     * 编辑 ASR 渠道（apiKey 留空表示不变）
+     */
+    @PutMapping("/asr-channels")
+    public Result<Void> updateAsrChannel(@Valid @RequestBody AsrChannelRequest req) {
+        requireAdmin();
+        if (req.getId() == null) {
+            throw new BusinessException(400, "渠道 ID 不能为空");
+        }
+        configService.updateAsrChannel(req);
+        return Result.success("渠道更新成功", null);
+    }
+
+    /**
+     * 启用/停用 ASR 渠道
+     */
+    @PostMapping("/asr-channels/toggle")
+    public Result<Void> toggleAsrChannel(@Valid @RequestBody AsrChannelToggleRequest req) {
+        requireAdmin();
+        configService.toggleAsrChannel(req.getId(), req.getEnabled());
+        return Result.success(req.getEnabled() ? "渠道已启用" : "渠道已停用", null);
+    }
+
+    /**
+     * ASR 渠道排序（direction：-1 上移，1 下移）
+     */
+    @PostMapping("/asr-channels/move")
+    public Result<Void> moveAsrChannel(@Valid @RequestBody AsrChannelMoveRequest req) {
+        requireAdmin();
+        int dir = req.getDirection() == null ? 0 : req.getDirection();
+        if (dir != -1 && dir != 1) {
+            throw new BusinessException(400, "非法的移动方向");
+        }
+        configService.moveAsrChannel(req.getId(), dir);
+        return Result.success();
+    }
+
+    /**
+     * 删除 ASR 渠道
+     */
+    @PostMapping("/asr-channels/delete")
+    public Result<Void> deleteAsrChannel(@Valid @RequestBody IdRequest req) {
+        requireAdmin();
+        configService.deleteAsrChannel(req.getId());
+        return Result.success("渠道已删除", null);
+    }
+
+    /**
+     * 测试 ASR 渠道连通性：向上游发送 1 秒静音 WAV 实测完整转写链路。
+     * 传 id 测试已保存渠道（Key 用库中存储值）；否则用表单中的 endpoint/apiKey/model。
+     */
+    @PostMapping("/asr-channels/test")
+    public Result<Map<String, Object>> testAsrChannel(@RequestBody(required = false) AsrChannelTestRequest req) {
+        requireAdmin();
+        LibraryConfigService.AsrChannel channel = new LibraryConfigService.AsrChannel();
+        if (req != null && req.getId() != null) {
+            channel = configService.getAsrChannelById(req.getId());
+        } else if (req != null && req.getEndpoint() != null && !req.getEndpoint().isBlank()) {
+            channel.setEndpoint(req.getEndpoint());
+            channel.setApiKey(req.getApiKey() == null ? "" : req.getApiKey());
+            channel.setModel(req.getModel() == null ? "" : req.getModel());
+        } else {
+            throw new BusinessException(400, "请提供渠道信息");
+        }
+        Map<String, Object> data = asrService.testChannel(channel);
+        boolean ok = Boolean.TRUE.equals(data.get("ok"));
+        // Result 泛型仅用于载荷，成功/失败由 ok 字段表达，HTTP 层始终 200 以便前端展示明细
+        return Result.success(ok ? "转写链路连通" : null, data);
     }
 
     // 借阅规则

@@ -101,14 +101,39 @@ public class AiController {
      * confirm（写操作授权卡）/ batch_confirm（批量授权卡，batch 档位）/
      * rag（知识库参考资料，含 sourceNo 引用编号）/ thinking（深度思考思维链增量）/
      * delta（增量正文）/ final（消毒后最终正文替换）/ thought（工具轮决策旁白）/
-     * degrade（工具循环超限降级提示）/ done（"[DONE]"，本轮结束）/ error（错误消息）
+     * degrade（工具循环超限降级提示）/ done（"[DONE]"，本轮结束）/ error（错误消息）/
+     * followups（建议追问：done 后后台生成，JSON 字符串数组，最新回答下方的可点击 chips）
      * <p>
      * 以上事件与前端 SSE 解析逻辑一一对应，新增事件类型需同步前端处理。
      */
     @PostMapping(value = "/chat", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter chat(@Valid @RequestBody AiChatRequest req) {
         return aiService.chat(req.getConversationId(), req.getContent(),
-                Boolean.TRUE.equals(req.getContinuation()));
+                Boolean.TRUE.equals(req.getContinuation()), req.getBranchGroupKey());
+    }
+
+    /**
+     * A2：查询一轮对话的兄弟分支列表（编辑重发/重新生成的历史版本）。
+     * 消息无分组时现场补建（懒初始化），前端据此渲染分支导航 « 2/3 »。
+     */
+    @GetMapping("/message/{id}/branches")
+    public Result<Map<String, Object>> branchSiblings(@PathVariable Long id,
+                                                      @RequestParam Long conversationId) {
+        CurrentUser cu = CurrentUser.get();
+        return Result.success(aiService.branchSiblings(conversationId, cu.getUserId(), id));
+    }
+
+    /**
+     * A2：切换一轮对话的激活分支。目标分支的 user 消息与其 assistant 回复置为激活，
+     * 同组其余分支置为非激活；模型上下文与历史接口都按激活态过滤，切换即全局生效。
+     */
+    @PostMapping("/message/{id}/switch-branch")
+    public Result<Void> switchBranch(@PathVariable Long id,
+                                     @RequestParam Long conversationId,
+                                     @RequestParam String groupKey) {
+        CurrentUser cu = CurrentUser.get();
+        aiService.switchBranch(conversationId, cu.getUserId(), groupKey, id);
+        return Result.success("已切换", null);
     }
 
     /**

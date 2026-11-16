@@ -5,7 +5,7 @@ import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 
 /**
- * AI 对话请求
+ * A2：AI 对话请求（含分支上下文）。
  */
 @Data
 public class AiChatRequest {
@@ -25,4 +25,11 @@ public class AiChatRequest {
      * 且受续跑次数上限约束（防确认循环）。
      */
     private Boolean continuation;
+
+    /**
+     * A2：分支分组标识。编辑重发/重新生成产生的分支轮传入原轮的 group_key——
+     * 新轮的 user/assistant 消息落库到该组，与兄弟分支共用分支导航；
+     * 普通轮为 null（首轮，无分组）。
+     */
+    private String branchGroupKey;
 }

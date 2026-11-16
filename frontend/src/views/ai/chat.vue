@@ -61,9 +61,51 @@
               <span class="day-line"></span>
             </div>
 
-            <!-- 用户消息：右侧气泡（data-anchor 供对话锚点导航定位与判定） -->
+            <!-- 用户消息：右侧气泡（data-anchor 供对话锚点导航定位与判定）。
+                 A2：气泡上方分支导航（同轮有多个编辑重发版本时显示 « 2/3 »）；
+                 悬停气泡出现操作条（编辑重发 / 重新生成） -->
             <div v-if="m.role === 'user'" class="msg-row user" :data-anchor="String(m.id)">
-              <div class="user-bubble">{{ m.content }}</div>
+              <div class="user-col">
+                <div v-if="m.branchInfo && m.branchInfo.total > 1" class="branch-nav">
+                  <button
+                    class="branch-arrow"
+                    :disabled="m.branchInfo.index === 0"
+                    title="上一版本"
+                    @click="switchBranch(m, -1)"
+                  >‹</button>
+                  <span class="branch-pos">{{ m.branchInfo.index + 1 }}/{{ m.branchInfo.total }}</span>
+                  <button
+                    class="branch-arrow"
+                    :disabled="m.branchInfo.index === m.branchInfo.total - 1"
+                    title="下一版本"
+                    @click="switchBranch(m, 1)"
+                  >›</button>
+                </div>
+                <div class="user-bubble">{{ m.content }}</div>
+                <div class="user-actions">
+                  <button class="user-action" title="编辑后重新提问（产生新分支）" @click="startEditResend(m)">编辑</button>
+                  <button
+                    class="user-action"
+                    title="换一个回答（产生新分支）"
+                    :disabled="streamingMap.has(currentConvId)"
+                    @click="regenerate(m)"
+                  >重新生成</button>
+                </div>
+                <div v-if="m.editing" class="edit-box">
+                  <el-input
+                    v-model="m.editText"
+                    type="textarea"
+                    :rows="2"
+                    placeholder="编辑提问内容，发送后产生新分支"
+                  />
+                  <div class="edit-actions">
+                    <el-button size="small" @click="m.editing = false">取消</el-button>
+                    <el-button size="small" type="primary" :disabled="!m.editText?.trim()" @click="confirmEditResend(m)">
+                      发送新分支
+                    </el-button>
+                  </div>
+                </div>
+              </div>
             </div>
 
             <!-- 助手消息：左侧头像 + 空气化排版。
@@ -97,17 +139,30 @@
                   </transition>
                 </div>
 
-                <!-- M4：Agent 决策时间线
-                     把「思考旁白 → 工具调用 → 授权请求」按实际发生顺序串成一条链，
-                     让 Agent 的规划与自主决策过程可见（评审考察点：Agent 是否具备规划能力）。
-                     工具卡片沿用原有 pill 形态，thought 用左侧竖线旁白，confirm 用授权卡 -->
-                <div v-if="m.timeline && m.timeline.length" class="timeline">
-                  <!-- 多工具串联计数：调用 ≥ 2 个时显示链路概览 -->
-                  <div v-if="m.toolEvents.length >= 2" class="tool-chain-head">
-                    <el-icon class="chain-icon"><Connection /></el-icon>
-                    <span>本次共调用 {{ m.toolEvents.length }} 个工具</span>
-                  </div>
+                <!-- M4：Agent 决策时间线（harness 式折叠汇总）。
+                     把「思考旁白 → 工具调用 → 授权请求」按实际发生顺序串成一条链。
+                     结束态默认折叠为一行类别计数汇总（「已查询图书 · 已提交借阅 · 12.4s」），
+                     点击展开完整链路；运行态保持展开看实时进度。
+                     数据全量保留在 timeline 中，折叠只控制可见性 -->
+                <div v-if="m.timeline && m.timeline.length" class="timeline-wrap">
+                  <!-- 折叠汇总行：仅结束态（非 running）且有 ≥1 个工具节点时显示 -->
+                  <button
+                    v-if="!m._timelineRunning && m.toolEvents.length > 0"
+                    class="timeline-summary"
+                    :aria-expanded="m._timelineOpen || undefined"
+                    @click="m._timelineOpen = !m._timelineOpen"
+                  >
+                    <el-icon class="summary-icon"><Connection /></el-icon>
+                    <span class="summary-text">{{ timelineSummary(m) }}</span>
+                    <span v-if="m.reasoningSeconds != null" class="summary-time">{{ m.reasoningSeconds }}s</span>
+                    <AppIcon name="chevron-down" :size="12" class="summary-chevron" :class="{ open: m._timelineOpen }" />
+                  </button>
 
+                  <!-- 完整时间线：运行态恒显示；结束态受 _timelineOpen 控制 -->
+                  <div
+                    v-show="m._timelineRunning || !m.toolEvents.length || m._timelineOpen"
+                    class="timeline"
+                  >
                   <div v-for="(node, ni) in m.timeline" :key="ni" class="timeline-node" :class="node.kind">
                     <!-- 节点序号：左侧轴线上的圆点标记 -->
                     <span class="timeline-seq">{{ ni + 1 }}</span>
@@ -151,6 +206,7 @@
                       <el-icon><Lock /></el-icon>
                       <span>等待你的授权确认</span>
                     </div>
+                  </div>
                   </div>
                 </div>
 
@@ -369,6 +425,20 @@
 
                 <div class="msg-content markdown" v-html="m.html"></div>
 
+                <!-- 建议追问：最新回答下方的 ghost 灰字（仅本轮 done 后拉取的最新回答持有），
+                     点击直接作为新消息发送。流式期间/发送新消息后不显示 -->
+                <div v-if="m.followUps?.length && !m.pending" class="followup-chips">
+                  <button
+                    v-for="(s, i) in m.followUps"
+                    :key="i"
+                    class="followup-chip"
+                    type="button"
+                    @click="sendFollowUp(s)"
+                  >
+                    {{ s }}
+                  </button>
+                </div>
+
                 <!-- 降级提示：工具循环超限时的优雅收尾（非报错样式）。
                      说明已完成部分仍然有效，引导用户就未完成部分继续追问 -->
                 <div v-if="m.degraded" class="degrade-tip">
@@ -449,7 +519,7 @@
             自动执行中：写操作无需确认直接生效
           </span>
         </div>
-        <div class="composer-box" :class="{ active: input, blocked: hasPendingConfirm }">
+        <div class="composer-box" :class="{ active: input, blocked: hasPendingConfirm, 'has-mic': asrAvailable }">
           <el-input
             v-model="input"
             type="textarea"
@@ -459,6 +529,17 @@
             class="composer-input"
             @keydown.enter.exact.prevent="send"
           />
+          <!-- 语音输入：WebAudio 录 WAV → 后端中转云端 ASR（渠道见系统设置），未配置时隐藏 -->
+          <button
+            v-if="asrAvailable"
+            class="composer-btn mic"
+            :class="{ recording: asrRecording }"
+            :disabled="asrTranscribing"
+            :title="asrTranscribing ? '正在转写…' : asrRecording ? `停止并转写（${asrRecordingSec}s）` : '语音输入'"
+            @click="toggleVoiceInput"
+          >
+            <el-icon><Loading v-if="asrTranscribing" class="is-loading" /><Microphone v-else /></el-icon>
+          </button>
           <button
             class="composer-btn"
             :class="currentStreaming ? 'stop' : 'send'"
@@ -472,6 +553,10 @@
           <el-icon><Lock /></el-icon>
           授权请求等待处理中：全部确认或取消后才能继续对话
         </p>
+        <p v-else-if="asrRecording" class="composer-tip asr-tip">
+          <el-icon><Microphone /></el-icon>
+          正在录音 {{ asrRecordingSec }}s，再次点击麦克风结束并转写，最长 120 秒
+        </p>
         <p v-else class="composer-tip">AI 助手基于馆藏数据回答，内容仅供参考。</p>
       </div>
     </main>
@@ -483,39 +568,21 @@ import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount, onActiva
 import {
   Plus, ChatDotRound, MagicStick, Promotion, Delete,
   VideoPause, Loading, Check, Close, ArrowDownBold, ArrowUpBold, Connection,
-  Lock, Warning, DataBoard,
+  Lock, Warning, DataBoard, Microphone,
 } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import MarkdownIt from 'markdown-it'
-import hljs from 'highlight.js'
-import 'highlight.js/styles/github.css'
-import { aiApi } from '@/api'
+import { aiApi, asrApi } from '@/api'
 import { useUserStore } from '@/stores/user'
 import ConversationNav from '@/components/ConversationNav.vue'
 import AppIcon from '@/components/AppIcon.vue'
 import AiGenUi from '@/components/ai/AiGenUi.vue'
 import { createStreamRenderer } from '@/utils/streamRender'
+import { renderMarkdown, renderMarkdownStream, handleCodeCopyClick } from '@/utils/markdown'
 import { classifyAiError, describeWithAction, withRetry, AiErrorKind } from '@/utils/aiErrors'
+import { MicRecorder } from '@/utils/recorder'
 
 // keep-alive 缓存名单按路由 name 匹配，故显式声明组件名
 defineOptions({ name: 'AIChat' })
-
-// 初始化 Markdown 渲染器：启用代码高亮、链接安全属性
-const md = new MarkdownIt({
-  html: false,        // 不允许内嵌 HTML（防止 XSS）
-  breaks: true,       // 单换行转 <br>
-  linkify: true,      // 自动识别链接
-  highlight(code, lang) {
-    if (lang && hljs.getLanguage(lang)) {
-      try {
-        return `<pre class="hljs"><code>${hljs.highlight(code, { language: lang, ignoreIllegals: true }).value}</code></pre>`
-      } catch {
-        // fallthrough
-      }
-    }
-    return `<pre class="hljs"><code>${md.utils.escapeHtml(code)}</code></pre>`
-  },
-})
 
 // 工具名称中文映射
 const TOOL_LABELS = {
@@ -610,6 +677,45 @@ const inlineGenCards = (m) =>
 const genCardTitle = (card) =>
   GEN_CARD_TITLES[card._genType] || '数据卡片'
 
+// —— M4 时间线折叠汇总（harness 式：结束后折叠为类别计数一行）——
+
+/** 工具名 → 类别标签（计数汇总用；比 TOOL_LABELS 更粗粒度，同类合并） */
+const TOOL_KINDS = {
+  queryCategories: '查询分类',
+  queryBooks: '查询图书',
+  queryHotBooks: '查询排行',
+  queryAnnouncements: '查询公告',
+  queryMyBorrows: '查询借阅',
+  queryMyFines: '查询罚款',
+  queryBorrowQuota: '查询额度',
+  queryMyNotifications: '查询通知',
+  applyBorrow: '提交借阅',
+  renewMyBorrow: '办理续借',
+  requestReturn: '办理归还',
+  adminQueryBorrows: '查询借阅',
+  adminQueryFines: '查询罚款',
+  adminQueryUsers: '查询读者',
+  adminQueryStats: '统计概览',
+  adminCounterProcess: '柜台办理',
+}
+const toolKind = (name) => TOOL_KINDS[name] || toolLabel(name)
+
+/**
+ * 结束态时间线的折叠汇总标题：按工具类别计数排名（前 3），
+ * 形如「查询图书 ×2 · 提交借阅 ×1 · 柜台办理 ×1」。零工具时回退「已完成处理」。
+ */
+const timelineSummary = (m) => {
+  const counts = new Map()
+  for (const t of m.toolEvents || []) {
+    if (t.phase !== 'end') continue
+    const kind = toolKind(t.name)
+    counts.set(kind, (counts.get(kind) || 0) + 1)
+  }
+  if (!counts.size) return '已完成处理'
+  const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3)
+  return ranked.map(([kind, n]) => (n > 1 ? `${kind} ×${n}` : kind)).join(' · ')
+}
+
 /** 快照时点展示（历史卡片角标）：今天显示时分，更早显示 月-日 时:分 */
 const formatSnapTime = (t) => {
   if (!t) return '历史'
@@ -662,42 +768,11 @@ const scrollToFirstGenCard = async (msg) => {
 }
 
 /**
- * A4：[资料 N] 引用角标渲染。
- * 把回答正文中的「[资料 N]」替换为内联角标（圆角小方块、主色、可点击），
- * 点击角标展开/收起正文上方参考资料条中对应的片段摘要（与药丸共用 ragOpenIndex）。
- * <p>
- * 实现约束：正文经 v-html 渲染，角标不能用 Vue 事件绑定——改为在角标上
- * 标 data-src 属性，由气泡容器的事件委托（handleCitationClick）统一处理。
- * 编号不存在（模型编造）时不渲染角标、原样保留文本，避免误导。
- *
- * @param {string} html  md.render 后的正文 HTML
- * @param {Array} sources 本轮 ragSources（[{sourceNo, docTitle, snippet}]）
+ * 角标 / 代码块复制按钮点击（事件委托，v-html 内容无法直接绑事件）：
+ * 先处理复制按钮（命中则结束），再处理引用角标——展开/收起对应编号的片段摘要
  */
-const CITE_RE = /\[资料\s*(\d+)\]/g
-const renderCitations = (html, sources) => {
-  if (!html || !sources || !sources.length) return html
-  const valid = new Set(sources.map((s) => s.sourceNo))
-  return html.replace(CITE_RE, (match, num) => {
-    const n = Number(num)
-    if (!valid.has(n)) return match
-    return (
-      `<sup class="cite-badge" data-src="${n}" title="查看资料 ${n}：${sources.find((s) => s.sourceNo === n)?.docTitle || ''}">` +
-      `${n}</sup>`
-    )
-  })
-}
-
-const renderMarkdown = (content, sources) => {
-  if (!content) return ''
-  try {
-    return renderCitations(md.render(content), sources)
-  } catch {
-    return md.utils.escapeHtml(content)
-  }
-}
-
-/** 角标点击（事件委托）：展开/收起对应编号的片段摘要 */
 const handleCitationClick = (m, e) => {
+  if (handleCodeCopyClick(e)) return
   const badge = e.target.closest('.cite-badge')
   if (!badge) return
   const n = Number(badge.dataset.src)
@@ -714,6 +789,7 @@ const handleCitationClick = (m, e) => {
 // 历史/分页消息映射：预渲染 Markdown 为 html 缓存，避免模板内反复重渲染
 const enrichMsg = (m) => ({
   ...m,
+  _fromHistory: true, // A2：历史消息标志——分支导航/编辑重发只对服务端已落库的消息开放
   html: renderMarkdown(m.content),
   // 工具快照落库后历史消息可重建内联生成式卡片；快照是查询时点数据，历史卡片带时点角标
   toolEvents: parseStoredSnapshots(m.toolSnapshots),
@@ -728,7 +804,93 @@ const enrichMsg = (m) => ({
   ragOpenIndex: -1,
   // M4：thought 旁白不落库（与思维链一致），历史消息无时间线
   timeline: [],
+  // A2：分支状态占位（branchInfo 由 loadBranchInfo 异步填充；本地流式消息无此字段）
+  branchInfo: null,
 })
+
+// —— A2 消息分支 ——
+
+/** 拉取一轮的兄弟分支并写入消息的 branchInfo（含在兄弟列表中的位置）。仅历史消息有真实 id */
+const loadBranchInfo = async (m) => {
+  if (!m || m.role !== 'user' || !m._fromHistory) return
+  try {
+    const res = await aiApi.branchSiblings(currentConvId.value, m.id)
+    const list = res?.list || []
+    if (!list.length) return
+    const idx = list.findIndex((s) => s.id === m.id)
+    m.branchInfo = {
+      groupKey: res.groupKey,
+      total: list.length,
+      index: idx >= 0 ? idx : 0,
+    }
+  } catch {
+    // 分支查询失败静默：导航不显示，不影响对话
+  }
+}
+
+/** 切换分支：切到当前消息的相邻兄弟版本（delta = -1 上一版 / 1 下一版），服务端重设激活链后重拉历史 */
+const switchBranch = async (m, delta) => {
+  if (!m.branchInfo || currentConvId.value === null) return
+  try {
+    const res = await aiApi.branchSiblings(currentConvId.value, m.id)
+    const list = res?.list || []
+    const idx = list.findIndex((s) => s.id === m.id)
+    const target = list[idx + delta]
+    if (!target) return
+    await aiApi.switchBranch(currentConvId.value, target.id, m.branchInfo.groupKey)
+    // 激活链已变：清缓存重拉（convStates 里该会话的快照已过期）
+    const st = stateOf(currentConvId.value)
+    st.messages = []
+    st.totalMessages = 0
+    await switchConv(currentConvId.value)
+  } catch (e) {
+    ElMessage.error(e?.message || '分支切换失败')
+  }
+}
+
+/** 编辑重发：展开编辑框（不覆盖原消息，发送后产生新分支） */
+const startEditResend = (m) => {
+  m.editing = true
+  m.editText = m.content
+}
+
+/** 确认编辑重发：以原消息的分支组发起新分支轮 */
+const confirmEditResend = async (m) => {
+  const content = m.editText?.trim()
+  if (!content || currentConvId.value === null) return
+  m.editing = false
+  // 分支组可能尚未建立（历史首轮无 group_key）：先查一次触发服务端懒初始化
+  let groupKey = m.branchInfo?.groupKey
+  if (!groupKey) {
+    try {
+      const res = await aiApi.branchSiblings(currentConvId.value, m.id)
+      groupKey = res?.groupKey
+    } catch { /* 拿不到组则按普通消息发送 */ }
+  }
+  m.branchInfo = null // 落库后重拉，先清掉避免过期的 index/total
+  await sendInternal(content, { continuation: false, branchGroupKey: groupKey || undefined })
+}
+
+/** 重新生成：同一提问换一个回答（新分支），仅历史消息可用（流式中的消息 id 是本地临时 id） */
+const regenerate = async (m) => {
+  if (currentConvId.value === null) return
+  // 找到本轮的 user 消息（助手消息向前找最近的 user）
+  const idx = messages.value.indexOf(m)
+  let userMsg = null
+  for (let i = Math.max(idx, 0); i >= 0; i--) {
+    if (messages.value[i].role === 'user') { userMsg = messages.value[i]; break }
+  }
+  if (!userMsg || !userMsg._fromHistory) return
+  let groupKey = userMsg.branchInfo?.groupKey
+  if (!groupKey) {
+    try {
+      const res = await aiApi.branchSiblings(currentConvId.value, userMsg.id)
+      groupKey = res?.groupKey
+      if (userMsg.branchInfo) userMsg.branchInfo.groupKey = groupKey
+    } catch { /* 拿不到组则按普通轮重发 */ }
+  }
+  await sendInternal(userMsg.content, { continuation: false, branchGroupKey: groupKey || undefined })
+}
 
 /**
  * M9：从快照通道解析授权卡决策记录为只读历史卡片。
@@ -1011,6 +1173,8 @@ const switchConv = async (id) => {
     st.totalMessages = data.total || page.length
     st.oldestLoadedId = page.length ? page[0].id : null
     st.hasMore = st.loadedCount < st.totalMessages
+    // A2：为可见 user 消息拉取分支导航（有兄弟版本才显示 « 2/3 »）；逐条异步不阻塞渲染
+    page.filter((mm) => mm.role === 'user').forEach((mm) => loadBranchInfo(mm))
   } catch (e) {
     const st = stateOf(id)
     st.messages = []
@@ -1398,6 +1562,24 @@ const send = async () => {
   await sendInternal(content, { continuation: false })
 }
 
+/** 建议追问 chips 点击：把追问文本直接作为新消息发送（沿用排队机制，流未结束时入队） */
+const sendFollowUp = async (text) => {
+  const content = (text || '').trim()
+  if (!content) return
+  if (hasPendingConfirm.value) {
+    ElMessage.warning('请先处理上方待确认的授权请求（确认或取消）后再继续对话')
+    return
+  }
+  const convId = currentConvId.value
+  if (convId !== null && streamingMap.has(convId)) {
+    pendingQueue.push({ convId, content })
+    await nextTick()
+    scrollToBottom()
+    return
+  }
+  await sendInternal(content, { continuation: false })
+}
+
 /** 排队出口：当前会话流结束后按 FIFO 发出其排队消息（一次一条，发出后若流又占线则继续排队） */
 const flushQueue = async (convId) => {
   const idx = pendingQueue.findIndex((q) => q.convId === convId)
@@ -1439,7 +1621,7 @@ const maybeContinueAfterAllResolved = (msg, toolSummary, convId) => {
   continueAfterConfirm(`${toolSummary}；本轮授权共 ${cards.length} 项：成功 ${ok} 项，跳过 ${skipped} 项`, { convId })
 }
 
-const sendInternal = async (content, { continuation, convId: explicitConvId }) => {
+const sendInternal = async (content, { continuation, convId: explicitConvId, branchGroupKey }) => {
   // 多会话并行：目标会话由显式 convId 决定（排队 flush / 授权续跑各自的会话），
   // 未显式给出时用当前会话；目标会话与当前视图解耦，切换不影响已发起的流
   let convId = explicitConvId ?? currentConvId.value
@@ -1460,10 +1642,15 @@ const sendInternal = async (content, { continuation, convId: explicitConvId }) =
     }
   }
   const st = stateOf(convId)
+  // 建议追问「仅最新回答」：发新消息即清除全部旧 chips
+  for (const m of st.messages) {
+    if (m.followUps) m.followUps = null
+  }
   const conv = conversations.value.find((c) => c.id === convId)
   const isFirstMsg = !conv || conv.title === '新对话' || !conv.title
 
-  // 推送用户消息（续跑轮引导语不显示用户气泡，避免伪造用户发言）
+  // 推送用户消息（续跑轮引导语不显示用户气泡，避免伪造用户发言）。
+  // A2：本地临时消息不带 _fromHistory——分支操作仅对服务端已落库的历史消息开放
   if (!continuation) {
     st.messages.push({
       id: Date.now(),
@@ -1530,6 +1717,9 @@ const sendInternal = async (content, { continuation, convId: explicitConvId }) =
     batchConfirmCard: null,
     // M4：Agent 决策时间线（thought 旁白节点），与工具卡片交替构成决策链视图
     timeline: [],
+    // M4 折叠汇总：运行态恒展开显示实时进度；done/error 后置 false → 折叠为计数汇总行
+    _timelineRunning: true,
+    _timelineOpen: false,
     createTime: new Date().toISOString(),
   })
   st.messages.push(assistantMsg)
@@ -1555,7 +1745,13 @@ const sendInternal = async (content, { continuation, convId: explicitConvId }) =
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ conversationId: convId, content, continuation }),
+      body: JSON.stringify({
+        conversationId: convId,
+        content,
+        continuation,
+        // A2：分支轮携带原轮分组标识（新消息落库到同组，前端分支导航聚合）
+        branchGroupKey: branchGroupKey || undefined,
+      }),
       signal: abortController.signal,
     })
 
@@ -1627,8 +1823,11 @@ const sendInternal = async (content, { continuation, convId: explicitConvId }) =
         msg.pending = false
         if (data) {
           if (!msg._reasonSegOpen) {
-            // 上一段思维链已被工具调用/正文截断 → 新开一段（多轮工具调用场景）
-            msg.reasoningSegments.push('')
+            // 上一段思维链已被工具调用/正文截断 → 新开一段（多轮工具调用场景）。
+            // 首段同理：首个思考增量才建段（harness 同款——空白流式尾巴不产生行）
+            if (msg.reasoningSegments.length === 0 || String(msg.reasoningSegments[msg.reasoningSegments.length - 1]).trim() !== '') {
+              msg.reasoningSegments.push('')
+            }
             msg._reasonSegOpen = true
           }
           if (!msg.reasoningStreaming) {
@@ -1671,25 +1870,28 @@ const sendInternal = async (content, { continuation, convId: explicitConvId }) =
       } else if (event === 'delta') {
         const msg = ensureAssistantMsg()
         msg.pending = false
-        // 正文开始：思维链阶段结束，停止耗时并自动折叠面板（DeepSeek 式交互）
+        // 正文开始：思维链阶段结束，停止耗时计时。
+        // 面板折叠交还用户手动控制（对齐 harness：数据全量、开合由读者决定）——
+        // 原实现在首个正文增量即自动折叠，模型边想边说时面板刚展开就被收起
         stopReasonTimer(msg)
         msg._reasonSegOpen = false
         msg.reasoningStreaming = false
-        msg.reasoningOpen = false
         msg.content += data
-        // A1：delta 高频到达，渲染走自适应节流（正文长时自动放宽间隔），done/final 时 flush 补尾
+        // A1：delta 高频到达，渲染走自适应节流（正文长时自动放宽间隔），done/final 时 flush 补尾。
+        // 流式渲染前先补齐未闭合语法（裸 ** / 裸 ` / 未闭合围栏），终态用原始全文重渲染
         streamRenderer?.schedule(() => {
-          msg.html = renderMarkdown(msg.content, msg.ragSources)
+          msg.html = renderMarkdownStream(msg.content, msg.ragSources)
           scrollToBottomIfCurrent()
         })
       } else if (event === 'reset') {
         // 进入工具调用轮：清空工具调用前的过渡文本（正文只保留最终回答，
-        // 工具调用过程由工具卡片承载）；本段思维链结束，停止耗时并折叠面板
+        // 工具调用过程由工具卡片承载）；本段思维链结束，停止耗时。
+        // 面板保持当前开合状态——工具调用后模型通常会再思考，新一轮 thinking
+        // 事件会续写展开（原实现强制折叠，多轮工具场景面板反复开合跳变）
         const msg = ensureAssistantMsg()
         stopReasonTimer(msg)
         msg._reasonSegOpen = false
         msg.reasoningStreaming = false
-        msg.reasoningOpen = false
         msg.content = ''
         msg.html = ''
       } else if (event === 'final') {
@@ -1783,7 +1985,8 @@ const sendInternal = async (content, { continuation, convId: explicitConvId }) =
           stopReasonTimer(assistantMsg)
           assistantMsg._reasonSegOpen = false
           assistantMsg.reasoningStreaming = false
-          assistantMsg.reasoningOpen = false
+          // M4 折叠汇总：流正常结束，时间线切换为折叠态（汇总行 + 可手动展开）
+          assistantMsg._timelineRunning = false
         }
         // 流结束滚动定位：本轮有内联生成式卡片时滚到本轮第一张卡片，否则维持滚底
         if (convId === currentConvId.value) {
@@ -1793,6 +1996,31 @@ const sendInternal = async (content, { continuation, convId: explicitConvId }) =
         }
         if (isFirstMsg && conv) {
           conv.title = content.length > 20 ? content.substring(0, 20) + '…' : content
+        }
+        // A2：本轮流结束（消息已落库），为本轮 user 消息拉取分支导航——
+        // 分支轮（编辑重发/重新生成）落库后同组出现新兄弟，导航立即更新。
+        // done 事件回传本轮 user 消息的真实落库 id：本地推送的是 Date.now()
+        // 临时 id，不回传真实 id 的话分支查询/编辑重发必 404
+        try {
+          const doneInfo = JSON.parse(data)
+          if (doneInfo?.userMessageId) {
+            const localUserMsg = !continuation ? st.messages[st.messages.length - 2] : null
+            if (localUserMsg && localUserMsg.role === 'user') {
+              localUserMsg.id = doneInfo.userMessageId
+              localUserMsg._fromHistory = true
+              loadBranchInfo(localUserMsg)
+            }
+          }
+        } catch { /* 兼容旧格式 [DONE]：无分支导航，不影响对话 */ }
+      } else if (event === 'followups') {
+        // 建议追问（方案 A）：后端 done 后后台生成，经同一 SSE 推送（JSON 字符串数组）。
+        // 挂到本轮助手消息上渲染 chips；仅最新回答显示——若用户已发出新消息
+        // （该消息不再是末条），丢弃本事件，避免旧 chips 复活
+        if (assistantMsg && st.messages[st.messages.length - 1] === assistantMsg) {
+          try {
+            const list = JSON.parse(data)
+            if (Array.isArray(list) && list.length) assistantMsg.followUps = list
+          } catch { /* 解析失败忽略 */ }
         }
       } else if (event === 'confirm') {
         // 写操作授权请求：模型发起写操作被门禁拦截，改为向用户请求授权。
@@ -1875,7 +2103,6 @@ const sendInternal = async (content, { continuation, convId: explicitConvId }) =
         stopReasonTimer(msg)
         msg._reasonSegOpen = false
         msg.reasoningStreaming = false
-        msg.reasoningOpen = false
         try {
           const info = JSON.parse(data)
           msg.degraded = true
@@ -1900,7 +2127,6 @@ const sendInternal = async (content, { continuation, convId: explicitConvId }) =
         stopReasonTimer(msg)
         msg._reasonSegOpen = false
         msg.reasoningStreaming = false
-        msg.reasoningOpen = false
         // 已有正文时保留原内容，错误说明追加其后（避免中途出错抹掉已流出的回答）
         const errTip = `⚠️ ${data || 'AI 请求出错'}`
         msg.content = msg.content ? `${msg.content}\n\n${errTip}` : errTip
@@ -1969,6 +2195,8 @@ const sendInternal = async (content, { continuation, convId: explicitConvId }) =
       stopReasonTimer(assistantMsg)
       assistantMsg._reasonSegOpen = false
       assistantMsg.reasoningStreaming = false
+      // M4 折叠汇总兜底：error/中断/停止路径也要结束运行态（done 之外的退出都走这里）
+      assistantMsg._timelineRunning = false
     }
     // 排队出口：本会话还有排队消息时自动发出下一条（排队模型的闭环）
     flushQueue(convId)
@@ -2043,7 +2271,97 @@ const syncFromPanel = async () => {
 
 onActivated(syncFromPanel)
 
-onMounted(loadConversations)
+/* ==================== 语音输入（ASR）====================
+ * WebAudio 录 16kHz 单声道 WAV → 上传后端中转云端转写（渠道配置在系统设置）。
+ * 录音中再次点击结束并转写；达 120s 上限自动停止转写（服务端同限校验，取
+ * DeepSeek ASR 最严标准）。文本回填输入框可编辑后再发送，不直接触发发送。
+ */
+const ASR_MAX_MS = 120000
+const asrAvailable = ref(false)
+const asrRecording = ref(false)
+const asrTranscribing = ref(false)
+const asrRecordingSec = ref(0)
+let micRecorder = null
+let asrTickTimer = null
+
+/** 麦克风按钮显隐由后端渠道配置决定；获取失败仅隐藏按钮，不阻塞聊天 */
+const checkAsrStatus = async () => {
+  try {
+    const data = await asrApi.status()
+    asrAvailable.value = !!data.available
+  } catch {
+    asrAvailable.value = false
+  }
+}
+
+const stopAsrTick = () => {
+  clearInterval(asrTickTimer)
+  asrTickTimer = null
+}
+
+/** 录音收尾：上传转写并把文本回填输入框（已有草稿时追加，不覆盖） */
+const finishAsr = async (result) => {
+  stopAsrTick()
+  asrRecording.value = false
+  micRecorder = null
+  if (!result) return
+  const { blob, durationMs } = result
+  if (durationMs < 600) {
+    ElMessage.warning('录音时间太短，请点击后正常说话')
+    return
+  }
+  asrTranscribing.value = true
+  try {
+    // 不传 language：DeepSeek 自动识别语种，其 API 未定义 language 字段，
+    // 多余表单字段有被上游 400 拒绝的风险；OpenAI 兼容端点同样支持自动识别
+    const data = await asrApi.transcribe(new File([blob], 'speech.wav', { type: 'audio/wav' }))
+    const text = (data.text || '').trim()
+    if (!text) {
+      ElMessage.info('未识别到语音内容，请再试一次')
+      return
+    }
+    input.value = input.value ? `${input.value} ${text}` : text
+  } catch {
+    // 错误已由拦截器提示（渠道未配置/超时/超限等）
+  } finally {
+    asrTranscribing.value = false
+  }
+}
+
+const toggleVoiceInput = async () => {
+  if (asrTranscribing.value) return
+  if (asrRecording.value) {
+    const result = await micRecorder?.stop()
+    await finishAsr(result)
+    return
+  }
+  micRecorder = new MicRecorder({
+    maxDurationMs: ASR_MAX_MS,
+    onMaxDuration: (result) => {
+      ElMessage.info('已达 120 秒录音上限，自动开始转写')
+      finishAsr(result)
+    },
+  })
+  try {
+    await micRecorder.start()
+    asrRecording.value = true
+    asrRecordingSec.value = 0
+    asrTickTimer = setInterval(() => { asrRecordingSec.value++ }, 1000)
+  } catch (e) {
+    micRecorder = null
+    ElMessage.error(e?.message || '麦克风启动失败')
+  }
+}
+
+onBeforeUnmount(() => {
+  stopAsrTick()
+  micRecorder?.cancel()
+})
+
+onMounted(() => {
+  loadConversations()
+  checkAsrStatus()
+})
 </script>
 
 <style scoped>
@@ -2298,8 +2616,75 @@ onMounted(loadConversations)
 .msg-row.user {
   justify-content: flex-end;
 }
-.user-bubble {
+/* A2：用户消息右列——分支导航 / 气泡 / 操作条纵向排列。
+   宽度封顶在列上：列的百分比相对 .msg-inner（860px 容器）解析，
+   若封顶写在气泡上，气泡的百分比会相对「内容宽度即列宽」的父列
+   解析，形成自引用——短消息被截到自身宽度的 78% 提前折行 */
+.user-col {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
   max-width: 78%;
+}
+/* 分支导航：« 2/3 » 版本切换（chat-demo 同款交互） */
+.branch-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-caption);
+  color: var(--color-text-tertiary);
+}
+.branch-arrow {
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  transition: all var(--duration-fast) var(--ease-soft);
+}
+.branch-arrow:hover:not(:disabled) {
+  background: var(--color-bg-subtle);
+  color: var(--color-primary);
+}
+.branch-arrow:disabled { opacity: 0.3; cursor: default; }
+.branch-pos { font-family: var(--font-mono); min-width: 28px; text-align: center; }
+/* 悬停操作条：编辑 / 重新生成（默认隐藏，悬停气泡列时浮现） */
+.user-actions {
+  display: flex;
+  gap: 10px;
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-soft);
+}
+.msg-row.user:hover .user-actions { opacity: 1; }
+.user-action {
+  border: none;
+  background: transparent;
+  color: var(--color-text-tertiary);
+  font-size: var(--fs-caption);
+  cursor: pointer;
+  padding: 2px 0;
+  transition: color var(--duration-fast) var(--ease-soft);
+}
+.user-action:hover:not(:disabled) { color: var(--color-primary); }
+.user-action:disabled { opacity: 0.4; cursor: default; }
+/* 编辑框：就地展开在气泡下方（右对齐） */
+.edit-box {
+  width: min(480px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.user-bubble {
+  max-width: 100%;
   background: var(--color-primary);
   color: var(--color-text-inverse);
   padding: var(--space-3) var(--space-4);
@@ -2449,11 +2834,10 @@ onMounted(loadConversations)
   40% { transform: scale(1.15); opacity: 1; }
 }
 
-/* 思维链正文：小号次级文字，限高内滚，避免超长推理撑爆对话区 */
+/* 思维链正文：小号次级文字。不限高——开合由用户控制（对齐 harness 数据全量原则），
+   限高会把长思考藏进内滚小窗，「显示不全」的观感正源于此 */
 .reason-body {
   padding: 0 12px 10px 38px;
-  max-height: 240px;
-  overflow-y: auto;
   font-size: var(--fs-caption);
   line-height: 1.75;
   color: var(--color-text-secondary);
@@ -2683,35 +3067,6 @@ onMounted(loadConversations)
   word-break: break-word;
 }
 
-/* —— A4：正文引用角标 ——
-   [资料 N] 渲染为内联小方块角标：主色描边、纸色底，点击展开对应片段摘要。
-   与参考资料药丸共用视觉语言（虚线描边 → 激活实线主色），不新增颜色 */
-.markdown .cite-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 18px;
-  height: 18px;
-  margin: 0 3px;
-  padding: 0 5px;
-  border-radius: var(--radius-pill);
-  border: 1px dashed var(--color-primary);
-  background: var(--color-primary-light);
-  color: var(--color-primary);
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 1;
-  vertical-align: super;
-  cursor: pointer;
-  user-select: none;
-  transition: all var(--duration-fast) var(--ease-soft);
-}
-.markdown .cite-badge:hover {
-  border-style: solid;
-  background: var(--color-primary);
-  color: #fff;
-}
-
 /* —— M4：Agent 决策时间线 ——
    左侧一条竖轴串起「思考旁白 → 工具调用 → 授权请求」，
    轴线用项目的主色淡化版，节点圆点实心，形成清晰的步骤感 */
@@ -2808,6 +3163,39 @@ onMounted(loadConversations)
   margin-bottom: 2px;
 }
 .chain-icon { font-size: 12px; }
+
+/* M4 折叠汇总行：结束态的时间线入口（harness 式类别计数标题） */
+.timeline-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  align-self: flex-start;
+  border: 1px dashed var(--color-border);
+  background: var(--color-bg-subtle);
+  border-radius: var(--radius-pill);
+  padding: 5px 12px;
+  font-size: var(--fs-caption);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  margin-bottom: var(--space-2);
+  transition: all var(--duration-fast) var(--ease-soft);
+}
+.timeline-summary:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  background: var(--color-primary-light);
+}
+.timeline-summary .summary-icon { font-size: 13px; }
+.timeline-summary .summary-time {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+}
+.timeline-summary .summary-chevron {
+  transition: transform var(--duration-fast) var(--ease-soft);
+  color: var(--color-text-tertiary);
+}
+.timeline-summary .summary-chevron.open { transform: rotate(180deg); }
 
 /* tool-card 是容器，不再承载 pill 样式；负责纵向堆叠 head + data */
 .tool-card {
@@ -2975,62 +3363,7 @@ onMounted(loadConversations)
   transform: translateY(-4px) scaleY(0.96);
 }
 
-/* Markdown 排版 */
-.msg-content.markdown :deep(p) { margin: 0 0 var(--space-2); }
-.msg-content.markdown :deep(p:last-child) { margin-bottom: 0; }
-.msg-content.markdown :deep(h1),
-.msg-content.markdown :deep(h2),
-.msg-content.markdown :deep(h3),
-.msg-content.markdown :deep(h4) {
-  margin: var(--space-3) 0 var(--space-2);
-  font-weight: 600;
-  line-height: 1.4;
-  font-family: var(--font-serif);
-}
-.msg-content.markdown :deep(h1) { font-size: 1.35em; }
-.msg-content.markdown :deep(h2) { font-size: 1.2em; }
-.msg-content.markdown :deep(h3) { font-size: 1.08em; }
-.msg-content.markdown :deep(ul),
-.msg-content.markdown :deep(ol) { margin: var(--space-2) 0; padding-left: 1.5em; }
-.msg-content.markdown :deep(li) { margin: 4px 0; }
-.msg-content.markdown :deep(code) {
-  background: var(--color-bg-muted);
-  padding: 2px 6px;
-  border-radius: var(--radius-sm);
-  font-family: var(--font-mono);
-  font-size: 0.88em;
-}
-.msg-content.markdown :deep(pre) {
-  background: var(--color-bg-subtle);
-  border: 1px solid var(--color-border);
-  padding: var(--space-3);
-  border-radius: var(--radius-md);
-  overflow-x: auto;
-  margin: var(--space-2) 0;
-}
-.msg-content.markdown :deep(pre code) { background: transparent; padding: 0; font-size: 0.85em; line-height: 1.5; }
-.msg-content.markdown :deep(table) {
-  border-collapse: collapse;
-  margin: var(--space-2) 0;
-  width: 100%;
-  font-size: var(--fs-small);
-}
-.msg-content.markdown :deep(th),
-.msg-content.markdown :deep(td) {
-  border: 1px solid var(--color-border);
-  padding: 6px 12px;
-  text-align: left;
-}
-.msg-content.markdown :deep(th) { background: var(--color-bg-subtle); font-weight: 600; }
-.msg-content.markdown :deep(blockquote) {
-  border-left: 3px solid var(--color-primary);
-  padding-left: var(--space-3);
-  margin: var(--space-2) 0;
-  color: var(--color-text-secondary);
-}
-.msg-content.markdown :deep(a) { color: var(--color-primary); text-decoration: none; }
-.msg-content.markdown :deep(a:hover) { text-decoration: underline; }
-.msg-content.markdown :deep(strong) { font-weight: 600; color: var(--color-text); }
+/* Markdown 排版已抽至 styles/ai-markdown.css（utils/markdown.js 导入生效，chat 页与悬浮球共用） */
 
 /* 「回到最新」浮动按钮 */
 .jump-latest {
@@ -3234,6 +3567,24 @@ onMounted(loadConversations)
   color: #fff;
 }
 .composer-btn.stop:hover { transform: scale(1.05); }
+/* 语音输入麦克风：位于发送按钮左侧；录音中红色呼吸提示；转写中转圈禁点 */
+.composer-btn.mic {
+  right: 56px;
+  background: var(--color-bg-subtle, #f5f5f5);
+  color: var(--color-text-secondary);
+}
+.composer-btn.mic:hover { color: var(--color-primary); }
+.composer-btn.mic.recording {
+  background: var(--color-danger);
+  color: #fff;
+  animation: asr-pulse 1.2s ease-in-out infinite;
+}
+@keyframes asr-pulse { 50% { opacity: 0.7; } }
+/* 有麦克风按钮时输入文本多让出一格，避免文字压在按钮下 */
+.composer-box.has-mic .composer-input :deep(.el-textarea__inner) {
+  padding-right: 100px;
+}
+.asr-tip { color: var(--color-danger); }
 .composer-tip {
   text-align: center;
   font-size: var(--fs-caption);
@@ -3257,6 +3608,6 @@ onMounted(loadConversations)
   .conv-side { display: none; }
   .msg-inner { padding: var(--space-4) var(--space-3) 0; }
   .composer { padding: var(--space-2) var(--space-3) var(--space-3); }
-  .user-bubble { max-width: 88%; }
+  .user-col { max-width: 88%; }
 }
 </style>

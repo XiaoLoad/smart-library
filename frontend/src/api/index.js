@@ -107,6 +107,23 @@ export const aiApi = {
   setPermissionMode: (id, mode) => post(`/ai/conversation/${id}/permission-mode?mode=${encodeURIComponent(mode)}`),
   // M10 会话待确认授权请求（对齐 ZCode pendingInteractions）：刷新/切页回来恢复等待确认的卡
   pendingInteractions: (id) => get(`/ai/conversation/${id}/pending`),
+  // A2 消息分支：查询一轮对话的兄弟分支（编辑重发/重新生成的历史版本）；切换激活分支
+  branchSiblings: (conversationId, messageId) => get(`/ai/message/${messageId}/branches`, { conversationId }),
+  switchBranch: (conversationId, messageId, groupKey) =>
+    post(`/ai/message/${messageId}/switch-branch?conversationId=${conversationId}&groupKey=${encodeURIComponent(groupKey)}`),
+}
+
+// AI 语音输入（ASR）：录音上传转写，服务端中转云端渠道，Key 不下发前端
+export const asrApi = {
+  // 是否存在启用中的转写渠道（控制麦克风按钮显示）
+  status: () => get('/ai/asr/status'),
+  // 上传 WAV 录音转文字；放宽超时覆盖 120s 长音频 + 上游转写耗时
+  transcribe: (file, language) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    if (language) fd.append('language', language)
+    return service.request({ method: 'post', url: '/ai/asr/transcribe', data: fd, timeout: 45000 })
+  },
 }
 
 // M6a：Agent 运行轨迹（管理员）
@@ -151,6 +168,15 @@ export const systemApi = {
   deleteChannel: (data) => post('/system/ai-channels/delete', data),
   // 测试连通性并拉取模型列表（传 id 测已保存渠道，或传 provider/apiKey/endpoint 测表单）
   testChannel: (data) => post('/system/ai-channels/test', data),
+  // ASR 语音识别渠道（多渠道管理，与 AI 渠道同构）
+  getAsrChannels: () => get('/system/asr-channels'),
+  addAsrChannel: (data) => post('/system/asr-channels', data),
+  updateAsrChannel: (data) => service.put('/system/asr-channels', data),
+  toggleAsrChannel: (data) => post('/system/asr-channels/toggle', data),
+  moveAsrChannel: (data) => post('/system/asr-channels/move', data),
+  deleteAsrChannel: (data) => post('/system/asr-channels/delete', data),
+  // 测试 ASR 转写链路（传 id 测已保存渠道，或传 endpoint/apiKey/model 测表单）
+  testAsrChannel: (data) => post('/system/asr-channels/test', data),
   // 借阅规则
   getBorrowLimits: () => get('/system/borrow-limits'),
   saveBorrowLimit: (data) => post('/system/borrow-limits', data),

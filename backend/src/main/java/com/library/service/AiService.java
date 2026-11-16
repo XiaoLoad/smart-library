@@ -13,6 +13,7 @@ import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.memory.ChatMemory;
 import dev.langchain4j.memory.chat.MessageWindowChatMemory;
+import dev.langchain4j.model.openai.OpenAiChatModel;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import dev.langchain4j.rag.DefaultRetrievalAugmentor;
 import dev.langchain4j.rag.RetrievalAugmentor;
@@ -43,6 +44,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 
 import static dev.langchain4j.store.embedding.filter.MetadataFilterBuilder.metadataKey;
@@ -83,13 +85,6 @@ public class AiService {
      * 取值 8 的依据：覆盖省赛演示主线的最大轮数（查额度→检索图书→确认→办理→推荐→汇总）。
      */
     private static final int MAX_TOOL_ROUNDS = 8;
-    /**
-     * M4：单条过渡语（thought）最大字符数。
-     * <p>
-     * M7 起 reset 已移除、正文保留全部叙述，thought 只是时间线上的摘要节点——
-     * 保持短句即可，长文本会与正文重复刷屏。
-     */
-    private static final int THOUGHT_MAX_LEN = 60;
     /** SSE 超时时间（毫秒） */
     private static final long SSE_TIMEOUT_MS = 300_000L;
     /** 首条消息生成标题的最大字符数 */
@@ -100,6 +95,14 @@ public class AiService {
     private static final long MODEL_TIMEOUT_SECONDS = 300L;
     /** RAG 来源回传给前端的单个片段摘要最大字符数 */
     private static final int RAG_SNIPPET_MAX_LEN = 120;
+    /** 建议追问：参考的历史消息条数（对齐 Open WebUI 的 MESSAGES:END:6） */
+    private static final int FOLLOW_UP_HISTORY_MESSAGES = 6;
+    /** 建议追问：最多返回条数 */
+    private static final int FOLLOW_UP_MAX_COUNT = 3;
+    /** 建议追问：单条最大字符数（过长说明模型没按「短句」要求输出，宁可丢弃） */
+    private static final int FOLLOW_UP_MAX_LEN = 60;
+    /** 建议追问：模型调用超时（秒）——辅助任务必须快速返回，失败静默不影响主对话 */
+    private static final long FOLLOW_UP_TIMEOUT_SECONDS = 20L;
 
     @Autowired private AiConversationMapper conversationMapper;
     @Autowired private AiMessageMapper messageMapper;
@@ -127,6 +130,9 @@ public class AiService {
 
     /** 缓存各渠道配置构建的流式模型（key = 配置 hash）。故障转移时多渠道并存复用，避免重复创建 OkHttpClient */
     private final Map<String, OpenAiStreamingChatModel> modelCache = new ConcurrentHashMap<>();
+
+    /** 缓存各渠道配置构建的非流式模型（key = 配置 hash）。建议追问等辅助任务使用，独立超时更快失败 */
+    private final Map<String, OpenAiChatModel> syncModelCache = new ConcurrentHashMap<>();
 
     // 模型请求/响应日志开关（application.yml app.ai.log-requests/log-responses）
     // 完整 prompt 含用户借阅记录等个人信息，日志打开等于把 PII 写进日志文件——生产必须关闭
@@ -368,6 +374,9 @@ public class AiService {
      *   <li>{@code tool}  —— 工具调用过程（JSON：{name, phase, detail}）</li>
      *   <li>{@code done}  —— "[DONE]"，表示本轮结束</li>
      *   <li>{@code error} —— 错误消息</li>
+     *   <li>{@code followups} —— 建议追问（JSON 字符串数组）：done 之后后台线程生成
+     *       （关思考+限长的非流式调用，1-2s），完成经同一连接推送，之后才 emitter.complete()；
+     *       前端渲染为最新回答下方的可点击 chips（点击即发送）</li>
      * </ul>
      * <p>
      * 记忆策略：每请求从 DB 加载历史「纯文本」消息（用户提问 + AI 最终回答）构建窗口记忆；
@@ -381,17 +390,17 @@ public class AiService {
      * 自动维护完整的工具调用上下文。
      */
     public SseEmitter chat(Long conversationId, String content) {
-        return chat(conversationId, content, false);
+        return chat(conversationId, content, false, null);
     }
 
     /**
-     * 流式对话（支持确认续跑）。
+     * A2：带分支上下文的流式对话。
      *
-     * @param continuation M8：true 表示由前端在授权确认成功后自动发起的续跑轮。
-     *                     续跑轮限制连续次数（默认 3），防止「确认→续跑→再弹卡→确认」
-     *                     无限循环消耗 token；超限走普通对话路径让用户手动继续。
+     * @param branchGroupKey 分支分组标识：普通轮为 null（首轮）；编辑重发/重新生成产生的
+     *                       分支轮传入原轮的 group_key，user/assistant 消息都落库到该组，
+     *                       与兄弟分支共用分支导航
      */
-    public SseEmitter chat(Long conversationId, String content, boolean continuation) {
+    public SseEmitter chat(Long conversationId, String content, boolean continuation, String branchGroupKey) {
         CurrentUser cu = CurrentUser.get();
         AiConversation conv = conversationMapper.selectById(conversationId);
         if (conv == null) {
@@ -421,6 +430,7 @@ public class AiService {
         // 2. 落库用户消息并使缓存失效（下次请求重新加载完整历史）
         // M8：续跑轮的引导语加前缀落库——模型历史可见其上下文意图；
         // countTrailingContinuations 靠该前缀统计连续续跑次数
+        // A2：分支轮的 user 消息带原轮 group_key（与兄弟分支同组，激活态默认 1）
         com.library.entity.AiMessage userMsg = new com.library.entity.AiMessage();
         userMsg.setConversationId(conversationId);
         userMsg.setRole("user");
@@ -428,6 +438,9 @@ public class AiService {
         // M10：续跑引导语是内部机制消息，对 UI 隐藏（模型历史仍可见）
         if (continuation) {
             userMsg.setVisibility("hidden");
+        }
+        if (branchGroupKey != null && !branchGroupKey.isBlank()) {
+            userMsg.setGroupKey(branchGroupKey);
         }
         userMsg.setCreateTime(LocalDateTime.now());
         messageMapper.insert(userMsg);
@@ -504,7 +517,11 @@ public class AiService {
             aiBatchConfirmService.clearAuditListener(conversationId);
         };
         emitter.onCompletion(unregister);
-        emitter.onTimeout(unregister);
+        emitter.onTimeout(() -> {
+            unregister.run();
+            // 诊断：记录超时原因，区分「5 分钟流超时」与「客户端断开」（后者走 onError/onCompletion）
+            log.info("[AI] SSE 连接超时关闭 conversationId={}（流总时长超过 {}s）", conversationId, SSE_TIMEOUT_MS / 1000);
+        });
         emitter.onError(t -> {
             unregister.run();
             // 客户端已断开：模型流仍在跑，但所有 emitter.send 会静默失败，
@@ -585,7 +602,7 @@ public class AiService {
                 if (data != null) {
                     payload.put("data", data);
                 }
-                emitter.send(SseEmitter.event().name("tool")
+                sendQuietly(emitter, SseEmitter.event().name("tool")
                         .data(objectMapper.writeValueAsString(payload)));
             } catch (IOException e) {
                 // 客户端已断开，忽略
@@ -617,7 +634,7 @@ public class AiService {
                 payload.put("ttlSeconds", 60);
                 // M8：本会话「始终允许」开关，前端渲染为授权卡上的勾选项
                 payload.put("sessionAllow", true);
-                emitter.send(SseEmitter.event().name("confirm")
+                sendQuietly(emitter, SseEmitter.event().name("confirm")
                         .data(objectMapper.writeValueAsString(payload)));
             } catch (IOException e) {
                 // 客户端已断开：作废令牌，用户重发消息后需重新发起授权
@@ -678,6 +695,8 @@ public class AiService {
             void start(int idx) {
                 AiConfig cfg = candidates.get(idx);
                 candidateIdx.set(idx);
+                // B4：渠道尝试留痕（try 事件，随轨迹落库）
+                trace.recordAttempt("try:" + idx + ":" + channelLabel(cfg));
                 OpenAiStreamingChatModel model = getOrBuildModel(cfg);
                 // 请求级记忆：持有完整工具调用上下文（含 tool_calls/tool 结果），不落库；
                 // 渠道切换重跑时重建，失败的尝试可能已把 user 消息写入旧 memory
@@ -718,28 +737,20 @@ public class AiService {
                                 produced.set(true);
                                 // 深度思考思维链增量（reasoning_content）：独立 thinking 事件推给前端展示，
                                 // 不落库、不计入回答正文（与工具中间态一致，避免污染历史）
-                                try {
-                                    String t = partial.text();
-                                    if (t != null && !t.isEmpty()) {
-                                        emitter.send(SseEmitter.event().name("thinking").data(t));
-                                    }
-                                } catch (IOException e) {
-                                    // 客户端已断开，忽略
+                                String t = partial.text();
+                                if (t != null && !t.isEmpty()) {
+                                    sendQuietly(emitter, SseEmitter.event().name("thinking").data(t));
                                 }
                             })
                             .onPartialResponse(partial -> {
                                 produced.set(true);
-                                try {
-                                    // 经 <think> 标签过滤器分流：标签内 → thinking 事件，标签外 → delta
-                                    String routed = thinkFilter.feed(partial);
-                                    if (routed != null && !routed.isEmpty()) {
-                                        // M4：同时累积到过渡语缓冲，等工具开始时改道为 thought 事件。
-                                        // 缓冲内容若最终未被发出（模型直接给最终答案），在 onCompleteResponse 清空即可。
-                                        thoughtBuffer.append(routed);
-                                        emitter.send(SseEmitter.event().name("delta").data(routed));
-                                    }
-                                } catch (IOException e) {
-                                    // 客户端已断开，忽略
+                                // 经 <think> 标签过滤器分流：标签内 → thinking 事件，标签外 → delta
+                                String routed = thinkFilter.feed(partial);
+                                if (routed != null && !routed.isEmpty()) {
+                                    // M4：同时累积到过渡语缓冲，等工具开始时改道为 thought 事件。
+                                    // 缓冲内容若最终未被发出（模型直接给最终答案），在 onCompleteResponse 清空即可。
+                                    thoughtBuffer.append(routed);
+                                    sendQuietly(emitter, SseEmitter.event().name("delta").data(routed));
                                 }
                             })
                     .onCompleteResponse(response -> {
@@ -748,13 +759,9 @@ public class AiService {
                         thoughtBuffer.setLength(0);
                         // 冲刷 <think> 过滤器缓冲：pending 中滞留的末尾正文增量补发为 delta，
                         // 否则回答结尾会缺字（残片滞留缓冲从未被发出）
-                        try {
-                            String tail = thinkFilter.flush();
-                            if (tail != null && !tail.isEmpty()) {
-                                emitter.send(SseEmitter.event().name("delta").data(tail));
-                            }
-                        } catch (IOException ignored) {
-                            // 客户端已断开
+                        String tail = thinkFilter.flush();
+                        if (tail != null && !tail.isEmpty()) {
+                            sendQuietly(emitter, SseEmitter.event().name("delta").data(tail));
                         }
                         // 落库最终 AI 回答：取最终一轮模型响应的文本（不含工具轮过渡语），
                         // 并剔除模型误输出到正文的工具调用代码块/函数调用片段
@@ -764,16 +771,14 @@ public class AiService {
                         if (sanitized != null && !sanitized.isBlank()) {
                             // 正文被消毒过：推送 final 事件替换前端已流式拼接的内容
                             if (answer != null && !sanitized.equals(answer)) {
-                                try {
-                                    emitter.send(SseEmitter.event().name("final").data(sanitized));
-                                } catch (IOException e) {
-                                    // 忽略
-                                }
+                                sendQuietly(emitter, SseEmitter.event().name("final").data(sanitized));
                             }
                             com.library.entity.AiMessage aiMsg = new com.library.entity.AiMessage();
                             aiMsg.setConversationId(conversationId);
                             aiMsg.setRole("assistant");
                             aiMsg.setContent(sanitized);
+                            // A2：回复与同轮 user 消息共用分支组（分支导航聚合到同一轮）
+                            aiMsg.setGroupKey(userMsg.getGroupKey());
                             aiMsg.setCreateTime(LocalDateTime.now());
                             // 工具调用摘要（JSON 数组、按调用顺序记录工具名），供前端徽章行持久展示
                             if (!toolCalls.isEmpty()) {
@@ -812,11 +817,37 @@ public class AiService {
                             emitBatchConfirm(emitter, conversationId, cu.getUserId(), batchItems);
                         }
                         try {
-                            emitter.send(SseEmitter.event().name("done").data("[DONE]"));
+                            // A2：done 事件回传本轮 user 消息的落库 id——前端本地消息是
+                            // Date.now() 临时 id，凭它查分支必 404；拿到真实 id 后前端
+                            // 才能正确拉分支导航/编辑重发/重新生成
+                            sendQuietly(emitter, SseEmitter.event().name("done")
+                                    .data(objectMapper.writeValueAsString(Map.of("userMessageId", userMsg.getId()))));
                         } catch (IOException e) {
                             // 忽略
                         }
-                        emitter.complete();
+                        // 建议追问（方案 A）：主回答已落库，后台线程立即生成（关思考+限长，1-2s），
+                        // 完成后经同一 SSE 连接推 followups 事件再收尾——省掉前端 REST 往返，
+                        // chips 出现更快。用户已关页时 sendQuietly 静默、complete 安全收尾
+                        final SseEmitter followUpEmitter = emitter;
+                        final Long followUpConversationId = conversationId;
+                        CompletableFuture.runAsync(() -> {
+                            try {
+                                List<String> followUps = generateFollowUpsInternal(followUpConversationId);
+                                if (!followUps.isEmpty()) {
+                                    sendQuietly(followUpEmitter, SseEmitter.event().name("followups")
+                                            .data(objectMapper.writeValueAsString(followUps)));
+                                }
+                            } catch (Exception e) {
+                                // 生成/推送失败静默收尾，不影响本轮已完成的回答
+                                log.info("[AI] 建议追问后台生成/推送失败：{}", truncateAttempt(e));
+                            } finally {
+                                try {
+                                    followUpEmitter.complete();
+                                } catch (Exception ignored) {
+                                    // emitter 已完成/已超时
+                                }
+                            }
+                        });
                     })
                     .onError(err -> onRoundError(err))
                             .start();
@@ -827,6 +858,13 @@ public class AiService {
             }
 
             void onRoundError(Throwable err) {
+                // 客户端断开导致的「流错误」：emitter 已完成，上游流的后续推送被框架误认为错误回调。
+                // 属正常事件（关页面/刷新/网络抖动），静默结束——不打错误日志、不污染失败轨迹。
+                if (isEmitterDead(err)) {
+                    log.info("[AI] 客户端已断开，对话流静默结束 conversationId={}，渠道={}", conversationId,
+                            candidates.get(candidateIdx.get()) == null ? "-" : channelLabel(candidates.get(candidateIdx.get())));
+                    return;
+                }
                 // 工具循环超限：转优雅降级（degrade 事件），而非红色报错。
                 // 已完成的动作仍然有效，未完成部分提示用户再说一次。
                 if (isToolRoundLimitExceeded(err, toolRounds.get())) {
@@ -842,8 +880,13 @@ public class AiService {
                     AiConfig next = candidates.get(candidateIdx.get() + 1);
                     markCooldown(failed.channelId());
                     log.warn("[AI] 渠道「{}」请求被上游拒绝，自动切换到「{}」重试", channelLabel(failed), channelLabel(next));
+                    // B4：失败与切换决策留痕（fail/switched 事件，随轨迹落库）
+                    trace.recordAttempt("fail:" + candidateIdx.get() + ":" + channelLabel(failed)
+                            + ":" + truncateAttempt(err));
+                    trace.recordAttempt("switched:" + candidateIdx.get() + "->" + (candidateIdx.get() + 1)
+                            + ":" + channelLabel(next));
                     try {
-                        emitter.send(SseEmitter.event().name("notice")
+                        sendQuietly(emitter, SseEmitter.event().name("notice")
                                 .data("「" + channelLabel(failed) + "」渠道繁忙，已自动切换到「" + channelLabel(next) + "」"));
                     } catch (Exception ignored) {
                         // 推送失败不影响切换
@@ -851,29 +894,27 @@ public class AiService {
                     start(candidateIdx.get() + 1);
                     return;
                 }
-                try {
-                    // 提取可读错误信息：LangChain4j 异常 message 常为空，需取 cause
-                    String msg = err.getMessage();
-                    if (msg == null || msg.isBlank()) {
-                        Throwable cause = err.getCause();
-                        if (cause != null) {
-                            msg = cause.getMessage();
-                        }
+                // 提取可读错误信息：LangChain4j 异常 message 常为空，需取 cause
+                String msg = err.getMessage();
+                if (msg == null || msg.isBlank()) {
+                    Throwable cause = err.getCause();
+                    if (cause != null) {
+                        msg = cause.getMessage();
                     }
-                    if (msg == null || msg.isBlank()) {
-                        msg = err.getClass().getSimpleName();
-                    }
-                    // 完整原文进日志与轨迹（排查用），前端只收净化后的文案
-                    log.warn("[AI] 对话流异常 conversationId={}，渠道={}：{}", conversationId,
-                            candidates.get(candidateIdx.get()) == null ? "-" : channelLabel(candidates.get(candidateIdx.get())),
-                            msg, err);
-                    emitter.send(SseEmitter.event().name("error").data(friendlyModelError(msg)));
-                    // M6a：异常轨迹（记原文，管理员在轨迹页可见完整错误）
-                    trace.markError(msg);
-                    traceService.save(trace);
-                } catch (IOException e) {
-                    // 忽略
                 }
+                if (msg == null || msg.isBlank()) {
+                    msg = err.getClass().getSimpleName();
+                }
+                // 完整原文进日志与轨迹（排查用），前端只收净化后的文案
+                log.warn("[AI] 对话流异常 conversationId={}，渠道={}：{}", conversationId,
+                        candidates.get(candidateIdx.get()) == null ? "-" : channelLabel(candidates.get(candidateIdx.get())),
+                        msg, err);
+                // B4：最终失败留痕（final-error 事件——走到这里说明候选耗尽或不可切换）
+                trace.recordAttempt("final-error:" + truncateAttempt(err));
+                sendQuietly(emitter, SseEmitter.event().name("error").data(friendlyModelError(msg)));
+                // M6a：异常轨迹（记原文，管理员在轨迹页可见完整错误）
+                trace.markError(msg);
+                traceService.save(trace);
                 // 注意：不能用 completeWithError，否则 Spring 异常处理器会尝试用 JSON Result 写入 SSE 响应，触发 HttpMessageNotWritableException
                 emitter.complete();
             }
@@ -886,7 +927,7 @@ public class AiService {
         // 部分场景（如容器异步超时但连接仍在）前端会一直停在生成态；done 与正常结束同形，UI 才能闭环。
         emitter.onTimeout(() -> {
             try {
-                emitter.send(SseEmitter.event().name("done").data("[DONE]"));
+                sendQuietly(emitter, SseEmitter.event().name("done").data("[DONE]"));
             } catch (Exception ignored) {
                 // 连接已断，直接收尾
             }
@@ -937,6 +978,36 @@ public class AiService {
      * @param buffer  过渡语缓冲
      * @param traceCollector 轨迹收集器（可为 null）
      */
+    /**
+     * SSE 静默发送：emitter 已完成（客户端断开/超时）时 Spring 抛 IllegalStateException，
+     * 客户端断开后底层写失败抛 IOException——两者都是连接层的正常事件。
+     * 流式回调里不能让它们穿透到 LangChain4j 的 onError，否则会被当成「流错误」
+     * 再次尝试往同一 dead emitter 发错误事件，形成日志套娃（2026-11-16 实测）。
+     */
+    private static void sendQuietly(SseEmitter emitter, SseEmitter.SseEventBuilder event) {
+        try {
+            emitter.send(event);
+        } catch (IOException | IllegalStateException ignored) {
+            // 连接已断开，静默
+        }
+    }
+
+    /**
+     * 判断异常是否为「SSE 通道已完成」：客户端断开/超时后上游继续推流，
+     * Spring 在 send 时抛出的标志性错误（沿 cause 链查找，兼容框架包装）。
+     */
+    private static boolean isEmitterDead(Throwable t) {
+        while (t != null) {
+            if (t instanceof IllegalStateException ise
+                    && ise.getMessage() != null
+                    && ise.getMessage().contains("ResponseBodyEmitter has already completed")) {
+                return true;
+            }
+            t = t.getCause();
+        }
+        return false;
+    }
+
     private void emitPendingThought(SseEmitter emitter, StringBuilder buffer,
                                     AiAgentTraceService.Collector traceCollector) {
         if (buffer == null || buffer.length() == 0) {
@@ -952,14 +1023,9 @@ public class AiService {
         if (text.isEmpty()) {
             return;
         }
-        // M4 视觉修正（2）：部分模型会把「最终答案正文」一起流式输出后才调用工具，
-        // 导致旁白里混入完整书目介绍，时间线被长文本淹没。
-        // 旁白本应是「一句话意图」，这里截取到首个分句边界，得到短句意图描述。
-        text = firstClause(text);
-        // 单条旁白上限：避免模型长篇大论淹没时间线
-        if (text.length() > THOUGHT_MAX_LEN) {
-            text = text.substring(0, THOUGHT_MAX_LEN) + "…";
-        }
+        // 旁白原文完整保留（对齐 deepseek-ai/harness：数据全量、展示靠前端折叠控制）——
+        // 曾在此处做 firstClause 首句截断与 60 字上限，用户看到的思考链只剩一句话的零头；
+        // 现只保留防御性清洗：剔除工具调用产物与未闭合书名号，长度控制交给前端折叠态。
         // M4 视觉修正：截断处的未闭合书名号会让旁白显示成「我来帮您查一下《三」，
         // 观感像渲染错误。此处剔除未闭合的《… 片段，只保留完整语义。
         if (text.indexOf('》') < 0) {
@@ -977,14 +1043,10 @@ public class AiService {
         if (!isTerminalPunct(text.charAt(text.length() - 1))) {
             text = text + "…";
         }
-        try {
-            emitter.send(SseEmitter.event().name("thought").data(text));
-            // M6a：决策旁白记入轨迹（Agent 规划轨迹的可视化证据）
-            if (traceCollector != null) {
-                traceCollector.recordThought(text);
-            }
-        } catch (IOException e) {
-            // 客户端已断开，忽略
+        sendQuietly(emitter, SseEmitter.event().name("thought").data(text));
+        // M6a：决策旁白记入轨迹（Agent 规划轨迹的可视化证据）
+        if (traceCollector != null) {
+            traceCollector.recordThought(text);
         }
     }
 
@@ -996,31 +1058,6 @@ public class AiService {
                 || c == ')' || c == '）'
                 || c == '"' || c == '"'
                 || c == '\'' || c == '\'';
-    }
-
-    /**
-     * M4：截取首个分句，作为「一句话意图」旁白。
-     * <p>
-     * 模型在工具轮前可能连同最终答案一起流式输出（先说答案再调工具），
-     * 若原样作为旁白展示，时间线会被整段书目介绍淹没。此处按中文分句边界
-     * （。！？，；：与换行）取首句，保留「我要做什么」的语义，去掉后面的数据罗列。
-     *
-     * @param text 原始旁白文本
-     * @return 首个分句（过短时回退为原文本）
-     */
-    private String firstClause(String text) {
-        if (text == null) {
-            return null;
-        }
-        for (int i = 0; i < text.length(); i++) {
-            char c = text.charAt(i);
-            if (c == '。' || c == '！' || c == '？' || c == '，' || c == '；' || c == '：' || c == '\n') {
-                String head = text.substring(0, i).trim();
-                // 太短说明切在了标点噪声上，保留原文
-                return head.length() >= 4 ? head : text.trim();
-            }
-        }
-        return text.trim();
     }
 
     /**
@@ -1107,7 +1144,7 @@ public class AiService {
             if (result.get("failCount") instanceof Integer fc) {
                 payload.put("failCount", fc);
             }
-            emitter.send(SseEmitter.event().name("tool_result")
+            sendQuietly(emitter, SseEmitter.event().name("tool_result")
                     .data(objectMapper.writeValueAsString(payload)));
         } catch (Exception e) {
             // 推送失败不影响确认返回；前端用 confirm 接口返回值兜底
@@ -1220,7 +1257,7 @@ public class AiService {
             payload.put("rows", rows == null ? List.of() : rows);
             payload.put("ttlSeconds", 60);
             payload.put("sessionAllow", true);
-            emitter.send(SseEmitter.event().name("confirm")
+            sendQuietly(emitter, SseEmitter.event().name("confirm")
                     .data(objectMapper.writeValueAsString(payload)));
         } catch (IOException e) {
             if (token != null) {
@@ -1254,7 +1291,7 @@ public class AiService {
             payload.put("title", "批量授权（" + items.size() + " 项操作）");
             payload.put("rows", AiBatchConfirmService.mergeRows(items));
             payload.put("ttlSeconds", 120);
-            emitter.send(SseEmitter.event().name("batch_confirm")
+            sendQuietly(emitter, SseEmitter.event().name("batch_confirm")
                     .data(objectMapper.writeValueAsString(payload)));
         } catch (IOException e) {
             if (token != null) {
@@ -1333,6 +1370,118 @@ public class AiService {
             }
         }
         return count;
+    }
+
+    /**
+     * A2：查询一轮对话的全部兄弟分支（编辑重发/重新生成的历史版本）。
+     * <p>
+     * 消息无 group_key（历史首轮或旧数据）时现场补建分组：把该消息 id 作为 key
+     * 回填到它自身与其后的 assistant 回复上——此后该轮即可产生分支，且无需迁移脚本。
+     *
+     * @return 兄弟 user 消息列表（按 id 升序）+ 当前激活的 user 消息 id
+     */
+    public Map<String, Object> branchSiblings(Long conversationId, Long userId, Long messageId) {
+        AiConversation conv = conversationMapper.selectById(conversationId);
+        if (conv == null) {
+            throw new BusinessException(404, "会话不存在");
+        }
+        if (!conv.getUserId().equals(userId)) {
+            throw new BusinessException(403, "无权操作该会话");
+        }
+        com.library.entity.AiMessage msg = messageMapper.selectById(messageId);
+        if (msg == null || !msg.getConversationId().equals(conversationId)
+                || !"user".equalsIgnoreCase(msg.getRole())) {
+            throw new BusinessException(404, "消息不存在或不是用户消息");
+        }
+        String groupKey = ensureBranchGroup(conversationId, msg);
+        List<com.library.entity.AiMessage> siblings = messageMapper.selectSiblings(conversationId, groupKey);
+        List<Map<String, Object>> items = new ArrayList<>();
+        for (com.library.entity.AiMessage s : siblings) {
+            Map<String, Object> item = new java.util.LinkedHashMap<>();
+            item.put("id", s.getId());
+            item.put("content", s.getContent());
+            item.put("active", s.getActive() != null && s.getActive() == 1);
+            item.put("createTime", s.getCreateTime());
+            items.add(item);
+        }
+        return Map.of("groupKey", groupKey, "list", items);
+    }
+
+    /**
+     * A2：切换一轮对话的激活分支。
+     * <p>
+     * 切换按「激活链」操作：旧分支组内消息全部置 0，目标分支的 user 消息与其后的
+     * assistant 回复（直至下一个分支组 user 消息）置 1。模型上下文与前端历史接口
+     * 都按 active=1 过滤，切换即同时生效于两侧。
+     */
+    public void switchBranch(Long conversationId, Long userId, String groupKey, Long targetUserMsgId) {
+        AiConversation conv = conversationMapper.selectById(conversationId);
+        if (conv == null) {
+            throw new BusinessException(404, "会话不存在");
+        }
+        if (!conv.getUserId().equals(userId)) {
+            throw new BusinessException(403, "无权操作该会话");
+        }
+        com.library.entity.AiMessage target = messageMapper.selectById(targetUserMsgId);
+        if (target == null || !target.getConversationId().equals(conversationId)
+                || !"user".equalsIgnoreCase(target.getRole())
+                || target.getGroupKey() == null || !target.getGroupKey().equals(groupKey)) {
+            throw new BusinessException(404, "目标分支不存在");
+        }
+        // 激活链：目标 user 消息 id 起到组内下一个兄弟 user 消息（或会话末尾）之前的全部消息。
+        // 一轮 = user 消息 + 其 assistant 回复（含 hidden 回执），全部属于同组同链
+        List<com.library.entity.AiMessage> group = messageMapper.selectGroupMessages(conversationId, groupKey);
+        List<Long> chainIds = new ArrayList<>();
+        boolean inChain = false;
+        for (com.library.entity.AiMessage m : group) {
+            if (m.getId().equals(targetUserMsgId)) {
+                inChain = true;
+            } else if (inChain && "user".equalsIgnoreCase(m.getRole())
+                    && "visible".equalsIgnoreCase(m.getVisibility())) {
+                // 下一条可见 user 消息 = 兄弟分支起点，链结束
+                break;
+            }
+            if (inChain) {
+                chainIds.add(m.getId());
+            }
+        }
+        if (chainIds.isEmpty()) {
+            throw new BusinessException(404, "目标分支链为空");
+        }
+        messageMapper.deactivateGroup(conversationId, groupKey);
+        messageMapper.activateMessages(conversationId, chainIds);
+        evictMemory(conversationId);
+    }
+
+    /**
+     * A2：为无分组的历史消息补建分支组（懒初始化）。
+     * 以消息 id 字符串为 key 回填：该 user 消息与其后的 assistant 回复同链同组。
+     * 已有 group_key 的消息原样返回——幂等，重复调用无副作用。
+     */
+    private String ensureBranchGroup(Long conversationId, com.library.entity.AiMessage userMsg) {
+        if (userMsg.getGroupKey() != null && !userMsg.getGroupKey().isBlank()) {
+            return userMsg.getGroupKey();
+        }
+        String key = "g" + userMsg.getId();
+        // 激活链 = 该 user 消息到下一条 user 消息之前的全部行（含 hidden 回执与 assistant 回复）
+        List<com.library.entity.AiMessage> all = messageMapper.selectByConversationId(conversationId);
+        List<Long> chainIds = new ArrayList<>();
+        boolean inChain = false;
+        for (com.library.entity.AiMessage m : all) {
+            if (m.getId().equals(userMsg.getId())) {
+                inChain = true;
+            } else if (inChain && "user".equalsIgnoreCase(m.getRole())) {
+                break;
+            }
+            if (inChain) {
+                chainIds.add(m.getId());
+            }
+        }
+        if (!chainIds.isEmpty()) {
+            messageMapper.assignGroupKey(conversationId, chainIds, key);
+            evictMemory(conversationId);
+        }
+        return key;
     }
 
     /**
@@ -1508,7 +1657,7 @@ public class AiService {
             Map<String, Object> payload = new java.util.LinkedHashMap<>();
             payload.put("rounds", rounds);
             payload.put("message", text);
-            emitter.send(SseEmitter.event().name("degrade")
+            sendQuietly(emitter, SseEmitter.event().name("degrade")
                     .data(objectMapper.writeValueAsString(payload)));
         } catch (IOException e) {
             // 客户端已断开，忽略
@@ -1529,12 +1678,27 @@ public class AiService {
             log.warn("[AI] 降级文案落库失败: {}", e.getMessage());
         }
 
-        try {
-            emitter.send(SseEmitter.event().name("done").data("[DONE]"));
-        } catch (IOException e) {
-            // 忽略
-        }
-        emitter.complete();
+        sendQuietly(emitter, SseEmitter.event().name("done").data("[DONE]"));
+        // 建议追问（方案 A）：降级轮同样生成（与正常完成同一异步推送逻辑，完成后收尾连接）
+        final SseEmitter degradeEmitter = emitter;
+        final Long degradeConversationId = conversationId;
+        CompletableFuture.runAsync(() -> {
+            try {
+                List<String> followUps = generateFollowUpsInternal(degradeConversationId);
+                if (!followUps.isEmpty()) {
+                    sendQuietly(degradeEmitter, SseEmitter.event().name("followups")
+                            .data(objectMapper.writeValueAsString(followUps)));
+                }
+            } catch (Exception e) {
+                log.info("[AI] 建议追问后台生成/推送失败：{}", truncateAttempt(e));
+            } finally {
+                try {
+                    degradeEmitter.complete();
+                } catch (Exception ignored) {
+                    // emitter 已完成/已超时
+                }
+            }
+        });
     }
 
     /**
@@ -1602,7 +1766,7 @@ public class AiService {
             if (sources.isEmpty()) {
                 return;
             }
-            emitter.send(SseEmitter.event().name("rag")
+            sendQuietly(emitter, SseEmitter.event().name("rag")
                     .data(objectMapper.writeValueAsString(sources)));
         } catch (IOException e) {
             // 客户端已断开，忽略
@@ -1863,6 +2027,20 @@ public class AiService {
     }
 
     /**
+     * B4：截取异常链的错误摘要用于尝试审计条目（取首个非空 message，限 120 字符）。
+     * 审计列是 TEXT 且条目在 JSON 数组内，截断保证单条不撑爆展示；完整原文仍在 error_msg 与日志。
+     */
+    private String truncateAttempt(Throwable err) {
+        for (Throwable t = err; t != null; t = t.getCause()) {
+            if (t.getMessage() != null && !t.getMessage().isBlank()) {
+                String s = t.getMessage().replaceAll("\\s+", " ").trim();
+                return s.length() > 120 ? s.substring(0, 120) + "…" : s;
+            }
+        }
+        return err == null ? "" : err.getClass().getSimpleName();
+    }
+
+    /**
      * 对话的渠道尝试顺序：启用渠道按 sort 升序，其中未冷却的排前、冷却中的垫底兜底。
      */
     private List<AiConfig> orderedCandidates() {
@@ -2022,6 +2200,172 @@ public class AiService {
 
     private String str(Object o, String def) {
         return o == null || o.toString().isBlank() ? def : o.toString();
+    }
+
+    // 建议追问（意图识别）
+
+    /**
+     * 建议追问生成：基于会话最近的历史消息，站在用户视角推测 3 条最可能的下一步提问。
+     * <p>
+     * 实现对齐 Open WebUI 的 Follow-Up Prompts，并针对速度做了三件事（方案 A）：
+     * <ul>
+     *   <li>关思考：渠道即使开启深度思考，辅助任务也注入 thinking:disabled——
+     *       思维链只在主对话展开，这里省掉整段推理耗时（5s→1-2s 的大头）；</li>
+     *   <li>限制输出长度：maxTokens 200（3 条短句 + JSON 语法的上限，留余量防截断）；</li>
+     *   <li>渠道逐个尝试，全部失败静默返回空数组，永不影响主对话。</li>
+     * </ul>
+     * <p>
+     * 无鉴权：仅供主对话 done 后的后台线程调用（会话归属已在 chat() 入口校验）。
+     *
+     * @return 最多 3 条追问文本；无可生成条件（会话为空/最后一条不是 AI 回答/全部渠道失败）时返回空数组
+     */
+    private List<String> generateFollowUpsInternal(Long conversationId) {
+
+        // 取最近 N 条纯文本消息：过滤机制消息（[系统续跑]/[系统回执] 等带方括号前缀的非用户话语），
+        // 且最后一条必须是 AI 回答——用户刚提问还没回答时没有「下一步追问」可言
+        List<com.library.entity.AiMessage> visible = new ArrayList<>();
+        for (com.library.entity.AiMessage m : loadHistory(conversationId)) {
+            String content = m.getContent();
+            if (content == null || content.isBlank()) continue;
+            if (!"user".equalsIgnoreCase(m.getRole()) && !"assistant".equalsIgnoreCase(m.getRole())) continue;
+            if (content.startsWith(CONTINUATION_PREFIX) || content.startsWith("[系统回执]")) continue;
+            visible.add(m);
+        }
+        if (visible.isEmpty() || !"assistant".equalsIgnoreCase(visible.get(visible.size() - 1).getRole())) {
+            return List.of();
+        }
+        List<com.library.entity.AiMessage> recent = visible.size() > FOLLOW_UP_HISTORY_MESSAGES
+                ? visible.subList(visible.size() - FOLLOW_UP_HISTORY_MESSAGES, visible.size())
+                : visible;
+        StringBuilder historyText = new StringBuilder();
+        for (com.library.entity.AiMessage m : recent) {
+            String content = m.getContent();
+            // 单条超长截断：建议追问只需要主题语境，不必喂全文
+            if (content.length() > 500) {
+                content = content.substring(0, 500) + "…";
+            }
+            historyText.append("user".equalsIgnoreCase(m.getRole()) ? "用户：" : "助手：")
+                    .append(content).append('\n');
+        }
+
+        // 逐渠道尝试（与主对话同一候选顺序），全部失败静默返回空数组
+        List<AiConfig> candidates = orderedCandidates();
+        boolean anyChannel = false;
+        for (AiConfig cfg : candidates) {
+            if (cfg.apiKey() == null || cfg.apiKey().isBlank()) continue;
+            anyChannel = true;
+            try {
+                String answer = getOrBuildSyncModel(cfg).chat(FOLLOW_UP_PROMPT.formatted(historyText.toString()));
+                List<String> result = parseFollowUps(answer);
+                if (!result.isEmpty()) {
+                    log.info("[AI] 建议追问生成成功：{} 条，渠道={}", result.size(), channelLabel(cfg));
+                    return result;
+                }
+                // 输出解析为空：换下一个渠道再试，全部失败才静默返回空数组
+                log.info("[AI] 建议追问输出解析为空，换渠道重试，当前渠道={}", channelLabel(cfg));
+            } catch (Exception e) {
+                log.warn("[AI] 建议追问生成失败，渠道={}：{}", channelLabel(cfg), truncateAttempt(e));
+            }
+        }
+        if (!anyChannel) {
+            log.warn("[AI] 建议跳过追问生成：无可用 AI 渠道");
+        }
+        return List.of();
+    }
+
+    /**
+     * 建议追问 prompt（对齐 Open WebUI Follow-Up Generation Prompt 的中文版）：
+     * 以用户视角生成可直接发送的下一条消息，输出 JSON 字符串数组。
+     * 条数与 FOLLOW_UP_MAX_COUNT 保持一致（3），直接写死——避免双重 formatted
+     * 时残留占位符在类初始化阶段抛 MissingFormatArgumentException。
+     */
+    private static final String FOLLOW_UP_PROMPT = """
+            ### 任务：
+            基于以下对话历史，站在「用户」的视角，推测用户接下来最可能自然提出的 3 个追问或指令。
+
+            ### 要求：
+            - 以用户对助手说话的口吻撰写，可直接作为下一条用户消息发送；
+            - 简洁具体（不超过 20 字），与刚讨论的主题直接相关，不重复已覆盖的内容；
+            - 这是图书馆借阅系统的 AI 助手：优先给出能直接执行的动作类建议（如借阅某本书、续借、查询记录、查罚款），
+              其次才是开放性问题；
+            - 使用与对话一致的语言（默认中文）；
+            - 只输出 JSON 字符串数组本身，不要任何解释、markdown 代码块标记或其他文字。
+
+            ### 输出格式：
+            ["问题1", "问题2", "问题3"]
+
+            ### 对话历史：
+            %s
+            """;
+
+    /** 解析模型返回的 JSON 数组：容忍 ```json 围栏包裹，逐条修剪、去重、限量限长 */
+    private List<String> parseFollowUps(String answer) {
+        if (answer == null || answer.isBlank()) {
+            return List.of();
+        }
+        String text = answer.trim();
+        // 剥掉模型偶尔无视指令加上的 markdown 代码围栏
+        if (text.startsWith("```")) {
+            text = text.replaceFirst("^```(json)?\\s*", "").replaceFirst("```\\s*$", "").trim();
+        }
+        try {
+            JsonNode node = objectMapper.readTree(text);
+            if (!node.isArray()) {
+                return List.of();
+            }
+            List<String> result = new ArrayList<>();
+            for (JsonNode item : node) {
+                String s = item.asText("").trim();
+                if (s.isEmpty() || s.length() > FOLLOW_UP_MAX_LEN) continue;
+                if (result.contains(s)) continue;
+                result.add(s);
+                if (result.size() >= FOLLOW_UP_MAX_COUNT) break;
+            }
+            return result;
+        } catch (Exception e) {
+            log.info("[AI] 建议追问输出解析失败：{}", truncateAttempt(e));
+            return List.of();
+        }
+    }
+
+    /** 非流式模型构建（建议追问等辅助任务），配置 hash 缓存复用 */
+    private OpenAiChatModel getOrBuildSyncModel(AiConfig cfg) {
+        String hash = cfg.provider() + "|" + cfg.apiKey() + "|" + cfg.model() + "|" + cfg.endpoint()
+                + "|sync|log=" + logRequestsEnabled + "," + logResponsesEnabled;
+        OpenAiChatModel cached = syncModelCache.get(hash);
+        if (cached != null) {
+            return cached;
+        }
+        String baseUrl = normalizeBaseUrl(cfg.endpoint());
+        if (baseUrl == null || baseUrl.isBlank()) {
+            String provider = cfg.provider() == null ? "deepseek" : cfg.provider();
+            baseUrl = switch (provider) {
+                case "openai" -> "https://api.openai.com/v1";
+                case "deepseek" -> "https://api.deepseek.com";
+                case "qwen" -> "https://dashscope.aliyuncs.com/compatible-mode/v1";
+                case "moonshot" -> "https://api.moonshot.cn/v1";
+                case "zhipu" -> "https://open.bigmodel.cn/api/paas/v4";
+                case "baichuan" -> "https://api.baichuan-ai.com/v1";
+                case "minimax" -> "https://api.minimax.chat/v1";
+                default -> "https://api.deepseek.com";
+            };
+        }
+        OpenAiChatModel model = OpenAiChatModel.builder()
+                .baseUrl(baseUrl)
+                .apiKey(cfg.apiKey())
+                .modelName(cfg.model())
+                // 辅助任务关思考：即使渠道开了深度思考，这里也注入 thinking:disabled，
+                // 思维链只在用户对话的主流式请求里展开（两模型实例互不影响）。
+                // 装饰器只改写 DeepSeek 协议请求体，其他厂商不序列化该字段，互不干扰
+                .httpClientBuilder(new DeepSeekThinkingDisableHttpClient.Builder())
+                // 限制输出长度：3 条短句 + JSON 语法的上限（留余量防截断），避免生成冗长输出拖慢返回
+                .maxTokens(200)
+                .timeout(Duration.ofSeconds(FOLLOW_UP_TIMEOUT_SECONDS))
+                .logRequests(logRequestsEnabled)
+                .logResponses(logResponsesEnabled)
+                .build();
+        syncModelCache.put(hash, model);
+        return model;
     }
 
     // 模型列表动态拉取
@@ -2235,12 +2579,9 @@ public class AiService {
             if (text == null || text.isEmpty()) {
                 return;
             }
-            try {
-                emitter.send(org.springframework.web.servlet.mvc.method.annotation.SseEmitter
-                        .event().name("thinking").data(text));
-            } catch (java.io.IOException ignored) {
-                // 客户端已断开
-            }
+            // 复用外层静默发送：emitter 已完成时 IllegalStateException 不穿透（同 sendQuietly 注释）
+            sendQuietly(emitter, org.springframework.web.servlet.mvc.method.annotation.SseEmitter
+                    .event().name("thinking").data(text));
         }
     }
 

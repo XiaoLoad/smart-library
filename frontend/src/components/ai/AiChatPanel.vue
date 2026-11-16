@@ -230,6 +230,19 @@
               </div>
 
               <div class="msg-content markdown" v-html="m.html"></div>
+
+              <!-- 建议追问：最新回答下方的 ghost 灰字，点击直接作为新消息发送 -->
+              <div v-if="m.followUps?.length && !m.pending" class="followup-chips">
+                <button
+                  v-for="(s, i) in m.followUps"
+                  :key="i"
+                  class="followup-chip"
+                  type="button"
+                  @click="sendFollowUp(s)"
+                >
+                  {{ s }}
+                </button>
+              </div>
             </div>
           </div>
         </template>
@@ -251,7 +264,26 @@
         <el-icon><Lock /></el-icon>
         <span>授权请求等待处理中：全部确认或取消后才能继续对话</span>
       </div>
+      <div v-else-if="asrRecording" class="panel-blocked-tip asr-tip">
+        <el-icon><Microphone /></el-icon>
+        <span>正在录音 {{ asrRecordingSec }}s，再次点击麦克风结束并转写，最长 120 秒</span>
+      </div>
       <div class="input-actions">
+        <!-- 语音输入：与 /ai/chat 页同款（WebAudio 录 WAV → 后端中转云端 ASR），未配置渠道时隐藏 -->
+        <el-button
+          v-if="asrAvailable"
+          size="small"
+          text
+          class="mic-btn"
+          :class="{ recording: asrRecording }"
+          :disabled="asrTranscribing"
+          :title="asrTranscribing ? '正在转写…' : asrRecording ? `停止并转写（${asrRecordingSec}s）` : '语音输入'"
+          @click="toggleVoiceInput"
+        >
+          <el-icon><Loading v-if="asrTranscribing" class="is-loading" /><Microphone v-else /></el-icon>
+          <span v-if="asrRecording" class="mic-sec">{{ asrRecordingSec }}s</span>
+        </el-button>
+        <span class="input-spacer" />
         <el-button v-if="generating" size="small" @click="stopGenerate">停止</el-button>
         <el-button v-else type="primary" size="small" @click="send">发送</el-button>
       </div>
@@ -268,17 +300,16 @@
  */
 import { ref, reactive, computed, nextTick, onBeforeUnmount } from 'vue'
 import { useRoute } from 'vue-router'
-import { Loading, Check, Close, Lock, Warning, DataBoard } from '@element-plus/icons-vue'
+import { Loading, Check, Close, Lock, Warning, DataBoard, Microphone } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
-import MarkdownIt from 'markdown-it'
-import hljs from 'highlight.js'
-import 'highlight.js/styles/github.css'
-import { aiApi } from '@/api'
+import { aiApi, asrApi } from '@/api'
 import { useAiSearchStore } from '@/stores/aiSearch'
 import AppIcon from '@/components/AppIcon.vue'
 import AiGenUi from '@/components/ai/AiGenUi.vue'
 import { createStreamRenderer } from '@/utils/streamRender'
+import { renderMarkdown, renderMarkdownStream, handleCodeCopyClick } from '@/utils/markdown'
 import { classifyAiError, describeWithAction, AiErrorKind } from '@/utils/aiErrors'
+import { MicRecorder } from '@/utils/recorder'
 
 const emit = defineEmits(['state-change'])
 
@@ -294,8 +325,6 @@ const route = useRoute()
 // AI 检索联动：queryBooks 等工具返回的图书列表写入该 store，图书检索页 watch 联动。
 // 广播有页面条件收窄（见 done 回调）：仅当前在馆藏图书页时写入
 const aiSearchStore = useAiSearchStore()
-
-const md = new MarkdownIt({ html: false, breaks: true, linkify: true })
 
 const TOOL_LABELS = {
   queryCategories: '查询图书分类',
@@ -522,28 +551,10 @@ const handleUnauthorized = (message) => {
   }, 500)
 }
 
-/**
- * A4：[资料 N] 引用角标渲染（与 /ai/chat 页同一约定）。
- * 编号不存在（模型编造）时原样保留文本。
- */
-const CITE_RE = /\[资料\s*(\d+)\]/g
-const renderCitations = (html, sources) => {
-  if (!html || !sources || !sources.length) return html
-  const valid = new Set(sources.map((s) => s.sourceNo))
-  return html.replace(CITE_RE, (match, num) => {
-    const n = Number(num)
-    if (!valid.has(n)) return match
-    return `<sup class="cite-badge" data-src="${n}" title="查看资料 ${n}">${n}</sup>`
-  })
-}
-
-const renderMarkdown = (content, sources) => {
-  if (!content) return ''
-  try { return renderCitations(md.render(content), sources) } catch { return md.utils.escapeHtml(content) }
-}
-
-/** 角标点击（事件委托）：展开/收起对应编号的片段摘要 */
+/** 角标 / 代码块复制按钮点击（事件委托，v-html 内容无法直接绑事件）：
+ *  先处理复制按钮（命中则结束），再处理引用角标——展开/收起对应编号的片段摘要 */
 const handleCitationClick = (m, e) => {
+  if (handleCodeCopyClick(e)) return
   const badge = e.target.closest('.cite-badge')
   if (!badge) return
   const n = Number(badge.dataset.src)
@@ -677,9 +688,95 @@ const onScroll = () => {
 const showJump = () => {}
 
 /** 挂载后首次展开时调用：加载最近会话 */
+/* ==================== 语音输入（ASR）====================
+ * 与 /ai/chat 页同款：WebAudio 录 16kHz 单声道 WAV → 后端中转云端转写。
+ * 文本回填输入框可编辑后再发送；状态检查挂在懒初始化 init() 里，
+ * 悬浮球未展开时不产生多余请求。
+ */
+const ASR_MAX_MS = 120000
+const asrAvailable = ref(false)
+const asrRecording = ref(false)
+const asrTranscribing = ref(false)
+const asrRecordingSec = ref(0)
+let micRecorder = null
+let asrTickTimer = null
+
+const checkAsrStatus = async () => {
+  try {
+    const data = await asrApi.status()
+    asrAvailable.value = !!data.available
+  } catch {
+    asrAvailable.value = false
+  }
+}
+
+const stopAsrTick = () => {
+  clearInterval(asrTickTimer)
+  asrTickTimer = null
+}
+
+/** 录音收尾：上传转写并把文本回填输入框（已有草稿时追加，不覆盖） */
+const finishAsr = async (result) => {
+  stopAsrTick()
+  asrRecording.value = false
+  micRecorder = null
+  if (!result) return
+  const { blob, durationMs } = result
+  if (durationMs < 600) {
+    ElMessage.warning('录音时间太短，请点击后正常说话')
+    return
+  }
+  asrTranscribing.value = true
+  try {
+    // 不传 language：DeepSeek 自动识别语种，多余表单字段有被上游 400 拒绝的风险
+    const data = await asrApi.transcribe(new File([blob], 'speech.wav', { type: 'audio/wav' }))
+    const text = (data.text || '').trim()
+    if (!text) {
+      ElMessage.info('未识别到语音内容，请再试一次')
+      return
+    }
+    input.value = input.value ? `${input.value} ${text}` : text
+  } catch {
+    // 错误已由拦截器提示（渠道未配置/超时/超限等）
+  } finally {
+    asrTranscribing.value = false
+  }
+}
+
+const toggleVoiceInput = async () => {
+  if (asrTranscribing.value) return
+  if (asrRecording.value) {
+    const result = await micRecorder?.stop()
+    await finishAsr(result)
+    return
+  }
+  micRecorder = new MicRecorder({
+    maxDurationMs: ASR_MAX_MS,
+    onMaxDuration: (result) => {
+      ElMessage.info('已达 120 秒录音上限，自动开始转写')
+      finishAsr(result)
+    },
+  })
+  try {
+    await micRecorder.start()
+    asrRecording.value = true
+    asrRecordingSec.value = 0
+    asrTickTimer = setInterval(() => { asrRecordingSec.value++ }, 1000)
+  } catch (e) {
+    micRecorder = null
+    ElMessage.error(e?.message || '麦克风启动失败')
+  }
+}
+
+onBeforeUnmount(() => {
+  stopAsrTick()
+  micRecorder?.cancel()
+})
+
 const init = async () => {
   if (inited) return
   inited = true
+  checkAsrStatus()
   try {
     const data = await aiApi.conversationList()
     const list = data.list || []
@@ -753,6 +850,17 @@ const send = async () => {
   await sendInternal(content, { continuation: false })
 }
 
+/** 建议追问 chips 点击：把追问文本直接作为新消息发送（面板流式串行，generating 时忽略） */
+const sendFollowUp = async (text) => {
+  const content = (text || '').trim()
+  if (!content || generating.value) return
+  if (hasPendingConfirm.value) {
+    ElMessage.warning('请先处理上方待确认的授权请求（确认或取消）后再继续对话')
+    return
+  }
+  await sendInternal(content, { continuation: false })
+}
+
 /**
  * M8 确认续跑：授权确认成功后自动发起的下一轮对话（面板内与助手页行为一致）。
  * M11 聚合续跑：本轮全部授权卡处理完毕才调用。
@@ -787,6 +895,10 @@ const maybeContinueAfterAllResolved = (msg, toolSummary) => {
 const sendInternal = async (content, { continuation }) => {
   if (generating.value) return
   lastUserText.value = continuation ? lastUserText.value : content
+  // 建议追问「仅最新回答」：发新消息即清除全部旧 chips
+  for (const m of messages.value) {
+    if (m.followUps) m.followUps = null
+  }
   // 新一轮：重置检索联动候补与写操作标记
   pendingAiSearch = null
   turnHasWrite = false
@@ -936,9 +1048,10 @@ const sendInternal = async (content, { continuation }) => {
         msg.reasoningStreaming = false
         msg.reasoningOpen = false
         msg.content += data
-        // A1：delta 高频到达，渲染走自适应节流，done/final 时 flush 补尾
+        // A1：delta 高频到达，渲染走自适应节流，done/final 时 flush 补尾。
+        // 流式渲染前先补齐未闭合语法（裸 ** / 裸 ` / 未闭合围栏），终态用原始全文重渲染
         streamRenderer?.schedule(() => {
-          msg.html = renderMarkdown(msg.content, msg.ragSources)
+          msg.html = renderMarkdownStream(msg.content, msg.ragSources)
           scrollToBottom()
         })
       } else if (event === 'reset') {
@@ -1126,6 +1239,15 @@ const sendInternal = async (content, { continuation }) => {
         if (event === 'done' && (msg.toolEvents || []).some((e) => e._inlineGen)) {
           scrollToFirstGenCard(msg)
         }
+      } else if (event === 'followups') {
+        // 建议追问（方案 A）：后端 done 后后台生成，经同一 SSE 推送（JSON 字符串数组）。
+        // 挂到本轮助手消息上渲染 chips；仅最新回答显示——若用户已发出新消息则丢弃
+        if (msg && messages.value[messages.value.length - 1] === msg) {
+          try {
+            const list = JSON.parse(data)
+            if (Array.isArray(list) && list.length) msg.followUps = list
+          } catch { /* 解析失败忽略 */ }
+        }
       }
     }
     while (true) {
@@ -1283,23 +1405,7 @@ defineExpose({ init, destroy, send, prefill })
   word-break: break-word;
 }
 .msg-body { min-width: 0; }
-.markdown {
-  font-size: 14px;
-  line-height: 1.6;
-  color: var(--color-text, #333);
-  word-break: break-word;
-}
-.markdown :deep(pre) {
-  background: var(--color-bg-subtle, #f4f4f5);
-  border-radius: 8px;
-  padding: 10px 12px;
-  overflow-x: auto;
-  font-size: 12px;
-}
-.markdown :deep(code) { font-family: var(--font-mono, monospace); }
-.markdown :deep(p) { margin: 0 0 8px; }
-.markdown :deep(p:last-child) { margin-bottom: 0; }
-.markdown :deep(ul), .markdown :deep(ol) { margin: 0 0 8px; padding-left: 20px; }
+/* Markdown 排版已抽至 styles/ai-markdown.css（utils/markdown.js 导入生效，与 /ai/chat 页共用） */
 
 /* 深度思考面板（精简版） */
 .reason-panel { margin-bottom: 8px; }
@@ -1589,33 +1695,6 @@ defineExpose({ init, destroy, send, prefill })
   word-break: break-word;
 }
 
-/* —— A4：正文引用角标（与 /ai/chat 页同一视觉语言） —— */
-.markdown .cite-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 18px;
-  height: 18px;
-  margin: 0 3px;
-  padding: 0 5px;
-  border-radius: 999px;
-  border: 1px dashed var(--color-primary, #4a6b7c);
-  background: var(--color-primary-light, #e8eef0);
-  color: var(--color-primary, #4a6b7c);
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 1;
-  vertical-align: super;
-  cursor: pointer;
-  user-select: none;
-  transition: all 0.15s ease;
-}
-.markdown .cite-badge:hover {
-  border-style: solid;
-  background: var(--color-primary, #4a6b7c);
-  color: #fff;
-}
-
 /* 等待指示 */
 .thinking {
   display: inline-flex;
@@ -1658,8 +1737,20 @@ defineExpose({ init, destroy, send, prefill })
 .input-actions {
   display: flex;
   justify-content: flex-end;
+  align-items: center;
   margin-top: 8px;
 }
+/* 语音输入麦克风：靠左占位，与右侧发送/停止分离；录音中红色呼吸提示 */
+.input-spacer { flex: 1; }
+.mic-btn { color: var(--color-text-secondary, #8a8580); }
+.mic-btn:hover { color: var(--color-primary, #4a7c59); }
+.mic-btn.recording {
+  color: var(--color-danger, #a85a4a);
+  animation: asr-pulse 1.2s ease-in-out infinite;
+}
+.mic-btn .mic-sec { margin-left: 3px; font-variant-numeric: tabular-nums; }
+.asr-tip { color: var(--color-danger, #a85a4a); }
+@keyframes asr-pulse { 50% { opacity: 0.6; } }
 
 /* M10：授权卡结果内联（与 /ai/chat 页样式一致） */
 .confirm-batch-result {

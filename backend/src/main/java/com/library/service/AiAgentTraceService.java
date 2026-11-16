@@ -39,6 +39,12 @@ public class AiAgentTraceService {
          * 按时间顺序落 JSON 数组，管理端可完整回放授权链路。
          */
         private final java.util.List<String> approvalAudit = new java.util.concurrent.CopyOnWriteArrayList<>();
+        /**
+         * B4：渠道尝试审计事件序（对齐 harness 的 attempt 留痕）。
+         * 每项格式 "try:idx:渠道名" / "fail:idx:渠道名:错误摘要" / "switched:idx->next:渠道名"
+         * / "final-error:错误摘要"，按时间顺序落 JSON 数组，管理端可回放故障转移链路。
+         */
+        private final java.util.List<String> attemptAudit = new java.util.concurrent.CopyOnWriteArrayList<>();
         private final long startAt = System.currentTimeMillis();
         private volatile boolean gateTriggered = false;
         private volatile String gateTool = null;
@@ -84,6 +90,21 @@ public class AiAgentTraceService {
 
         public List<String> getApprovalAudit() {
             return approvalAudit;
+        }
+
+        /**
+         * B4：记录一次渠道尝试事件。
+         *
+         * @param event 完整事件文本（如 "try:0:DeepSeek"、"fail:0:硅基流动:429"、"final-error:超时"）
+         */
+        public void recordAttempt(String event) {
+            if (event != null && !event.isBlank()) {
+                attemptAudit.add(event);
+            }
+        }
+
+        public List<String> getAttemptAudit() {
+            return attemptAudit;
         }
 
         public void markGate(String toolName) {
@@ -168,6 +189,7 @@ public class AiAgentTraceService {
             t.setToolSequence(toJsonArray(c.toolSequence));
             t.setThoughtSummary(toJsonArray(c.thoughtSummary));
             t.setApprovalAudit(toJsonArray(c.getApprovalAudit()));
+            t.setAttemptAudit(toJsonArray(c.getAttemptAudit()));
             // 轮次取实际框架计数（至少 1：用到工具即视为 1 轮），工具数仍按工具调用次数
             t.setToolRounds(Math.max(1, c.getToolRounds()));
             t.setToolCount(c.toolSequence.size());
