@@ -139,17 +139,30 @@
                   </transition>
                 </div>
 
-                <!-- M4：Agent 决策时间线
-                     把「思考旁白 → 工具调用 → 授权请求」按实际发生顺序串成一条链，
-                     让 Agent 的规划与自主决策过程可见（评审考察点：Agent 是否具备规划能力）。
-                     工具卡片沿用原有 pill 形态，thought 用左侧竖线旁白，confirm 用授权卡 -->
-                <div v-if="m.timeline && m.timeline.length" class="timeline">
-                  <!-- 多工具串联计数：调用 ≥ 2 个时显示链路概览 -->
-                  <div v-if="m.toolEvents.length >= 2" class="tool-chain-head">
-                    <el-icon class="chain-icon"><Connection /></el-icon>
-                    <span>本次共调用 {{ m.toolEvents.length }} 个工具</span>
-                  </div>
+                <!-- M4：Agent 决策时间线（harness 式折叠汇总）。
+                     把「思考旁白 → 工具调用 → 授权请求」按实际发生顺序串成一条链。
+                     结束态默认折叠为一行类别计数汇总（「已查询图书 · 已提交借阅 · 12.4s」），
+                     点击展开完整链路；运行态保持展开看实时进度。
+                     数据全量保留在 timeline 中，折叠只控制可见性 -->
+                <div v-if="m.timeline && m.timeline.length" class="timeline-wrap">
+                  <!-- 折叠汇总行：仅结束态（非 running）且有 ≥1 个工具节点时显示 -->
+                  <button
+                    v-if="!m._timelineRunning && m.toolEvents.length > 0"
+                    class="timeline-summary"
+                    :aria-expanded="m._timelineOpen || undefined"
+                    @click="m._timelineOpen = !m._timelineOpen"
+                  >
+                    <el-icon class="summary-icon"><Connection /></el-icon>
+                    <span class="summary-text">{{ timelineSummary(m) }}</span>
+                    <span v-if="m.reasoningSeconds != null" class="summary-time">{{ m.reasoningSeconds }}s</span>
+                    <AppIcon name="chevron-down" :size="12" class="summary-chevron" :class="{ open: m._timelineOpen }" />
+                  </button>
 
+                  <!-- 完整时间线：运行态恒显示；结束态受 _timelineOpen 控制 -->
+                  <div
+                    v-show="m._timelineRunning || !m.toolEvents.length || m._timelineOpen"
+                    class="timeline"
+                  >
                   <div v-for="(node, ni) in m.timeline" :key="ni" class="timeline-node" :class="node.kind">
                     <!-- 节点序号：左侧轴线上的圆点标记 -->
                     <span class="timeline-seq">{{ ni + 1 }}</span>
@@ -193,6 +206,7 @@
                       <el-icon><Lock /></el-icon>
                       <span>等待你的授权确认</span>
                     </div>
+                  </div>
                   </div>
                 </div>
 
@@ -651,6 +665,45 @@ const inlineGenCards = (m) =>
 
 const genCardTitle = (card) =>
   GEN_CARD_TITLES[card._genType] || '数据卡片'
+
+// —— M4 时间线折叠汇总（harness 式：结束后折叠为类别计数一行）——
+
+/** 工具名 → 类别标签（计数汇总用；比 TOOL_LABELS 更粗粒度，同类合并） */
+const TOOL_KINDS = {
+  queryCategories: '查询分类',
+  queryBooks: '查询图书',
+  queryHotBooks: '查询排行',
+  queryAnnouncements: '查询公告',
+  queryMyBorrows: '查询借阅',
+  queryMyFines: '查询罚款',
+  queryBorrowQuota: '查询额度',
+  queryMyNotifications: '查询通知',
+  applyBorrow: '提交借阅',
+  renewMyBorrow: '办理续借',
+  requestReturn: '办理归还',
+  adminQueryBorrows: '查询借阅',
+  adminQueryFines: '查询罚款',
+  adminQueryUsers: '查询读者',
+  adminQueryStats: '统计概览',
+  adminCounterProcess: '柜台办理',
+}
+const toolKind = (name) => TOOL_KINDS[name] || toolLabel(name)
+
+/**
+ * 结束态时间线的折叠汇总标题：按工具类别计数排名（前 3），
+ * 形如「查询图书 ×2 · 提交借阅 ×1 · 柜台办理 ×1」。零工具时回退「已完成处理」。
+ */
+const timelineSummary = (m) => {
+  const counts = new Map()
+  for (const t of m.toolEvents || []) {
+    if (t.phase !== 'end') continue
+    const kind = toolKind(t.name)
+    counts.set(kind, (counts.get(kind) || 0) + 1)
+  }
+  if (!counts.size) return '已完成处理'
+  const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3)
+  return ranked.map(([kind, n]) => (n > 1 ? `${kind} ×${n}` : kind)).join(' · ')
+}
 
 /** 快照时点展示（历史卡片角标）：今天显示时分，更早显示 月-日 时:分 */
 const formatSnapTime = (t) => {
@@ -1662,6 +1715,9 @@ const sendInternal = async (content, { continuation, convId: explicitConvId, bra
     batchConfirmCard: null,
     // M4：Agent 决策时间线（thought 旁白节点），与工具卡片交替构成决策链视图
     timeline: [],
+    // M4 折叠汇总：运行态恒展开显示实时进度；done/error 后置 false → 折叠为计数汇总行
+    _timelineRunning: true,
+    _timelineOpen: false,
     createTime: new Date().toISOString(),
   })
   st.messages.push(assistantMsg)
@@ -1765,8 +1821,11 @@ const sendInternal = async (content, { continuation, convId: explicitConvId, bra
         msg.pending = false
         if (data) {
           if (!msg._reasonSegOpen) {
-            // 上一段思维链已被工具调用/正文截断 → 新开一段（多轮工具调用场景）
-            msg.reasoningSegments.push('')
+            // 上一段思维链已被工具调用/正文截断 → 新开一段（多轮工具调用场景）。
+            // 首段同理：首个思考增量才建段（harness 同款——空白流式尾巴不产生行）
+            if (msg.reasoningSegments.length === 0 || String(msg.reasoningSegments[msg.reasoningSegments.length - 1]).trim() !== '') {
+              msg.reasoningSegments.push('')
+            }
             msg._reasonSegOpen = true
           }
           if (!msg.reasoningStreaming) {
@@ -1809,11 +1868,12 @@ const sendInternal = async (content, { continuation, convId: explicitConvId, bra
       } else if (event === 'delta') {
         const msg = ensureAssistantMsg()
         msg.pending = false
-        // 正文开始：思维链阶段结束，停止耗时并自动折叠面板（DeepSeek 式交互）
+        // 正文开始：思维链阶段结束，停止耗时计时。
+        // 面板折叠交还用户手动控制（对齐 harness：数据全量、开合由读者决定）——
+        // 原实现在首个正文增量即自动折叠，模型边想边说时面板刚展开就被收起
         stopReasonTimer(msg)
         msg._reasonSegOpen = false
         msg.reasoningStreaming = false
-        msg.reasoningOpen = false
         msg.content += data
         // A1：delta 高频到达，渲染走自适应节流（正文长时自动放宽间隔），done/final 时 flush 补尾
         streamRenderer?.schedule(() => {
@@ -1822,12 +1882,13 @@ const sendInternal = async (content, { continuation, convId: explicitConvId, bra
         })
       } else if (event === 'reset') {
         // 进入工具调用轮：清空工具调用前的过渡文本（正文只保留最终回答，
-        // 工具调用过程由工具卡片承载）；本段思维链结束，停止耗时并折叠面板
+        // 工具调用过程由工具卡片承载）；本段思维链结束，停止耗时。
+        // 面板保持当前开合状态——工具调用后模型通常会再思考，新一轮 thinking
+        // 事件会续写展开（原实现强制折叠，多轮工具场景面板反复开合跳变）
         const msg = ensureAssistantMsg()
         stopReasonTimer(msg)
         msg._reasonSegOpen = false
         msg.reasoningStreaming = false
-        msg.reasoningOpen = false
         msg.content = ''
         msg.html = ''
       } else if (event === 'final') {
@@ -1921,7 +1982,8 @@ const sendInternal = async (content, { continuation, convId: explicitConvId, bra
           stopReasonTimer(assistantMsg)
           assistantMsg._reasonSegOpen = false
           assistantMsg.reasoningStreaming = false
-          assistantMsg.reasoningOpen = false
+          // M4 折叠汇总：流正常结束，时间线切换为折叠态（汇总行 + 可手动展开）
+          assistantMsg._timelineRunning = false
         }
         // 流结束滚动定位：本轮有内联生成式卡片时滚到本轮第一张卡片，否则维持滚底
         if (convId === currentConvId.value) {
@@ -1933,12 +1995,20 @@ const sendInternal = async (content, { continuation, convId: explicitConvId, bra
           conv.title = content.length > 20 ? content.substring(0, 20) + '…' : content
         }
         // A2：本轮流结束（消息已落库），为本轮 user 消息拉取分支导航——
-        // 分支轮（编辑重发/重新生成）落库后同组出现新兄弟，导航立即更新
-        const localUserMsg = !continuation ? st.messages[st.messages.length - 2] : null
-        if (localUserMsg && localUserMsg.role === 'user') {
-          localUserMsg._fromHistory = true
-          loadBranchInfo(localUserMsg)
-        }
+        // 分支轮（编辑重发/重新生成）落库后同组出现新兄弟，导航立即更新。
+        // done 事件回传本轮 user 消息的真实落库 id：本地推送的是 Date.now()
+        // 临时 id，不回传真实 id 的话分支查询/编辑重发必 404
+        try {
+          const doneInfo = JSON.parse(data)
+          if (doneInfo?.userMessageId) {
+            const localUserMsg = !continuation ? st.messages[st.messages.length - 2] : null
+            if (localUserMsg && localUserMsg.role === 'user') {
+              localUserMsg.id = doneInfo.userMessageId
+              localUserMsg._fromHistory = true
+              loadBranchInfo(localUserMsg)
+            }
+          }
+        } catch { /* 兼容旧格式 [DONE]：无分支导航，不影响对话 */ }
       } else if (event === 'confirm') {
         // 写操作授权请求：模型发起写操作被门禁拦截，改为向用户请求授权。
         // 卡片渲染在工具卡片之后，正文不受影响（后端拦截时不会发 reset 事件）。
@@ -2020,7 +2090,6 @@ const sendInternal = async (content, { continuation, convId: explicitConvId, bra
         stopReasonTimer(msg)
         msg._reasonSegOpen = false
         msg.reasoningStreaming = false
-        msg.reasoningOpen = false
         try {
           const info = JSON.parse(data)
           msg.degraded = true
@@ -2045,7 +2114,6 @@ const sendInternal = async (content, { continuation, convId: explicitConvId, bra
         stopReasonTimer(msg)
         msg._reasonSegOpen = false
         msg.reasoningStreaming = false
-        msg.reasoningOpen = false
         // 已有正文时保留原内容，错误说明追加其后（避免中途出错抹掉已流出的回答）
         const errTip = `⚠️ ${data || 'AI 请求出错'}`
         msg.content = msg.content ? `${msg.content}\n\n${errTip}` : errTip
@@ -2114,6 +2182,8 @@ const sendInternal = async (content, { continuation, convId: explicitConvId, bra
       stopReasonTimer(assistantMsg)
       assistantMsg._reasonSegOpen = false
       assistantMsg.reasoningStreaming = false
+      // M4 折叠汇总兜底：error/中断/停止路径也要结束运行态（done 之外的退出都走这里）
+      assistantMsg._timelineRunning = false
     }
     // 排队出口：本会话还有排队消息时自动发出下一条（排队模型的闭环）
     flushQueue(convId)
@@ -2658,11 +2728,10 @@ onMounted(loadConversations)
   40% { transform: scale(1.15); opacity: 1; }
 }
 
-/* 思维链正文：小号次级文字，限高内滚，避免超长推理撑爆对话区 */
+/* 思维链正文：小号次级文字。不限高——开合由用户控制（对齐 harness 数据全量原则），
+   限高会把长思考藏进内滚小窗，「显示不全」的观感正源于此 */
 .reason-body {
   padding: 0 12px 10px 38px;
-  max-height: 240px;
-  overflow-y: auto;
   font-size: var(--fs-caption);
   line-height: 1.75;
   color: var(--color-text-secondary);
@@ -3017,6 +3086,39 @@ onMounted(loadConversations)
   margin-bottom: 2px;
 }
 .chain-icon { font-size: 12px; }
+
+/* M4 折叠汇总行：结束态的时间线入口（harness 式类别计数标题） */
+.timeline-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  align-self: flex-start;
+  border: 1px dashed var(--color-border);
+  background: var(--color-bg-subtle);
+  border-radius: var(--radius-pill);
+  padding: 5px 12px;
+  font-size: var(--fs-caption);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  margin-bottom: var(--space-2);
+  transition: all var(--duration-fast) var(--ease-soft);
+}
+.timeline-summary:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  background: var(--color-primary-light);
+}
+.timeline-summary .summary-icon { font-size: 13px; }
+.timeline-summary .summary-time {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+}
+.timeline-summary .summary-chevron {
+  transition: transform var(--duration-fast) var(--ease-soft);
+  color: var(--color-text-tertiary);
+}
+.timeline-summary .summary-chevron.open { transform: rotate(180deg); }
 
 /* tool-card 是容器，不再承载 pill 样式；负责纵向堆叠 head + data */
 .tool-card {
