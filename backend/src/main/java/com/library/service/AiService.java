@@ -13,6 +13,7 @@ import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.memory.ChatMemory;
 import dev.langchain4j.memory.chat.MessageWindowChatMemory;
+import dev.langchain4j.model.openai.OpenAiChatModel;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import dev.langchain4j.rag.DefaultRetrievalAugmentor;
 import dev.langchain4j.rag.RetrievalAugmentor;
@@ -43,6 +44,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 
 import static dev.langchain4j.store.embedding.filter.MetadataFilterBuilder.metadataKey;
@@ -93,6 +95,14 @@ public class AiService {
     private static final long MODEL_TIMEOUT_SECONDS = 300L;
     /** RAG 来源回传给前端的单个片段摘要最大字符数 */
     private static final int RAG_SNIPPET_MAX_LEN = 120;
+    /** 建议追问：参考的历史消息条数（对齐 Open WebUI 的 MESSAGES:END:6） */
+    private static final int FOLLOW_UP_HISTORY_MESSAGES = 6;
+    /** 建议追问：最多返回条数 */
+    private static final int FOLLOW_UP_MAX_COUNT = 3;
+    /** 建议追问：单条最大字符数（过长说明模型没按「短句」要求输出，宁可丢弃） */
+    private static final int FOLLOW_UP_MAX_LEN = 60;
+    /** 建议追问：模型调用超时（秒）——辅助任务必须快速返回，失败静默不影响主对话 */
+    private static final long FOLLOW_UP_TIMEOUT_SECONDS = 20L;
 
     @Autowired private AiConversationMapper conversationMapper;
     @Autowired private AiMessageMapper messageMapper;
@@ -120,6 +130,9 @@ public class AiService {
 
     /** 缓存各渠道配置构建的流式模型（key = 配置 hash）。故障转移时多渠道并存复用，避免重复创建 OkHttpClient */
     private final Map<String, OpenAiStreamingChatModel> modelCache = new ConcurrentHashMap<>();
+
+    /** 缓存各渠道配置构建的非流式模型（key = 配置 hash）。建议追问等辅助任务使用，独立超时更快失败 */
+    private final Map<String, OpenAiChatModel> syncModelCache = new ConcurrentHashMap<>();
 
     // 模型请求/响应日志开关（application.yml app.ai.log-requests/log-responses）
     // 完整 prompt 含用户借阅记录等个人信息，日志打开等于把 PII 写进日志文件——生产必须关闭
@@ -361,6 +374,9 @@ public class AiService {
      *   <li>{@code tool}  —— 工具调用过程（JSON：{name, phase, detail}）</li>
      *   <li>{@code done}  —— "[DONE]"，表示本轮结束</li>
      *   <li>{@code error} —— 错误消息</li>
+     *   <li>{@code followups} —— 建议追问（JSON 字符串数组）：done 之后后台线程生成
+     *       （关思考+限长的非流式调用，1-2s），完成经同一连接推送，之后才 emitter.complete()；
+     *       前端渲染为最新回答下方的可点击 chips（点击即发送）</li>
      * </ul>
      * <p>
      * 记忆策略：每请求从 DB 加载历史「纯文本」消息（用户提问 + AI 最终回答）构建窗口记忆；
@@ -809,7 +825,29 @@ public class AiService {
                         } catch (IOException e) {
                             // 忽略
                         }
-                        emitter.complete();
+                        // 建议追问（方案 A）：主回答已落库，后台线程立即生成（关思考+限长，1-2s），
+                        // 完成后经同一 SSE 连接推 followups 事件再收尾——省掉前端 REST 往返，
+                        // chips 出现更快。用户已关页时 sendQuietly 静默、complete 安全收尾
+                        final SseEmitter followUpEmitter = emitter;
+                        final Long followUpConversationId = conversationId;
+                        CompletableFuture.runAsync(() -> {
+                            try {
+                                List<String> followUps = generateFollowUpsInternal(followUpConversationId);
+                                if (!followUps.isEmpty()) {
+                                    sendQuietly(followUpEmitter, SseEmitter.event().name("followups")
+                                            .data(objectMapper.writeValueAsString(followUps)));
+                                }
+                            } catch (Exception e) {
+                                // 生成/推送失败静默收尾，不影响本轮已完成的回答
+                                log.info("[AI] 建议追问后台生成/推送失败：{}", truncateAttempt(e));
+                            } finally {
+                                try {
+                                    followUpEmitter.complete();
+                                } catch (Exception ignored) {
+                                    // emitter 已完成/已超时
+                                }
+                            }
+                        });
                     })
                     .onError(err -> onRoundError(err))
                             .start();
@@ -1641,7 +1679,26 @@ public class AiService {
         }
 
         sendQuietly(emitter, SseEmitter.event().name("done").data("[DONE]"));
-        emitter.complete();
+        // 建议追问（方案 A）：降级轮同样生成（与正常完成同一异步推送逻辑，完成后收尾连接）
+        final SseEmitter degradeEmitter = emitter;
+        final Long degradeConversationId = conversationId;
+        CompletableFuture.runAsync(() -> {
+            try {
+                List<String> followUps = generateFollowUpsInternal(degradeConversationId);
+                if (!followUps.isEmpty()) {
+                    sendQuietly(degradeEmitter, SseEmitter.event().name("followups")
+                            .data(objectMapper.writeValueAsString(followUps)));
+                }
+            } catch (Exception e) {
+                log.info("[AI] 建议追问后台生成/推送失败：{}", truncateAttempt(e));
+            } finally {
+                try {
+                    degradeEmitter.complete();
+                } catch (Exception ignored) {
+                    // emitter 已完成/已超时
+                }
+            }
+        });
     }
 
     /**
@@ -2143,6 +2200,172 @@ public class AiService {
 
     private String str(Object o, String def) {
         return o == null || o.toString().isBlank() ? def : o.toString();
+    }
+
+    // 建议追问（意图识别）
+
+    /**
+     * 建议追问生成：基于会话最近的历史消息，站在用户视角推测 3 条最可能的下一步提问。
+     * <p>
+     * 实现对齐 Open WebUI 的 Follow-Up Prompts，并针对速度做了三件事（方案 A）：
+     * <ul>
+     *   <li>关思考：渠道即使开启深度思考，辅助任务也注入 thinking:disabled——
+     *       思维链只在主对话展开，这里省掉整段推理耗时（5s→1-2s 的大头）；</li>
+     *   <li>限制输出长度：maxTokens 200（3 条短句 + JSON 语法的上限，留余量防截断）；</li>
+     *   <li>渠道逐个尝试，全部失败静默返回空数组，永不影响主对话。</li>
+     * </ul>
+     * <p>
+     * 无鉴权：仅供主对话 done 后的后台线程调用（会话归属已在 chat() 入口校验）。
+     *
+     * @return 最多 3 条追问文本；无可生成条件（会话为空/最后一条不是 AI 回答/全部渠道失败）时返回空数组
+     */
+    private List<String> generateFollowUpsInternal(Long conversationId) {
+
+        // 取最近 N 条纯文本消息：过滤机制消息（[系统续跑]/[系统回执] 等带方括号前缀的非用户话语），
+        // 且最后一条必须是 AI 回答——用户刚提问还没回答时没有「下一步追问」可言
+        List<com.library.entity.AiMessage> visible = new ArrayList<>();
+        for (com.library.entity.AiMessage m : loadHistory(conversationId)) {
+            String content = m.getContent();
+            if (content == null || content.isBlank()) continue;
+            if (!"user".equalsIgnoreCase(m.getRole()) && !"assistant".equalsIgnoreCase(m.getRole())) continue;
+            if (content.startsWith(CONTINUATION_PREFIX) || content.startsWith("[系统回执]")) continue;
+            visible.add(m);
+        }
+        if (visible.isEmpty() || !"assistant".equalsIgnoreCase(visible.get(visible.size() - 1).getRole())) {
+            return List.of();
+        }
+        List<com.library.entity.AiMessage> recent = visible.size() > FOLLOW_UP_HISTORY_MESSAGES
+                ? visible.subList(visible.size() - FOLLOW_UP_HISTORY_MESSAGES, visible.size())
+                : visible;
+        StringBuilder historyText = new StringBuilder();
+        for (com.library.entity.AiMessage m : recent) {
+            String content = m.getContent();
+            // 单条超长截断：建议追问只需要主题语境，不必喂全文
+            if (content.length() > 500) {
+                content = content.substring(0, 500) + "…";
+            }
+            historyText.append("user".equalsIgnoreCase(m.getRole()) ? "用户：" : "助手：")
+                    .append(content).append('\n');
+        }
+
+        // 逐渠道尝试（与主对话同一候选顺序），全部失败静默返回空数组
+        List<AiConfig> candidates = orderedCandidates();
+        boolean anyChannel = false;
+        for (AiConfig cfg : candidates) {
+            if (cfg.apiKey() == null || cfg.apiKey().isBlank()) continue;
+            anyChannel = true;
+            try {
+                String answer = getOrBuildSyncModel(cfg).chat(FOLLOW_UP_PROMPT.formatted(historyText.toString()));
+                List<String> result = parseFollowUps(answer);
+                if (!result.isEmpty()) {
+                    log.info("[AI] 建议追问生成成功：{} 条，渠道={}", result.size(), channelLabel(cfg));
+                    return result;
+                }
+                // 输出解析为空：换下一个渠道再试，全部失败才静默返回空数组
+                log.info("[AI] 建议追问输出解析为空，换渠道重试，当前渠道={}", channelLabel(cfg));
+            } catch (Exception e) {
+                log.warn("[AI] 建议追问生成失败，渠道={}：{}", channelLabel(cfg), truncateAttempt(e));
+            }
+        }
+        if (!anyChannel) {
+            log.warn("[AI] 建议跳过追问生成：无可用 AI 渠道");
+        }
+        return List.of();
+    }
+
+    /**
+     * 建议追问 prompt（对齐 Open WebUI Follow-Up Generation Prompt 的中文版）：
+     * 以用户视角生成可直接发送的下一条消息，输出 JSON 字符串数组。
+     * 条数与 FOLLOW_UP_MAX_COUNT 保持一致（3），直接写死——避免双重 formatted
+     * 时残留占位符在类初始化阶段抛 MissingFormatArgumentException。
+     */
+    private static final String FOLLOW_UP_PROMPT = """
+            ### 任务：
+            基于以下对话历史，站在「用户」的视角，推测用户接下来最可能自然提出的 3 个追问或指令。
+
+            ### 要求：
+            - 以用户对助手说话的口吻撰写，可直接作为下一条用户消息发送；
+            - 简洁具体（不超过 20 字），与刚讨论的主题直接相关，不重复已覆盖的内容；
+            - 这是图书馆借阅系统的 AI 助手：优先给出能直接执行的动作类建议（如借阅某本书、续借、查询记录、查罚款），
+              其次才是开放性问题；
+            - 使用与对话一致的语言（默认中文）；
+            - 只输出 JSON 字符串数组本身，不要任何解释、markdown 代码块标记或其他文字。
+
+            ### 输出格式：
+            ["问题1", "问题2", "问题3"]
+
+            ### 对话历史：
+            %s
+            """;
+
+    /** 解析模型返回的 JSON 数组：容忍 ```json 围栏包裹，逐条修剪、去重、限量限长 */
+    private List<String> parseFollowUps(String answer) {
+        if (answer == null || answer.isBlank()) {
+            return List.of();
+        }
+        String text = answer.trim();
+        // 剥掉模型偶尔无视指令加上的 markdown 代码围栏
+        if (text.startsWith("```")) {
+            text = text.replaceFirst("^```(json)?\\s*", "").replaceFirst("```\\s*$", "").trim();
+        }
+        try {
+            JsonNode node = objectMapper.readTree(text);
+            if (!node.isArray()) {
+                return List.of();
+            }
+            List<String> result = new ArrayList<>();
+            for (JsonNode item : node) {
+                String s = item.asText("").trim();
+                if (s.isEmpty() || s.length() > FOLLOW_UP_MAX_LEN) continue;
+                if (result.contains(s)) continue;
+                result.add(s);
+                if (result.size() >= FOLLOW_UP_MAX_COUNT) break;
+            }
+            return result;
+        } catch (Exception e) {
+            log.info("[AI] 建议追问输出解析失败：{}", truncateAttempt(e));
+            return List.of();
+        }
+    }
+
+    /** 非流式模型构建（建议追问等辅助任务），配置 hash 缓存复用 */
+    private OpenAiChatModel getOrBuildSyncModel(AiConfig cfg) {
+        String hash = cfg.provider() + "|" + cfg.apiKey() + "|" + cfg.model() + "|" + cfg.endpoint()
+                + "|sync|log=" + logRequestsEnabled + "," + logResponsesEnabled;
+        OpenAiChatModel cached = syncModelCache.get(hash);
+        if (cached != null) {
+            return cached;
+        }
+        String baseUrl = normalizeBaseUrl(cfg.endpoint());
+        if (baseUrl == null || baseUrl.isBlank()) {
+            String provider = cfg.provider() == null ? "deepseek" : cfg.provider();
+            baseUrl = switch (provider) {
+                case "openai" -> "https://api.openai.com/v1";
+                case "deepseek" -> "https://api.deepseek.com";
+                case "qwen" -> "https://dashscope.aliyuncs.com/compatible-mode/v1";
+                case "moonshot" -> "https://api.moonshot.cn/v1";
+                case "zhipu" -> "https://open.bigmodel.cn/api/paas/v4";
+                case "baichuan" -> "https://api.baichuan-ai.com/v1";
+                case "minimax" -> "https://api.minimax.chat/v1";
+                default -> "https://api.deepseek.com";
+            };
+        }
+        OpenAiChatModel model = OpenAiChatModel.builder()
+                .baseUrl(baseUrl)
+                .apiKey(cfg.apiKey())
+                .modelName(cfg.model())
+                // 辅助任务关思考：即使渠道开了深度思考，这里也注入 thinking:disabled，
+                // 思维链只在用户对话的主流式请求里展开（两模型实例互不影响）。
+                // 装饰器只改写 DeepSeek 协议请求体，其他厂商不序列化该字段，互不干扰
+                .httpClientBuilder(new DeepSeekThinkingDisableHttpClient.Builder())
+                // 限制输出长度：3 条短句 + JSON 语法的上限（留余量防截断），避免生成冗长输出拖慢返回
+                .maxTokens(200)
+                .timeout(Duration.ofSeconds(FOLLOW_UP_TIMEOUT_SECONDS))
+                .logRequests(logRequestsEnabled)
+                .logResponses(logResponsesEnabled)
+                .build();
+        syncModelCache.put(hash, model);
+        return model;
     }
 
     // 模型列表动态拉取

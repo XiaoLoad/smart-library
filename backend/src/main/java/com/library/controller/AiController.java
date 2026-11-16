@@ -101,7 +101,8 @@ public class AiController {
      * confirm（写操作授权卡）/ batch_confirm（批量授权卡，batch 档位）/
      * rag（知识库参考资料，含 sourceNo 引用编号）/ thinking（深度思考思维链增量）/
      * delta（增量正文）/ final（消毒后最终正文替换）/ thought（工具轮决策旁白）/
-     * degrade（工具循环超限降级提示）/ done（"[DONE]"，本轮结束）/ error（错误消息）
+     * degrade（工具循环超限降级提示）/ done（"[DONE]"，本轮结束）/ error（错误消息）/
+     * followups（建议追问：done 后后台生成，JSON 字符串数组，最新回答下方的可点击 chips）
      * <p>
      * 以上事件与前端 SSE 解析逻辑一一对应，新增事件类型需同步前端处理。
      */
