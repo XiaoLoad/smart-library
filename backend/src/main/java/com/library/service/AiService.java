@@ -501,7 +501,11 @@ public class AiService {
             aiBatchConfirmService.clearAuditListener(conversationId);
         };
         emitter.onCompletion(unregister);
-        emitter.onTimeout(unregister);
+        emitter.onTimeout(() -> {
+            unregister.run();
+            // 诊断：记录超时原因，区分「5 分钟流超时」与「客户端断开」（后者走 onError/onCompletion）
+            log.info("[AI] SSE 连接超时关闭 conversationId={}（流总时长超过 {}s）", conversationId, SSE_TIMEOUT_MS / 1000);
+        });
         emitter.onError(t -> {
             unregister.run();
             // 客户端已断开：模型流仍在跑，但所有 emitter.send 会静默失败，
@@ -582,7 +586,7 @@ public class AiService {
                 if (data != null) {
                     payload.put("data", data);
                 }
-                emitter.send(SseEmitter.event().name("tool")
+                sendQuietly(emitter, SseEmitter.event().name("tool")
                         .data(objectMapper.writeValueAsString(payload)));
             } catch (IOException e) {
                 // 客户端已断开，忽略
@@ -614,7 +618,7 @@ public class AiService {
                 payload.put("ttlSeconds", 60);
                 // M8：本会话「始终允许」开关，前端渲染为授权卡上的勾选项
                 payload.put("sessionAllow", true);
-                emitter.send(SseEmitter.event().name("confirm")
+                sendQuietly(emitter, SseEmitter.event().name("confirm")
                         .data(objectMapper.writeValueAsString(payload)));
             } catch (IOException e) {
                 // 客户端已断开：作废令牌，用户重发消息后需重新发起授权
@@ -717,28 +721,20 @@ public class AiService {
                                 produced.set(true);
                                 // 深度思考思维链增量（reasoning_content）：独立 thinking 事件推给前端展示，
                                 // 不落库、不计入回答正文（与工具中间态一致，避免污染历史）
-                                try {
-                                    String t = partial.text();
-                                    if (t != null && !t.isEmpty()) {
-                                        emitter.send(SseEmitter.event().name("thinking").data(t));
-                                    }
-                                } catch (IOException e) {
-                                    // 客户端已断开，忽略
+                                String t = partial.text();
+                                if (t != null && !t.isEmpty()) {
+                                    sendQuietly(emitter, SseEmitter.event().name("thinking").data(t));
                                 }
                             })
                             .onPartialResponse(partial -> {
                                 produced.set(true);
-                                try {
-                                    // 经 <think> 标签过滤器分流：标签内 → thinking 事件，标签外 → delta
-                                    String routed = thinkFilter.feed(partial);
-                                    if (routed != null && !routed.isEmpty()) {
-                                        // M4：同时累积到过渡语缓冲，等工具开始时改道为 thought 事件。
-                                        // 缓冲内容若最终未被发出（模型直接给最终答案），在 onCompleteResponse 清空即可。
-                                        thoughtBuffer.append(routed);
-                                        emitter.send(SseEmitter.event().name("delta").data(routed));
-                                    }
-                                } catch (IOException e) {
-                                    // 客户端已断开，忽略
+                                // 经 <think> 标签过滤器分流：标签内 → thinking 事件，标签外 → delta
+                                String routed = thinkFilter.feed(partial);
+                                if (routed != null && !routed.isEmpty()) {
+                                    // M4：同时累积到过渡语缓冲，等工具开始时改道为 thought 事件。
+                                    // 缓冲内容若最终未被发出（模型直接给最终答案），在 onCompleteResponse 清空即可。
+                                    thoughtBuffer.append(routed);
+                                    sendQuietly(emitter, SseEmitter.event().name("delta").data(routed));
                                 }
                             })
                     .onCompleteResponse(response -> {
@@ -747,13 +743,9 @@ public class AiService {
                         thoughtBuffer.setLength(0);
                         // 冲刷 <think> 过滤器缓冲：pending 中滞留的末尾正文增量补发为 delta，
                         // 否则回答结尾会缺字（残片滞留缓冲从未被发出）
-                        try {
-                            String tail = thinkFilter.flush();
-                            if (tail != null && !tail.isEmpty()) {
-                                emitter.send(SseEmitter.event().name("delta").data(tail));
-                            }
-                        } catch (IOException ignored) {
-                            // 客户端已断开
+                        String tail = thinkFilter.flush();
+                        if (tail != null && !tail.isEmpty()) {
+                            sendQuietly(emitter, SseEmitter.event().name("delta").data(tail));
                         }
                         // 落库最终 AI 回答：取最终一轮模型响应的文本（不含工具轮过渡语），
                         // 并剔除模型误输出到正文的工具调用代码块/函数调用片段
@@ -763,11 +755,7 @@ public class AiService {
                         if (sanitized != null && !sanitized.isBlank()) {
                             // 正文被消毒过：推送 final 事件替换前端已流式拼接的内容
                             if (answer != null && !sanitized.equals(answer)) {
-                                try {
-                                    emitter.send(SseEmitter.event().name("final").data(sanitized));
-                                } catch (IOException e) {
-                                    // 忽略
-                                }
+                                sendQuietly(emitter, SseEmitter.event().name("final").data(sanitized));
                             }
                             com.library.entity.AiMessage aiMsg = new com.library.entity.AiMessage();
                             aiMsg.setConversationId(conversationId);
@@ -816,7 +804,7 @@ public class AiService {
                             // A2：done 事件回传本轮 user 消息的落库 id——前端本地消息是
                             // Date.now() 临时 id，凭它查分支必 404；拿到真实 id 后前端
                             // 才能正确拉分支导航/编辑重发/重新生成
-                            emitter.send(SseEmitter.event().name("done")
+                            sendQuietly(emitter, SseEmitter.event().name("done")
                                     .data(objectMapper.writeValueAsString(Map.of("userMessageId", userMsg.getId()))));
                         } catch (IOException e) {
                             // 忽略
@@ -832,6 +820,13 @@ public class AiService {
             }
 
             void onRoundError(Throwable err) {
+                // 客户端断开导致的「流错误」：emitter 已完成，上游流的后续推送被框架误认为错误回调。
+                // 属正常事件（关页面/刷新/网络抖动），静默结束——不打错误日志、不污染失败轨迹。
+                if (isEmitterDead(err)) {
+                    log.info("[AI] 客户端已断开，对话流静默结束 conversationId={}，渠道={}", conversationId,
+                            candidates.get(candidateIdx.get()) == null ? "-" : channelLabel(candidates.get(candidateIdx.get())));
+                    return;
+                }
                 // 工具循环超限：转优雅降级（degrade 事件），而非红色报错。
                 // 已完成的动作仍然有效，未完成部分提示用户再说一次。
                 if (isToolRoundLimitExceeded(err, toolRounds.get())) {
@@ -853,7 +848,7 @@ public class AiService {
                     trace.recordAttempt("switched:" + candidateIdx.get() + "->" + (candidateIdx.get() + 1)
                             + ":" + channelLabel(next));
                     try {
-                        emitter.send(SseEmitter.event().name("notice")
+                        sendQuietly(emitter, SseEmitter.event().name("notice")
                                 .data("「" + channelLabel(failed) + "」渠道繁忙，已自动切换到「" + channelLabel(next) + "」"));
                     } catch (Exception ignored) {
                         // 推送失败不影响切换
@@ -861,31 +856,27 @@ public class AiService {
                     start(candidateIdx.get() + 1);
                     return;
                 }
-                try {
-                    // 提取可读错误信息：LangChain4j 异常 message 常为空，需取 cause
-                    String msg = err.getMessage();
-                    if (msg == null || msg.isBlank()) {
-                        Throwable cause = err.getCause();
-                        if (cause != null) {
-                            msg = cause.getMessage();
-                        }
+                // 提取可读错误信息：LangChain4j 异常 message 常为空，需取 cause
+                String msg = err.getMessage();
+                if (msg == null || msg.isBlank()) {
+                    Throwable cause = err.getCause();
+                    if (cause != null) {
+                        msg = cause.getMessage();
                     }
-                    if (msg == null || msg.isBlank()) {
-                        msg = err.getClass().getSimpleName();
-                    }
-                    // 完整原文进日志与轨迹（排查用），前端只收净化后的文案
-                    log.warn("[AI] 对话流异常 conversationId={}，渠道={}：{}", conversationId,
-                            candidates.get(candidateIdx.get()) == null ? "-" : channelLabel(candidates.get(candidateIdx.get())),
-                            msg, err);
-                    // B4：最终失败留痕（final-error 事件——走到这里说明候选耗尽或不可切换）
-                    trace.recordAttempt("final-error:" + truncateAttempt(err));
-                    emitter.send(SseEmitter.event().name("error").data(friendlyModelError(msg)));
-                    // M6a：异常轨迹（记原文，管理员在轨迹页可见完整错误）
-                    trace.markError(msg);
-                    traceService.save(trace);
-                } catch (IOException e) {
-                    // 忽略
                 }
+                if (msg == null || msg.isBlank()) {
+                    msg = err.getClass().getSimpleName();
+                }
+                // 完整原文进日志与轨迹（排查用），前端只收净化后的文案
+                log.warn("[AI] 对话流异常 conversationId={}，渠道={}：{}", conversationId,
+                        candidates.get(candidateIdx.get()) == null ? "-" : channelLabel(candidates.get(candidateIdx.get())),
+                        msg, err);
+                // B4：最终失败留痕（final-error 事件——走到这里说明候选耗尽或不可切换）
+                trace.recordAttempt("final-error:" + truncateAttempt(err));
+                sendQuietly(emitter, SseEmitter.event().name("error").data(friendlyModelError(msg)));
+                // M6a：异常轨迹（记原文，管理员在轨迹页可见完整错误）
+                trace.markError(msg);
+                traceService.save(trace);
                 // 注意：不能用 completeWithError，否则 Spring 异常处理器会尝试用 JSON Result 写入 SSE 响应，触发 HttpMessageNotWritableException
                 emitter.complete();
             }
@@ -898,7 +889,7 @@ public class AiService {
         // 部分场景（如容器异步超时但连接仍在）前端会一直停在生成态；done 与正常结束同形，UI 才能闭环。
         emitter.onTimeout(() -> {
             try {
-                emitter.send(SseEmitter.event().name("done").data("[DONE]"));
+                sendQuietly(emitter, SseEmitter.event().name("done").data("[DONE]"));
             } catch (Exception ignored) {
                 // 连接已断，直接收尾
             }
@@ -949,6 +940,36 @@ public class AiService {
      * @param buffer  过渡语缓冲
      * @param traceCollector 轨迹收集器（可为 null）
      */
+    /**
+     * SSE 静默发送：emitter 已完成（客户端断开/超时）时 Spring 抛 IllegalStateException，
+     * 客户端断开后底层写失败抛 IOException——两者都是连接层的正常事件。
+     * 流式回调里不能让它们穿透到 LangChain4j 的 onError，否则会被当成「流错误」
+     * 再次尝试往同一 dead emitter 发错误事件，形成日志套娃（2026-11-16 实测）。
+     */
+    private static void sendQuietly(SseEmitter emitter, SseEmitter.SseEventBuilder event) {
+        try {
+            emitter.send(event);
+        } catch (IOException | IllegalStateException ignored) {
+            // 连接已断开，静默
+        }
+    }
+
+    /**
+     * 判断异常是否为「SSE 通道已完成」：客户端断开/超时后上游继续推流，
+     * Spring 在 send 时抛出的标志性错误（沿 cause 链查找，兼容框架包装）。
+     */
+    private static boolean isEmitterDead(Throwable t) {
+        while (t != null) {
+            if (t instanceof IllegalStateException ise
+                    && ise.getMessage() != null
+                    && ise.getMessage().contains("ResponseBodyEmitter has already completed")) {
+                return true;
+            }
+            t = t.getCause();
+        }
+        return false;
+    }
+
     private void emitPendingThought(SseEmitter emitter, StringBuilder buffer,
                                     AiAgentTraceService.Collector traceCollector) {
         if (buffer == null || buffer.length() == 0) {
@@ -984,14 +1005,10 @@ public class AiService {
         if (!isTerminalPunct(text.charAt(text.length() - 1))) {
             text = text + "…";
         }
-        try {
-            emitter.send(SseEmitter.event().name("thought").data(text));
-            // M6a：决策旁白记入轨迹（Agent 规划轨迹的可视化证据）
-            if (traceCollector != null) {
-                traceCollector.recordThought(text);
-            }
-        } catch (IOException e) {
-            // 客户端已断开，忽略
+        sendQuietly(emitter, SseEmitter.event().name("thought").data(text));
+        // M6a：决策旁白记入轨迹（Agent 规划轨迹的可视化证据）
+        if (traceCollector != null) {
+            traceCollector.recordThought(text);
         }
     }
 
@@ -1089,7 +1106,7 @@ public class AiService {
             if (result.get("failCount") instanceof Integer fc) {
                 payload.put("failCount", fc);
             }
-            emitter.send(SseEmitter.event().name("tool_result")
+            sendQuietly(emitter, SseEmitter.event().name("tool_result")
                     .data(objectMapper.writeValueAsString(payload)));
         } catch (Exception e) {
             // 推送失败不影响确认返回；前端用 confirm 接口返回值兜底
@@ -1202,7 +1219,7 @@ public class AiService {
             payload.put("rows", rows == null ? List.of() : rows);
             payload.put("ttlSeconds", 60);
             payload.put("sessionAllow", true);
-            emitter.send(SseEmitter.event().name("confirm")
+            sendQuietly(emitter, SseEmitter.event().name("confirm")
                     .data(objectMapper.writeValueAsString(payload)));
         } catch (IOException e) {
             if (token != null) {
@@ -1236,7 +1253,7 @@ public class AiService {
             payload.put("title", "批量授权（" + items.size() + " 项操作）");
             payload.put("rows", AiBatchConfirmService.mergeRows(items));
             payload.put("ttlSeconds", 120);
-            emitter.send(SseEmitter.event().name("batch_confirm")
+            sendQuietly(emitter, SseEmitter.event().name("batch_confirm")
                     .data(objectMapper.writeValueAsString(payload)));
         } catch (IOException e) {
             if (token != null) {
@@ -1602,7 +1619,7 @@ public class AiService {
             Map<String, Object> payload = new java.util.LinkedHashMap<>();
             payload.put("rounds", rounds);
             payload.put("message", text);
-            emitter.send(SseEmitter.event().name("degrade")
+            sendQuietly(emitter, SseEmitter.event().name("degrade")
                     .data(objectMapper.writeValueAsString(payload)));
         } catch (IOException e) {
             // 客户端已断开，忽略
@@ -1623,11 +1640,7 @@ public class AiService {
             log.warn("[AI] 降级文案落库失败: {}", e.getMessage());
         }
 
-        try {
-            emitter.send(SseEmitter.event().name("done").data("[DONE]"));
-        } catch (IOException e) {
-            // 忽略
-        }
+        sendQuietly(emitter, SseEmitter.event().name("done").data("[DONE]"));
         emitter.complete();
     }
 
@@ -1696,7 +1709,7 @@ public class AiService {
             if (sources.isEmpty()) {
                 return;
             }
-            emitter.send(SseEmitter.event().name("rag")
+            sendQuietly(emitter, SseEmitter.event().name("rag")
                     .data(objectMapper.writeValueAsString(sources)));
         } catch (IOException e) {
             // 客户端已断开，忽略
@@ -2343,12 +2356,9 @@ public class AiService {
             if (text == null || text.isEmpty()) {
                 return;
             }
-            try {
-                emitter.send(org.springframework.web.servlet.mvc.method.annotation.SseEmitter
-                        .event().name("thinking").data(text));
-            } catch (java.io.IOException ignored) {
-                // 客户端已断开
-            }
+            // 复用外层静默发送：emitter 已完成时 IllegalStateException 不穿透（同 sendQuietly 注释）
+            sendQuietly(emitter, org.springframework.web.servlet.mvc.method.annotation.SseEmitter
+                    .event().name("thinking").data(text));
         }
     }
 
