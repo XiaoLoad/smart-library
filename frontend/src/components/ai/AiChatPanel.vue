@@ -787,7 +787,7 @@ onBeforeUnmount(() => {
 const init = async () => {
   if (inited) return
   inited = true
-  checkAsrStatus()
+  await checkAsrStatus()
   try {
     const data = await aiApi.conversationList()
     const list = data.list || []
@@ -1399,7 +1399,20 @@ const prefillConversation = async (convId) => {
     await scrollToBottom()
   } catch { /* 静默 */ }
 }
-defineExpose({ init, destroy, send, prefill, prefillConversation })
+/**
+ * 每次面板展开时的就绪检查（悬浮球 expand 调用）：
+ * init 只在组件生命周期跑一次，而面板 v-show 隐藏不销毁——若 ASR 可用态
+ * 也只查一次，管理员后配渠道/首开未完成就 collapse 时麦克风会永久缺失。
+ * init 已跑过则只刷新 ASR 状态（一次 GET，可忽略）；未跑过走完整 init。
+ */
+const ensureReady = async () => {
+  if (inited) {
+    await checkAsrStatus()
+    return
+  }
+  await init()
+}
+defineExpose({ init, destroy, send, prefill, prefillConversation, ensureReady })
 </script>
 
 <style scoped>

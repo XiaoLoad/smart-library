@@ -301,8 +301,11 @@ const expand = async () => {
     modalMounted.value = true
     unreadDone.value = false
     await nextTick()
-    panelRef.value?.init()
   }
+  // ensureReady：首次展开走完整 init；此后每次展开仅刷新 ASR 可用态
+  // （面板 v-show 不销毁，init 生命周期只跑一次，不能承担重复状态检查；
+  //  修复：首开未完成 ASR 检查就收起后，再次展开麦克风永久缺失）
+  panelRef.value?.ensureReady?.()
   animating = true
   const { cx, cy } = ballCenter()
   const pos = placeModal()
