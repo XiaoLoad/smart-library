@@ -56,6 +56,17 @@ public class StatsService {
     @Autowired
     private FineMapper fineMapper;
 
+    /**
+     * 全局口径统计缓存（管理员视图）：缓存 30 秒。
+     * <p>
+     * overview 全量聚合 books/borrows/users/fines 五张表，仪表盘每次进入都执行会随
+     * 数据量线性恶化；统计对实时性要求是秒级而非毫秒级，30s 缓存可显著削峰。
+     * 个人口径（每用户不同）不缓存，记录量小直接现算。
+     */
+    private static final long GLOBAL_CACHE_MS = 30_000L;
+    private volatile Map<String, Object> globalStatsCache;
+    private volatile long globalStatsCacheAt;
+
     /** 是否为真实借阅记录（读者实际取过书：borrowTime 不为空） */
     private boolean isActuallyBorrowed(Borrow b) {
         return b.getBorrowTime() != null;
@@ -69,10 +80,28 @@ public class StatsService {
     /**
      * 统计概览。
      *
-     * @param type          用户类型：3=管理员（全局口径），其他=个人口径
+     * @param type          用户类型：3=管理员（全局口径），其他=个人口径；来自
+     *                      token 实时身份（JwtInterceptor 回查 users 表），不接受外部参数
      * @param currentUserId 个人口径时的当前用户 ID；管理员口径可传 null
      */
-    public Map<String, Object> overview(int type, Long currentUserId) {
+    public Map<String, Object> overview(Integer type, Long currentUserId) {
+        int t = type != null ? type : 2;
+        // 管理员全局口径：命中 30s 缓存直接返回（返回副本，调用方写入不会污染缓存）
+        if (t == 3) {
+            Map<String, Object> cached = globalStatsCache;
+            if (cached != null && System.currentTimeMillis() - globalStatsCacheAt < GLOBAL_CACHE_MS) {
+                return new java.util.LinkedHashMap<>(cached);
+            }
+            Map<String, Object> data = buildOverview(t, currentUserId);
+            globalStatsCache = data;
+            globalStatsCacheAt = System.currentTimeMillis();
+            return new java.util.LinkedHashMap<>(data);
+        }
+        return buildOverview(t, currentUserId);
+    }
+
+    /** 实际聚合逻辑（overview 的无缓存实现） */
+    private Map<String, Object> buildOverview(int t, Long currentUserId) {
         List<Book> allBooks = bookMapper.selectList(null, null);
         List<Borrow> allBorrows = borrowMapper.selectList(null, true, null, null);
         List<User> allUsers = userMapper.selectAll();
@@ -80,24 +109,24 @@ public class StatsService {
         List<Fine> allFines = fineMapper.selectList(null, true);
 
         // 按角色过滤借阅记录
-        List<Borrow> myBorrows = type == 3 ? allBorrows : allBorrows.stream()
+        List<Borrow> myBorrows = t == 3 ? allBorrows : allBorrows.stream()
                 .filter(b -> b.getUserId() != null && b.getUserId().equals(currentUserId))
                 .collect(Collectors.toList());
-        List<Fine> myFines = type == 3 ? allFines : allFines.stream()
+        List<Fine> myFines = t == 3 ? allFines : allFines.stream()
                 .filter(f -> f.getUserId() != null && f.getUserId().equals(currentUserId))
                 .collect(Collectors.toList());
 
         Map<String, Object> data = new HashMap<>();
-        data.put("stats", buildStats(type, allBooks, allUsers, allBorrows, myBorrows, allFines, myFines));
-        data.put("borrowTrend", buildBorrowTrend(type, allBorrows, myBorrows));
+        data.put("stats", buildStats(t, allBooks, allUsers, allBorrows, myBorrows, allFines, myFines));
+        data.put("borrowTrend", buildBorrowTrend(t, allBorrows, myBorrows));
         data.put("hotBooks", buildHotBooks(allBorrows, allBooks));
         // 注意：categoryDist 是「真实借阅次数」分布（基于借阅记录），不是藏书量
-        data.put("categoryDist", buildCategoryDist(type, allBorrows, myBorrows, allBooks, categories));
+        data.put("categoryDist", buildCategoryDist(t, allBorrows, myBorrows, allBooks, categories));
         // 馆藏口径数据：分类藏书分布（基于图书）+ 馆藏总量汇总
         data.put("categoryBookDist", buildCategoryBookDist(allBooks, categories));
         data.put("collection", buildCollectionSummary(allBooks));
         // 管理员运营数据（待办/今日/罚款/活跃读者/在办状态分布）
-        data.put("operations", buildOperations(type, allBooks, allBorrows, allFines, myBorrows, myFines));
+        data.put("operations", buildOperations(t, allBooks, allBorrows, allFines, myBorrows, myFines));
         return data;
     }
 

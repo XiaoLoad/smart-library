@@ -76,8 +76,9 @@ export const notificationApi = {
 }
 
 // Dashboard
+// 统计口径由后端按 token 身份决定，不接受外部 userType 参数（防止读者越权读全馆统计）
 export const dashboardApi = {
-  stats: (userType) => get('/dashboard/stats', { userType }),
+  stats: () => get('/dashboard/stats'),
 }
 
 // 图书推荐

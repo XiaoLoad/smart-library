@@ -6,7 +6,6 @@ import com.library.service.StatsService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Map;
@@ -18,6 +17,9 @@ import java.util.Map;
  * - borrowTrend: { months: [], borrow: [], return: [] }
  * - hotBooks: [{ rank, title, author, count }]
  * - categoryDist: [{ name, value }]
+ * <p>
+ * 统计口径（管理员=全馆 / 读者=个人）只由 token 里的身份决定，
+ * 不接受任何外部参数——否则读者可通过传 userType=3 读到全馆运营统计。
  */
 @RestController
 @RequestMapping("/dashboard")
@@ -27,9 +29,8 @@ public class DashboardController {
     private StatsService statsService;
 
     @GetMapping("/stats")
-    public Result<Map<String, Object>> stats(@RequestParam(required = false) Integer userType) {
+    public Result<Map<String, Object>> stats() {
         CurrentUser cu = CurrentUser.get();
-        int type = userType != null ? userType : cu.getUserType();
-        return Result.success(statsService.overview(type, cu.getUserId()));
+        return Result.success(statsService.overview(cu.getUserType(), cu.getUserId()));
     }
 }
