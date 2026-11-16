@@ -2513,13 +2513,16 @@ onMounted(loadConversations)
 .msg-row.user {
   justify-content: flex-end;
 }
-/* A2：用户消息右列——分支导航 / 气泡 / 操作条纵向排列 */
+/* A2：用户消息右列——分支导航 / 气泡 / 操作条纵向排列。
+   宽度封顶在列上：列的百分比相对 .msg-inner（860px 容器）解析，
+   若封顶写在气泡上，气泡的百分比会相对「内容宽度即列宽」的父列
+   解析，形成自引用——短消息被截到自身宽度的 78% 提前折行 */
 .user-col {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: 4px;
-  max-width: 100%;
+  max-width: 78%;
 }
 /* 分支导航：« 2/3 » 版本切换（chat-demo 同款交互） */
 .branch-nav {
@@ -2578,7 +2581,7 @@ onMounted(loadConversations)
   gap: 8px;
 }
 .user-bubble {
-  max-width: 78%;
+  max-width: 100%;
   background: var(--color-primary);
   color: var(--color-text-inverse);
   padding: var(--space-3) var(--space-4);
@@ -3568,6 +3571,6 @@ onMounted(loadConversations)
   .conv-side { display: none; }
   .msg-inner { padding: var(--space-4) var(--space-3) 0; }
   .composer { padding: var(--space-2) var(--space-3) var(--space-3); }
-  .user-bubble { max-width: 88%; }
+  .user-col { max-width: 88%; }
 }
 </style>
