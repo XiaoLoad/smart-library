@@ -2,6 +2,7 @@ package com.library.dto;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 import lombok.Data;
 
 /**
@@ -15,8 +16,12 @@ public class AiChatRequest {
     /**
      * 消息内容：常规对话为用户输入；确认续跑（continuation=true）时为
      * 系统注入的引导语，落库标记为系统续跑而非用户发言。
+     * <p>
+     * 上限 8000 字：远超正常对话长度（提示词场景也足够），防止超长消息
+     * 放大 token 成本与拖慢落库/记忆构建。
      */
     @NotBlank(message = "消息内容不能为空")
+    @Size(max = 8000, message = "消息内容不能超过 8000 字")
     private String content;
 
     /**
