@@ -309,6 +309,7 @@ import { ElMessage } from 'element-plus'
 import { useRouter } from 'vue-router'
 import { aiApi, asrApi } from '@/api'
 import { useAiSearchStore } from '@/stores/aiSearch'
+import { useBookEntryStore, ENTRY_SOURCES } from '@/stores/bookEntry'
 import AppIcon from '@/components/AppIcon.vue'
 import AiGenUi from '@/components/ai/AiGenUi.vue'
 import { createStreamRenderer } from '@/utils/streamRender'
@@ -327,6 +328,7 @@ const notifySessionActivity = () => {
 }
 
 const route = useRoute()
+const entryStore = useBookEntryStore()
 
 // AI 检索联动：queryBooks 等工具返回的图书列表写入该 store，图书检索页 watch 联动。
 // 广播有页面条件收窄（见 done 回调）：仅当前在馆藏图书页时写入
@@ -861,9 +863,16 @@ const send = async () => {
 
 const router = useRouter()
 
-/** GenUI 图书卡点击 → 进入图书详情页（悬浮球跳转主窗口路由） */
+/** GenUI 图书卡点击 → 进入图书详情页（悬浮球跳转主窗口路由）。
+ * 登记来源「悬浮球」+ 当前会话 id：详情页返回后悬浮球自动展开并恢复该会话 */
 const openBookDetail = (b) => {
-  if (b?.id != null) router.push(`/book/detail/${b.id}`)
+  if (b?.id == null) return
+  entryStore.enter({
+    fromName: ENTRY_SOURCES.AI_PANEL,
+    fromPath: route.fullPath,
+    aiPanelConvId: currentConvId,
+  })
+  router.push(`/book/detail/${b.id}`)
 }
 
 /** GenUI 图书卡「借阅」→ 发送借阅消息给 AI，走 applyBorrow 授权卡确认流程
@@ -1360,7 +1369,37 @@ const prefill = (text) => {
   input.value = text || ''
   nextTick(() => inputRef.value?.focus())
 }
-defineExpose({ init, destroy, send, prefill })
+
+/**
+ * 恢复指定会话（详情页返回后的悬浮球闭环）。
+ * 面板组件在 v-show 下从未销毁，messages/currentConvId 天然保留——
+ * 目标会话即当前会话时为空操作（最常见路径，零开销）；
+ * 仅在面板从未 init（首开即恢复）或目标会话不同（面板被销毁重建过）时才拉取消息。
+ */
+const prefillConversation = async (convId) => {
+  if (!convId) return
+  if (inited && currentConvId === convId) return
+  if (!inited) await init()
+  if (!inited || currentConvId === convId) return
+  try {
+    const md = await aiApi.messageList(convId)
+    currentConvId = convId
+    messages.value = (md.list || []).map((m) => ({
+      ...m,
+      html: renderMarkdown(m.content),
+      toolEvents: parseStoredSnapshots(m.toolSnapshots),
+      historyCards: parseStoredCardDecisions(m.toolSnapshots),
+      reasoningSegments: [],
+      reasoningOpen: false,
+      reasoningStreaming: false,
+      reasoningSeconds: null,
+      pending: false,
+      timeline: [],
+    })).reverse()
+    await scrollToBottom()
+  } catch { /* 静默 */ }
+}
+defineExpose({ init, destroy, send, prefill, prefillConversation })
 </script>
 
 <style scoped>

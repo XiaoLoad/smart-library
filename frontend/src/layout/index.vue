@@ -163,18 +163,18 @@
       </el-drawer>
 
       <!-- 全局 AI 悬浮球（AI 管理页与永久关闭时自动隐藏；内部自行管理开关状态） -->
-      <AiFloatingBall v-if="aiFloatEnabled" />
+      <AiFloatingBall ref="aiFloatRef" v-if="aiFloatEnabled" />
     </div>
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, onBeforeUnmount, ref } from 'vue'
+import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useAppStore } from '@/stores/app'
 import { useUserStore } from '@/stores/user'
-import { useBookEntryStore } from '@/stores/bookEntry'
+import { useBookEntryStore, ENTRY_SOURCES } from '@/stores/bookEntry'
 import { notificationApi } from '@/api'
 import { formatDateTime } from '@/utils/datetime.js'
 import AppIcon from '@/components/AppIcon.vue'
@@ -194,6 +194,29 @@ const router = useRouter()
 const appStore = useAppStore()
 const userStore = useUserStore()
 const entryStore = useBookEntryStore()
+const aiFloatRef = ref(null)
+
+/* 详情页返回 → 悬浮球会话恢复（方案 A 闭环）：
+ * 详情页「返回来源」对悬浮球来源执行 router.back 回跳转前页面，
+ * 此处监听路由离开详情页的时机：来源是悬浮球时自动展开面板并恢复会话。
+ * AI 助手页来源无需处理——chat 页 keep-alive，onActivated 天然恢复。 */
+let lastDetailSource = null
+router.afterEach((to, from) => {
+  if (from.name === 'BookDetail') {
+    lastDetailSource = entryStore.fromName
+    // 来源消费完即清理，避免残留影响下次进入详情的来源判定
+    if (lastDetailSource) entryStore.leave()
+  } else if (to.name === 'BookDetail') {
+    lastDetailSource = null
+  }
+})
+watch(() => route.name, (name) => {
+  if (name !== 'BookDetail' && lastDetailSource === ENTRY_SOURCES.AI_PANEL) {
+    lastDetailSource = null
+    aiFloatRef.value?.reopen?.(entryStore.aiPanelConvId)
+    entryStore.leave()
+  }
+})
 
 /* 目次式菜单配置
  * 与路由结构解耦：容器路由已拍平（"用户管理>读者列表"这类单子项层级去除），

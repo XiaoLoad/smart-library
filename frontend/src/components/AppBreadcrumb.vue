@@ -22,10 +22,11 @@
 
 <script setup>
 import { computed } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useBookEntryStore } from '@/stores/bookEntry'
 
 const route = useRoute()
+const router = useRouter()
 const entryStore = useBookEntryStore()
 
 /* 书眉式面包屑：首页 → [meta.crumbs 或 meta.title]
@@ -36,11 +37,19 @@ const items = computed(() => {
   const meta = route.meta || {}
   const crumbs = meta.crumbs
   if (Array.isArray(crumbs) && crumbs.length) {
-    // 详情页：二级 crumb 用来源记忆覆盖默认书架项
+    // 详情页：二级 crumb 用来源记忆覆盖默认书架项；
+    // 悬浮球来源 crumb 的 title 由路由 meta 动态解析（见下方解析逻辑）
     const isDetail = route.name === 'BookDetail'
     const mapped = crumbs.map((c, i) => {
       if (isDetail && i === 0) {
         const from = entryStore.crumb
+        // 悬浮球来源：显示跳转前所在页面的真实标题（从 meta 表反查）
+        if (!from.title && from.path) {
+          const target = router.resolve(from.path)
+          const t = target.meta?.crumbs
+          const last = Array.isArray(t) && t.length ? t[t.length - 1] : null
+          return { title: last?.title || target.meta?.title || from.path, path: from.path }
+        }
         return { title: from.title, path: from.path }
       }
       return { title: c.title, path: c.path }

@@ -569,7 +569,7 @@
 
 <script setup>
 import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount, onActivated } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import {
   Plus, ChatDotRound, MagicStick, Promotion, Delete,
   VideoPause, Loading, Check, Close, ArrowDownBold, ArrowUpBold, Connection,
@@ -578,6 +578,7 @@ import {
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { aiApi, asrApi } from '@/api'
 import { useUserStore } from '@/stores/user'
+import { useBookEntryStore, ENTRY_SOURCES } from '@/stores/bookEntry'
 import ConversationNav from '@/components/ConversationNav.vue'
 import AppIcon from '@/components/AppIcon.vue'
 import AiGenUi from '@/components/ai/AiGenUi.vue'
@@ -1569,11 +1570,16 @@ const send = async () => {
 }
 
 /** 建议追问 chips 点击：把追问文本直接作为新消息发送（沿用排队机制，流未结束时入队） */
+const route = useRoute()
 const router = useRouter()
+const entryStore = useBookEntryStore()
 
-/** GenUI 图书卡点击 → 进入图书详情页 */
+/** GenUI 图书卡点击 → 进入图书详情页。
+ * 登记来源「AI 助手」：详情页面包屑显示「AI 助手」、返回按钮回本页（keep-alive 保留会话与滚动位置） */
 const openBookDetail = (b) => {
-  if (b?.id != null) router.push(`/book/detail/${b.id}`)
+  if (b?.id == null) return
+  entryStore.enter({ fromName: ENTRY_SOURCES.AI_ASSISTANT, fromPath: route.fullPath })
+  router.push(`/book/detail/${b.id}`)
 }
 
 /** GenUI 图书卡「借阅」→ 以读者口吻把借阅请求发给 AI，走 applyBorrow 授权卡确认流程。

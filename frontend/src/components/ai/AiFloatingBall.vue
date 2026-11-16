@@ -128,7 +128,21 @@ const setPermanent = (val) => {
   if (val) localStorage.setItem(STORAGE_KEY, '1')
   else localStorage.removeItem(STORAGE_KEY)
 }
-defineExpose({ setPermanent })
+defineExpose({ setPermanent, reopen })
+
+/**
+ * 详情页返回后的会话恢复（方案 A 闭环）：
+ * 展开面板（沿用现有 FLIP 变形动画），若记录了会话 id 则由面板加载该会话消息。
+ * 面板组件本身在 v-show 下从未销毁，会话状态天然保留；convId 仅在面板
+ * 尚未初始化（首开即恢复）时用于定位。
+ * @param {number|null} convId 跳转前面板所在会话 id
+ */
+async function reopen(convId) {
+  if (generating.value) return // 流式输出中不打断，仅展开即可见
+  sessionClosed.value = false
+  await expand()
+  if (convId) panelRef.value?.prefillConversation?.(convId)
+}
 // 提供给设置页/个人中心的全局响应（通过自定义事件通信）
 const onToggleEvent = (e) => {
   if (e.detail && typeof e.detail.enabled === 'boolean') setPermanent(!e.detail.enabled)
