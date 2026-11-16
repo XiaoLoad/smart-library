@@ -2,6 +2,7 @@ package com.library.controller;
 
 import com.github.pagehelper.PageHelper;
 import com.github.pagehelper.PageInfo;
+import com.library.common.PageClamp;
 import com.library.common.PageResult;
 import com.library.common.Result;
 import com.library.dto.UserAddRequest;
@@ -61,7 +62,7 @@ public class UserController {
         if (!isAdmin(CurrentUser.get())) {
             return Result.error(403, "仅管理员可查看读者名录");
         }
-        PageHelper.startPage(page, size);
+        PageHelper.startPage(PageClamp.page(page), PageClamp.size(size));
         List<User> list = userMapper.selectList(keyword);
         // 脱敏：名录只需身份与联系方式，密码哈希不出后端
         list.forEach(u -> u.setPassword(null));

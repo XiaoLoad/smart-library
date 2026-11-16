@@ -2,6 +2,7 @@ package com.library.controller;
 
 import com.github.pagehelper.PageHelper;
 import com.github.pagehelper.PageInfo;
+import com.library.common.PageClamp;
 import com.library.common.PageResult;
 import com.library.common.Result;
 import com.library.dto.AnnouncementAddRequest;
@@ -34,7 +35,7 @@ public class AnnouncementController {
     public Result<PageResult<Announcement>> list(
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "10") int size) {
-        PageHelper.startPage(page, size);
+        PageHelper.startPage(PageClamp.page(page), PageClamp.size(size));
         List<Announcement> list = announcementMapper.selectList();
         PageInfo<Announcement> info = new PageInfo<>(list);
         return Result.success(new PageResult<>(info.getList(), info.getTotal()));

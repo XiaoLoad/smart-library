@@ -2,6 +2,7 @@ package com.library.service;
 
 import com.github.pagehelper.PageHelper;
 import com.github.pagehelper.PageInfo;
+import com.library.common.PageClamp;
 import com.library.common.PageResult;
 import com.library.common.exception.BusinessException;
 import com.library.entity.Book;
@@ -41,7 +42,7 @@ public class BookService {
         if (categoryId != null && categoryId > 0) {
             categoryIds = categoryService.collectDescendantIds(categoryId);
         }
-        PageHelper.startPage(page, size);
+        PageHelper.startPage(PageClamp.page(page), PageClamp.size(size));
         List<Book> list = bookMapper.selectList(keyword, categoryIds);
         PageInfo<Book> info = new PageInfo<>(list);
         return new PageResult<>(info.getList(), info.getTotal());

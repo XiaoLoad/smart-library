@@ -2,6 +2,7 @@ package com.library.service;
 
 import com.github.pagehelper.PageHelper;
 import com.github.pagehelper.PageInfo;
+import com.library.common.PageClamp;
 import com.library.common.PageResult;
 import com.library.common.exception.BusinessException;
 import com.library.dto.BorrowQuotaVo;
@@ -43,27 +44,22 @@ public class BorrowService {
      * 同步借阅状态
      * 待取书超期 → 已取消 + 恢复库存
      * 借阅中超期 → 已逾期
+     * <p>
+     * SQL 条件化批量执行（不再全表加载到 Java 过滤），数据量增长时开销稳定。
+     * 取消走「先查后逐条取消」以便精确恢复对应库存；逾期标记是纯 UPDATE 一步完成。
      */
     // 定时同步借阅状态（替代原 list()/quota() 内的实时写库，避免读接口产生写副作用）
     @Scheduled(fixedDelay = 60000)
     @Transactional
     public void syncBorrowStatus() {
-        LocalDateTime now = LocalDateTime.now();
-        // 待取书超期 → 已取消（恢复库存）
-        List<Borrow> overduePickups = borrowMapper.selectList(null, true, 0, null);
-        for (Borrow b : overduePickups) {
-            if (b.getPickupDeadline() != null && b.getPickupDeadline().isBefore(now)) {
-                borrowMapper.updateStatus(b.getId(), 4, "取书超期已自动取消");
-                bookMapper.increaseAvailable(b.getBookId(), 1);
-            }
+        // 待取书超期 → 已取消（恢复库存）：逐条条件更新，并发下 status 条件防误取消
+        List<Borrow> expiredPickups = borrowMapper.cancelExpiredPickups();
+        for (Borrow b : expiredPickups) {
+            borrowMapper.updateStatus(b.getId(), 4, "取书超期已自动取消");
+            bookMapper.increaseAvailable(b.getBookId(), 1);
         }
-        // 借阅中超期 → 已逾期
-        List<Borrow> borrowing = borrowMapper.selectList(null, true, 1, null);
-        for (Borrow b : borrowing) {
-            if (b.getDueTime() != null && b.getDueTime().isBefore(now)) {
-                borrowMapper.updateStatus(b.getId(), 3, "已逾期");
-            }
-        }
+        // 借阅中超期 → 已逾期：单条 UPDATE 完成
+        borrowMapper.markOverdueBorrows();
     }
 
     /**
@@ -72,7 +68,7 @@ public class BorrowService {
     public PageResult<Borrow> list(int page, int size, Integer status, String search) {
         CurrentUser cu = CurrentUser.get();
         boolean isAdmin = cu.getUserType() == 3;
-        PageHelper.startPage(page, size);
+        PageHelper.startPage(PageClamp.page(page), PageClamp.size(size));
         List<Borrow> list = borrowMapper.selectList(cu.getUserId(), isAdmin, status, search);
         PageInfo<Borrow> info = new PageInfo<>(list);
         return new PageResult<>(info.getList(), info.getTotal());
