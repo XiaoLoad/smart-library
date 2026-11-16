@@ -2,6 +2,7 @@ package com.library.controller;
 
 import com.github.pagehelper.PageHelper;
 import com.github.pagehelper.PageInfo;
+import com.library.common.PageClamp;
 import com.library.common.Result;
 import com.library.common.exception.BusinessException;
 import com.library.dto.*;
@@ -477,7 +478,7 @@ public class SystemSettingController {
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "20") int size) {
         requireAdmin();
-        PageHelper.startPage(page, size);
+        PageHelper.startPage(PageClamp.page(page), PageClamp.size(size));
         List<NotificationLog> list = logMapper.selectAdminPage(status, channel, eventType, startDate, endDate);
         PageInfo<NotificationLog> info = new PageInfo<>(list);
         Map<String, Object> data = new HashMap<>();

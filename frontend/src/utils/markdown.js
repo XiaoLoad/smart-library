@@ -72,8 +72,11 @@ const renderCitations = (html, sources) => {
   return html.replace(CITE_RE, (match, num) => {
     const n = Number(num)
     if (!valid.has(n)) return match
+    // docTitle 来自知识库文档（管理员录入），拼接进 HTML 属性前必须转义，
+    // 否则标题中的引号/尖括号会破坏属性边界（属性注入）
+    const title = md.utils.escapeHtml(sources.find((s) => s.sourceNo === n)?.docTitle || '')
     return (
-      `<sup class="cite-badge" data-src="${n}" title="查看资料 ${n}：${sources.find((s) => s.sourceNo === n)?.docTitle || ''}">` +
+      `<sup class="cite-badge" data-src="${n}" title="查看资料 ${n}：${title}">` +
       `${n}</sup>`
     )
   })

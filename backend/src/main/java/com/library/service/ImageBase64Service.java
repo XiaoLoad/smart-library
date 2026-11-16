@@ -45,6 +45,9 @@ public class ImageBase64Service {
     private static final int MIN_WIDTH = 32;
     private static final int MAX_WIDTH = 1080;
 
+    /** 解码前允许的最大像素数（宽×高）。超限视为图片解压炸弹，拒绝编码防 OOM */
+    private static final long MAX_PIXELS = 24_000_000L;
+
     private static final float JPEG_QUALITY = 0.72f;
 
     private static final int CACHE_CAPACITY = 512;
@@ -101,6 +104,11 @@ public class ImageBase64Service {
 
     private String encode(Path file, int width) {
         try {
+            // 先读尺寸再全量解码：解压炸弹（如 60000×60000 的 JPEG）在读头阶段即被拦截，
+            // 不会分配完整位图内存导致 OOM
+            if (!withinPixelBudget(file)) {
+                return null;
+            }
             BufferedImage src = ImageIO.read(file.toFile());
             // 读不出的格式（如 webp 未装解码器）退回原字节，至少不阻断前端
             if (src == null) {
@@ -114,6 +122,31 @@ public class ImageBase64Service {
             return "data:image/jpeg;base64," + Base64.getEncoder().encodeToString(jpeg);
         } catch (IOException e) {
             return null;
+        }
+    }
+
+    /**
+     * 读图头校验像素预算。读不出尺寸（不支持的格式）时放行——后续 ImageIO.read
+     * 返回 null 会走 rawFallback 原字节路径，不会分配大位图。
+     */
+    private boolean withinPixelBudget(Path file) throws IOException {
+        try (var in = ImageIO.createImageInputStream(file.toFile())) {
+            Iterator<javax.imageio.ImageReader> readers = ImageIO.getImageReaders(in);
+            if (!readers.hasNext()) {
+                return true;
+            }
+            javax.imageio.ImageReader reader = readers.next();
+            try {
+                reader.setInput(in);
+                int w = reader.getWidth(0);
+                int h = reader.getHeight(0);
+                if (w > 0 && h > 0 && (long) w * h > MAX_PIXELS) {
+                    return false;
+                }
+                return true;
+            } finally {
+                reader.dispose();
+            }
         }
     }
 

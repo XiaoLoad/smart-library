@@ -53,4 +53,13 @@ public interface BorrowMapper {
     List<Borrow> selectDueOn(@Param("status") Integer status,
                              @Param("start") LocalDateTime start,
                              @Param("end") LocalDateTime end);
+
+    /**
+     * 待取书超期批量取消（定时任务）：返回被更新的记录，供逐条恢复库存。
+     * 条件更新而非全表加载到 Java 后过滤，数据量增长时开销稳定。
+     */
+    List<Borrow> cancelExpiredPickups();
+
+    /** 借阅中超期批量标记逾期（定时任务）：返回受影响行数 */
+    int markOverdueBorrows();
 }

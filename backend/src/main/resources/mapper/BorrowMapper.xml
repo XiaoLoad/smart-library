@@ -140,4 +140,18 @@
         WHERE id = #{id}
     </update>
 
+    <!-- 定时任务：待取书超期批量取消。先 SELECT 后 UPDATE 逐条进行，
+         WHERE 带 status=0 条件保证并发下不会误取消已取书/已取消的记录 -->
+    <select id="cancelExpiredPickups" resultMap="borrowMap">
+        SELECT * FROM borrows
+        WHERE status = 0 AND pickup_deadline IS NOT NULL AND pickup_deadline &lt; NOW()
+    </select>
+
+    <!-- 定时任务：借阅中超期批量标记逾期（带 status 条件防并发误标） -->
+    <update id="markOverdueBorrows">
+        UPDATE borrows
+        SET status = 3, remark = '已逾期'
+        WHERE status = 1 AND due_time IS NOT NULL AND due_time &lt; NOW()
+    </update>
+
 </mapper>

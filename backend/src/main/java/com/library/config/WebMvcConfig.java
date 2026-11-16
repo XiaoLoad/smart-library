@@ -49,15 +49,17 @@ public class WebMvcConfig implements WebMvcConfigurer {
 
     @Override
     public void addCorsMappings(CorsRegistry registry) {
-        // CORS 收敛为白名单制：仅放行 app.cors.allowed-origins 中配置的来源。
-        // 原先 allowedOriginPatterns("*") + allowCredentials(true) 等于对任意站点
-        // 开放携带凭据的跨域访问，属安全问题；局域网设备请把对应来源加入白名单配置。
+        // CORS 收敛为白名单制：仅放行 app.cors.allowed-origins 中配置的精确来源。
+        // 网段通配（如 192.168.*）+ allowCredentials(true) 等于对整个私网开放携带凭据的
+        // 跨域访问，属安全问题；局域网设备调试请把精确来源逐条加入配置。
+        // Token 走 Authorization Header（非 Cookie），allowCredentials 不构成实际放权，
+        // 但保持 false 收紧语义，未来引入 Cookie 认证时不留隐患。
         registry.addMapping("/**")
-                .allowedOriginPatterns(allowedOrigins)
+                .allowedOrigins(allowedOrigins)
                 .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
                 .allowedHeaders("*")
                 .exposedHeaders("Authorization")
-                .allowCredentials(true)
+                .allowCredentials(false)
                 .maxAge(3600);
     }
 }

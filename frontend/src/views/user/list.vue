@@ -98,11 +98,17 @@
           <el-input v-model="userForm.realName" placeholder="真实姓名" />
         </el-form-item>
         <el-form-item label="类型" prop="userType">
-          <el-select v-model="userForm.userType" style="width: 100%">
+          <!-- 编辑管理员时禁选：管理员身份不可降级，否则平台将失去所有管理员且无法恢复 -->
+          <el-select v-model="userForm.userType" style="width: 100%"
+                     :disabled="userForm.mode === 'edit' && editingWasAdmin"
+                     :title="userForm.mode === 'edit' && editingWasAdmin ? '管理员身份不可修改' : ''">
             <el-option label="教师" :value="1" />
             <el-option label="学生" :value="2" />
             <el-option label="管理员" :value="3" />
           </el-select>
+          <div v-if="userForm.mode === 'edit' && editingWasAdmin" class="admin-type-hint">
+            管理员身份不可修改（防止误操作导致平台失去管理员）
+          </div>
         </el-form-item>
         <el-form-item label="邮箱" prop="email">
           <el-input v-model="userForm.email" placeholder="邮箱" clearable />
@@ -212,6 +218,8 @@ const onTypeFilterChange = (val) => {
 const userDialogVisible = ref(false)
 const userLoading = ref(false)
 const userFormRef = ref(null)
+// 编辑中的用户是否本就是管理员：管理员身份不可降级，类型下拉禁用
+const editingWasAdmin = ref(false)
 const userForm = reactive({
   mode: 'add',
   id: null,
@@ -309,6 +317,7 @@ const openEdit = (row) => {
     studentNo: row.studentNo || '', className: row.className || '', grade: row.grade || '',
     major: row.major || '', status: row.status,
   })
+  editingWasAdmin.value = row.userType === 3
   userDialogVisible.value = true
 }
 
@@ -401,6 +410,12 @@ onMounted(load)
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: var(--space-3);
+}
+.admin-type-hint {
+  font-size: var(--fs-caption);
+  color: var(--color-text-tertiary);
+  margin-top: 4px;
+  line-height: 1.4;
 }
 .detail-item {
   display: flex;

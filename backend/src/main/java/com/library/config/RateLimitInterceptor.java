@@ -41,6 +41,10 @@ public class RateLimitInterceptor implements HandlerInterceptor {
     @Value("${app.rate-limit.ai-confirm-per-minute:20}")
     private int aiConfirmPerMinute;
 
+    /** ASR 语音转写接口每分钟最大请求数（云端转写按次计费，需防刷） */
+    @Value("${app.rate-limit.ai-asr-per-minute:12}")
+    private int aiAsrPerMinute;
+
     /** 限流窗口：key（用户ID或IP + 路径）→ 请求时间戳队列 */
     private final Map<String, Deque<Long>> windows = new ConcurrentHashMap<>();
 
@@ -73,8 +77,11 @@ public class RateLimitInterceptor implements HandlerInterceptor {
         if (uri.endsWith("/ai/chat")) {
             return aiChatPerMinute;
         }
-        if (uri.endsWith("/ai/confirm")) {
+        if (uri.endsWith("/ai/confirm") || uri.endsWith("/ai/confirm/batch")) {
             return aiConfirmPerMinute;
+        }
+        if (uri.endsWith("/ai/asr/transcribe")) {
+            return aiAsrPerMinute;
         }
         return 0;
     }

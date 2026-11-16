@@ -652,7 +652,7 @@ const recommendVisible = ref(false)
 
 const loadData = async () => {
   const [stats, noticeData] = await Promise.all([
-    dashboardApi.stats(userStore.userType),
+    dashboardApi.stats(),
     announcementApi.list(),
   ])
   data.value = stats
