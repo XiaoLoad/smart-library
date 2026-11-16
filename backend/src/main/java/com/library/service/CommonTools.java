@@ -62,7 +62,8 @@ public class CommonTools extends BaseLibraryTools {
             + "分类ID（来自 queryCategories，自动包含其全部子分类）、是否只看可借。"
             + "三个参数均可省略；不传任何条件时返回最新入库图书。"
             + "返回字段含 description=图书内容简介，用户要求介绍/推荐某本书时应据此概述其内容；"
-            + "用户确认借阅某本时，须记下该书返回的 title 与 isbn，调用 applyBorrow 时一并传入，确保借出的正是这一本")
+            + "用户表达借阅意图时，须记下目标书的 title 与 isbn，查询完成后立即调用 applyBorrow 一并传入"
+            + "（确保借出的正是这一本），不要只复述书目信息就结束回复")
     public Map<String, Object> queryBooks(@P("检索关键词：书名/作者/ISBN 片段，可省略") String keyword,
                                           @P("分类ID，必须来自 queryCategories 返回的 id；传该ID自动包含所有子分类，可省略") Long categoryId,
                                           @P("是否只看当前可借的书：true=只看可借数量>0，false 或省略=全部") Boolean availableOnly) {

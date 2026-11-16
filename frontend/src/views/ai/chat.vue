@@ -1576,9 +1576,13 @@ const openBookDetail = (b) => {
   if (b?.id != null) router.push(`/book/detail/${b.id}`)
 }
 
-/** GenUI 图书卡「借阅」→ 以读者口吻把借阅请求发给 AI，走 applyBorrow 授权卡确认流程 */
+/** GenUI 图书卡「借阅」→ 以读者口吻把借阅请求发给 AI，走 applyBorrow 授权卡确认流程。
+ * 祈使句 + 携带 ISBN：明确「办理指令」语义避免模型停在复述书目，ISBN 直达书目定位消除同名多本 candidates */
 const borrowFromCard = (b) => {
-  if (b?.title) sendFollowUp(`我想借阅《${b.title}》`)
+  if (!b?.title) return
+  sendFollowUp(b.isbn
+    ? `请为我办理借阅《${b.title}》（ISBN: ${b.isbn}），直接发起借阅申请`
+    : `请为我办理借阅《${b.title}》，直接发起借阅申请`)
 }
 
 const sendFollowUp = async (text) => {
