@@ -33,6 +33,18 @@ public class FileController {
 
     private static final Set<String> ALLOWED_EXT = Set.of("jpg", "jpeg", "png", "webp", "gif");
 
+    /**
+     * 图片格式魔数（文件头签名）：
+     * JPEG = FF D8 FF，PNG = 89 50 4E 47，GIF = GIF8，WEBP = RIFF....WEBP。
+     * 仅凭扩展名校验可上传伪装成图片的任意内容（静态目录对外无鉴权可访问），
+     * 魔数不匹配直接拒绝。
+     */
+    private static final byte[] MAGIC_JPEG = {(byte) 0xFF, (byte) 0xD8, (byte) 0xFF};
+    private static final byte[] MAGIC_PNG = {(byte) 0x89, 0x50, 0x4E, 0x47};
+    private static final byte[] MAGIC_GIF = {'G', 'I', 'F', '8'};
+    private static final byte[] MAGIC_RIFF = {'R', 'I', 'F', 'F'};
+    private static final byte[] MAGIC_WEBP = {'W', 'E', 'B', 'P'};
+
     @Value("${app.upload-dir:./uploads}")
     private String uploadDir;
 
@@ -59,6 +71,9 @@ public class FileController {
         if (!ALLOWED_EXT.contains(ext)) {
             throw new BusinessException("仅支持 jpg / jpeg / png / webp / gif 格式");
         }
+        if (!hasImageMagic(file)) {
+            throw new BusinessException("文件内容与图片格式不符，请上传真实图片");
+        }
 
         try {
             Path dir = Paths.get(uploadDir).toAbsolutePath().normalize();
@@ -73,6 +88,36 @@ public class FileController {
         } catch (IOException e) {
             throw new BusinessException("图片保存失败，请稍后重试");
         }
+    }
+
+    /** 校验上传文件头魔数与声明格式一致 */
+    private boolean hasImageMagic(MultipartFile file) {
+        try (var in = file.getInputStream()) {
+            byte[] head = in.readNBytes(12);
+            if (head.length < 12) {
+                return false;
+            }
+            return startsWith(head, MAGIC_JPEG) || startsWith(head, MAGIC_PNG) || startsWith(head, MAGIC_GIF)
+                    || (startsWith(head, MAGIC_RIFF) && startsWith(head, MAGIC_WEBP, 8));
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    private static boolean startsWith(byte[] data, byte[] prefix) {
+        return startsWith(data, prefix, 0);
+    }
+
+    private static boolean startsWith(byte[] data, byte[] prefix, int offset) {
+        if (data.length < offset + prefix.length) {
+            return false;
+        }
+        for (int i = 0; i < prefix.length; i++) {
+            if (data[offset + i] != prefix[i]) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**
