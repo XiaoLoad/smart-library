@@ -56,7 +56,7 @@
 
               <!-- 生成式 UI 一级内联卡片：带可视化 type 的工具快照默认平铺展开（与 /ai/chat 页一致） -->
               <div
-                v-for="(card, gi) in (m.toolEvents || []).filter((e) => e.phase === 'end' && e._inlineGen)"
+                v-for="(card, gi) in inlineGenCards(m)"
                 :key="'gi-' + gi"
                 class="gen-ui-inline"
                 :data-gen-turn="card._turnMarker"
@@ -313,6 +313,7 @@ import AppIcon from '@/components/AppIcon.vue'
 import AiGenUi from '@/components/ai/AiGenUi.vue'
 import { createStreamRenderer } from '@/utils/streamRender'
 import { renderMarkdown, renderMarkdownStream, handleCodeCopyClick } from '@/utils/markdown'
+import { groupInlineGenCards, genCardArgLabel } from '@/utils/genUiCards'
 import { classifyAiError, describeWithAction, AiErrorKind } from '@/utils/aiErrors'
 import { MicRecorder } from '@/utils/recorder'
 
@@ -596,6 +597,9 @@ const GEN_CARD_TITLES = {
 }
 const GEN_UI_TYPES = new Set(Object.keys(GEN_CARD_TITLES))
 const genCardTitle = (card) => GEN_CARD_TITLES[card._genType] || '数据卡片'
+
+/** B3：同轮多张 book_grid 卡按条目重叠率门控合并（与助手页共用同一实现） */
+const inlineGenCards = (m) => groupInlineGenCards(m.toolEvents)
 
 /** 快照时点展示（历史卡片角标）：今天显示时分，更早显示 月-日 时:分 */
 const formatSnapTime = (t) => {
@@ -1538,6 +1542,24 @@ defineExpose({ init, destroy, send, prefill })
   color: var(--color-text-tertiary, #9c958d);
   background: var(--color-bg-elevated, #fff);
   border: 1px solid var(--color-border, #e8e3dc);
+}
+/* 检索参数摘要：区分多面检索的多张卡（与助手页一致） */
+.gen-ui-args {
+  font-size: 11px;
+  color: var(--color-text-tertiary, #9c958d);
+  max-width: 180px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* 合并标注：同轮重复检索被 B3 门控合并时提示数据来源 */
+.gen-ui-merged {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--color-primary, #3a5a6b);
+  background: var(--color-primary-light, rgba(58, 90, 107, 0.1));
 }
 
 /* 写操作授权卡（浮动面板简化版：卡片 + 靛蓝竖条，与工具 pill 形态区分） */

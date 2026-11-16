@@ -583,6 +583,7 @@ import AppIcon from '@/components/AppIcon.vue'
 import AiGenUi from '@/components/ai/AiGenUi.vue'
 import { createStreamRenderer } from '@/utils/streamRender'
 import { renderMarkdown, renderMarkdownStream, handleCodeCopyClick } from '@/utils/markdown'
+import { groupInlineGenCards, genCardArgLabel } from '@/utils/genUiCards'
 import { classifyAiError, describeWithAction, withRetry, AiErrorKind } from '@/utils/aiErrors'
 import { MicRecorder } from '@/utils/recorder'
 
@@ -675,9 +676,9 @@ const GEN_CARD_TITLES = {
 /**
  * 取本轮工具事件中带可视化 type 的快照（内联渲染用）。
  * 每个事件对象记有 _inlineGen 标志（tool end 时算好），避免模板里反复 JSON.parse。
+ * B3：同轮多张 book_grid 卡按条目重叠率门控合并——重复检索并为一卡，多面检索保持独立
  */
-const inlineGenCards = (m) =>
-  (m.toolEvents || []).filter((e) => e.phase === 'end' && e._inlineGen)
+const inlineGenCards = (m) => groupInlineGenCards(m.toolEvents)
 
 const genCardTitle = (card) =>
   GEN_CARD_TITLES[card._genType] || '数据卡片'
@@ -3342,6 +3343,24 @@ onMounted(() => {
   color: var(--color-text-tertiary, #9c958d);
   background: var(--color-bg-elevated, #fff);
   border: 1px solid var(--color-border, #e8e3dc);
+}
+/* 检索参数摘要：区分多面检索的多张卡（如「关键词：中国历史」） */
+.gen-ui-args {
+  font-size: 11px;
+  color: var(--color-text-tertiary, #9c958d);
+  max-width: 220px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* 合并标注：同轮重复检索被 B3 门控合并时提示数据来源 */
+.gen-ui-merged {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--color-primary);
+  background: var(--color-primary-light, rgba(58, 90, 107, 0.1));
 }
 /* 抽屉左上角与 pill 的视觉连接线 */
 .tool-data::before {
